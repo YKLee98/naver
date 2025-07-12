@@ -1,0 +1,49 @@
+{
+  "name": "hallyu-pomaholic-sync",
+  "version": "1.0.0",
+  "description": "Shopify-Naver Smart Store Real-time Sync System",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "lerna run dev --parallel",
+    "build": "lerna run build",
+    "start": "lerna run start --scope=@hallyu/backend",
+    "test": "lerna run test",
+    "lint": "lerna run lint",
+    "clean": "lerna clean && rimraf node_modules",
+    "bootstrap": "lerna bootstrap",
+    "deploy": "./scripts/deploy/deploy.sh",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up",
+    "docker:down": "docker-compose down"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "husky": "^8.0.3",
+    "lerna": "^8.0.2",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.2.4",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}
