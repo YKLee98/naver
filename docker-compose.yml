@@ -1,0 +1,97 @@
+version: '3.9'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: hallyu-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: bcok52
+      MONGO_INITDB_ROOT_PASSWORD: Dldbrud98&&
+      MONGO_INITDB_DATABASE: hallyu-fomaholic
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/mongodb-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    networks:
+      - hallyu-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: hallyu-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass redis123
+    volumes:
+      - redis_data:/data
+    networks:
+      - hallyu-network
+
+  backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+    container_name: hallyu-backend
+    restart: always
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      MONGODB_URI: mongodb://bcok52:Dldbrud98&&@mongodb:27017/hallyu-fomaholic?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis123
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - ./packages/backend:/app
+      - /app/node_modules
+    networks:
+      - hallyu-network
+
+  frontend:
+    build:
+      context: ./packages/frontend
+      dockerfile: Dockerfile
+    container_name: hallyu-frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000/api/v1
+      VITE_WS_URL: ws://localhost:3001
+    depends_on:
+      - backend
+    volumes:
+      - ./packages/frontend:/app
+      - /app/node_modules
+    networks:
+      - hallyu-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: hallyu-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/docker/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - hallyu-network
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  hallyu-network:
+    driver: bridge
