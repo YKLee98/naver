@@ -1,7 +1,7 @@
 // packages/backend/src/services/shopify/ShopifyGraphQLService.ts
 import { ShopifyService } from './ShopifyService';
-import { logger } from '@/utils/logger';
-import { retry } from '@/utils/retry';
+import { logger } from '../../utils/logger';
+import { retry } from '../../utils/retry';
 
 interface ProductVariant {
   id: string;

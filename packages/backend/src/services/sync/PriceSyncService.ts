@@ -1,8 +1,8 @@
 // packages/backend/src/services/sync/PriceSyncService.ts
 import { Redis } from 'ioredis';
 import axios from 'axios';
-import { ExchangeRate, PriceHistory } from '@/models';
-import { logger } from '@/utils/logger';
+import { ExchangeRate, PriceHistory } from '../../models';
+import { logger } from '../../utils/logger';
 
 export class PriceSyncService {
   private redis: Redis;
@@ -141,4 +141,3 @@ export class PriceSyncService {
       .lean();
   }
 }
-

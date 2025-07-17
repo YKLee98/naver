@@ -1,0 +1,28 @@
+{
+  "name": "@hallyu/lambda",
+  "version": "1.0.0",
+  "description": "AWS Lambda functions for Hallyu-Pomaholic sync system",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:all",
+    "build:all": "npm run build:webhook-handler && npm run build:sync-scheduler && npm run build:inventory-updater && npm run build:price-calculator && npm run build:dlq-processor",
+    "build:webhook-handler": "cd webhook-handler && npm run build",
+    "build:sync-scheduler": "cd sync-scheduler && npm run build",
+    "build:inventory-updater": "cd inventory-updater && npm run build",
+    "build:price-calculator": "cd price-calculator && npm run build",
+    "build:dlq-processor": "cd dlq-processor && npm run build",
+    "test": "jest",
+    "lint": "eslint . --ext .ts"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.133",
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "esbuild": "^0.19.11",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.3.3"
+  }
+}

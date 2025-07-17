@@ -6,12 +6,12 @@ import {
   PriceHistory,
   OrderSyncStatus,
   SystemLog 
-} from '@/models';
-import { NaverProductService, NaverOrderService } from '@/services/naver';
-import { ShopifyBulkService } from '@/services/shopify';
+} from '../../models';
+import { NaverProductService, NaverOrderService } from '../../services/naver';
+import { ShopifyBulkService } from '../../services/shopify';
 import { PriceSyncService } from './PriceSyncService';
 import { InventorySyncService } from './InventorySyncService';
-import { logger } from '@/utils/logger';
+import { logger } from '../../utils/logger';
 import { EventEmitter } from 'events';
 
 export interface SyncResult {

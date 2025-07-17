@@ -1,7 +1,7 @@
 // packages/backend/src/services/shopify/ShopifyBulkService.ts
 import { ShopifyService } from './ShopifyService';
 import { ShopifyGraphQLService } from './ShopifyGraphQLService';
-import { logger } from '@/utils/logger';
+import { logger } from '../../utils/logger';
 
 interface PriceUpdate {
   sku: string;
