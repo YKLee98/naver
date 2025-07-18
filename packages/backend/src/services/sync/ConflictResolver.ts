@@ -1,5 +1,28 @@
 import { ProductMapping, InventoryTransaction, PriceHistory } from '../../models';
 import { logger } from '../../utils/logger';
+import{ Schema, model, Document } from 'mongoose';  
+interface ConflictLog extends Document {
+    type: 'inventory' | 'price';
+    sku: string;
+    conflict: any;
+    resolution: any;
+    strategy: string;
+    resolvedAt: Date;
+    resolvedBy: string;
+}
+const conflictLogSchema = new Schema<ConflictLog>({
+  type: { type: String, required: true, enum: ['inventory', 'price'] },
+  sku: { type: String, required: true },
+  conflict: { type: Schema.Types.Mixed, required: true },
+  resolution: { type: Schema.Types.Mixed, required: true },
+  strategy: { type: String, required: true },
+  resolvedAt: { type: Date, default: Date.now },
+  resolvedBy: { type: String, default:'system', },} // 사용자 ID 또는 이름
+, {
+    timestamps: true,
+    collection: 'conflict_logs',
+});
+const ConflictLogModel = model<ConflictLog>('ConflictLog', conflictLogSchema);
 
 export interface ConflictResolution {
   type: 'inventory' | 'price';
@@ -181,8 +204,36 @@ export class ConflictResolver {
    * 충돌 로그 저장
    */
   async logConflictResolution(resolution: ConflictResolution): Promise<void> {
+    try{
+        await ConflictLog.create({
+        type: resolution.type,
+        sku: resolution.sku,
+        conflict: resolution.conflict,
+        resolution: resolution.resolution,
+        strategy: resolution.strategy,
+        resolvedAt: new Date(),
+        resolvedBy: 'system', // 또는 현재 사용자 ID
+      });  
+    } catch (error) {
+      logger.error(`Failed to log conflict resolution for SKU ${resolution.sku}:`, error);
+    }
     // TODO: 충돌 해결 로그를 별도 컬렉션에 저장
     logger.info('Conflict resolved:', resolution);
   }
+}
+
+async function getConflictHistory(
+    sku?: string,
+    type?: 'inventory' | 'price',
+    limit: number = 100
+): Promise<ConflictLog[]> {
+  const query: any = {};
+  if (sku) query.sku = sku;
+  if (type) query.type = type;
+
+  return ConflictLog.find(query)
+    .sort({ resolvedAt: -1 })
+    .limit(limit)
+    .lean();
 }
 

@@ -2,6 +2,7 @@ import cron, { ScheduledTask } from 'node-cron';
 import { logger } from './logger';
 import { getRedisClient } from '../config/redis';
 import { SystemLog } from '../models';
+import { service } from 'aws-sdk/clients/health';
 
 interface CronJob {
   name: string;
@@ -11,6 +12,16 @@ interface CronJob {
 }
 
 const cronJobs: Map<string, ScheduledTask> = new Map();
+let syncServiceInstance: any = null;
+let exchangeRateServiceInstance: any = null;
+
+export function setCronServices(services:{
+    syncService: any;
+    exchangeRateService: any;
+    }): void {
+    syncServiceInstance = services.syncService;
+    exchangeRateServiceInstance = services.exchangeRateService;
+}
 
 /**
  * 전체 동기화 작업
@@ -40,10 +51,11 @@ async function fullSyncJob(): Promise<void> {
     }
     
     // 동기화 실행
-    // TODO: SyncService 인스턴스를 주입받도록 수정 필요
-    // const syncService = new SyncService(...);
-    // await syncService.performFullSync();
-    
+    if (!syncServiceInstance) {
+        throw new Error('SyncService not initialized');
+    }
+    await syncServiceInstance.performFullSync();
+    logger.info(`Cron job completed: ${jobName}`);
     // 마지막 실행 시간 기록
     await redis.set(`cronjob:${jobName}:lastRun`, new Date().toISOString());
     
@@ -77,10 +89,11 @@ async function updateExchangeRateJob(): Promise<void> {
   try {
     logger.info(`Starting cron job: ${jobName}`);
     
-    // TODO: ExchangeRateService 인스턴스를 주입받도록 수정 필요
-    // const exchangeRateService = new ExchangeRateService(...);
-    // await exchangeRateService.updateExchangeRate();
-    
+    if (!exchangeRateServiceInstance) {
+      throw new Error('ExchangeRateService not initialized');
+    }
+
+    await exchangeRateServiceInstance.updateExchangeRate();
     logger.info(`Cron job completed: ${jobName}`);
   } catch (error) {
     logger.error(`Cron job failed: ${jobName}`, error);

@@ -2,9 +2,35 @@
 import 'dotenv/config';
 import { App } from './app';
 import { logger } from './utils/logger';
-import { setupCronJobs } from './utils/cronJobs';
+import { setupCronJobs ,setCronServices} from './utils/cronjobs';
+import { getRedisClient } from './config/redis'; 
+import{
+  NaverAuthService,
+  NaverProductService,
+  NaverOrderService
+} from './services/naver';
+import { ShopifyBulkService}  from './services/shopify';
+import { SyncService } from './services/sync';
+import { ExchangeRateService } from './services/exchangeRate';  
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const redis = getRedisClient();
+const naverAuthService = new NaverAuthService(redis);
+const naverProductService = new NaverProductService(redis);
+const naverOrderService = new NaverOrderService();
+const shopifyBulkService = new ShopifyBulkService();
+const syncService = new SyncService(
+  naverProductService,
+  naverOrderService,
+  shopifyBulkService,
+  redis
+);
+const exchangeRateService = new ExchangeRateService(redis);
+
+setCronServices({
+  syncService,
+  exchangeRateService
+});
 
 async function startServer() {
   try {

@@ -1,0 +1,105 @@
+ {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 스크롤바 스타일 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* 로딩 애니메이션 */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* 차트 스타일 */
+.recharts-wrapper {
+  font-size: 14px;
+}
+
+.recharts-cartesian-axis-tick {
+  font-size: 12px;
+}
+
+/* 테이블 스타일 */
+.MuiDataGrid-root {
+  border: none;
+}
+
+.MuiDataGrid-cell:focus {
+  outline: none;
+}
+
+.MuiDataGrid-columnHeader:focus {
+  outline: none;
+}
+
+/* 상태 표시 뱃지 */
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.status-badge.active {
+  background-color: #4caf50;
+  color: white;
+}
+
+.status-badge.inactive {
+  background-color: #f44336;
+  color: white;
+}
+
+.status-badge.pending {
+  background-color: #ff9800;
+  color: white;
+}
+
+.status-badge.synced {
+  background-color: #2196f3;
+  color: white;
+}
+
+.status-badge.error {
+  background-color: #f44336;
+  color: white;
+}

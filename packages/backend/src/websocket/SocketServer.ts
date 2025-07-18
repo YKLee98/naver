@@ -5,6 +5,16 @@ import { authMiddleware } from '../middlewares';
 import { setupInventoryEvents } from './events/inventory.events';
 import { setupPriceEvents } from './events/price.events';
 
+
+interface JWTPayload {
+  id: string;
+  email: string;
+  role: string;
+  iat: number;
+  exp: number;
+}
+
+
 export class SocketServer {
   private io: SocketIOServer;
   private connectedClients: Map<string, Socket> = new Map();
@@ -26,9 +36,16 @@ export class SocketServer {
         }
 
         // JWT 토큰 검증
-        // TODO: JWT 검증 로직 구현
-        const user = { id: 'user123', email: 'user@example.com' };
-        socket.data.user = user;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+        if (!decoded || !decoded.id) {
+          return next(new Error('Invalid token'));
+        }
+
+        socket.data.user = {
+            id: decoded.id,
+            email: decoded.email,
+            role: decoded.role,
+        };
         
         next();
       } catch (error) {
