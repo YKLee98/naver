@@ -1,0 +1,226 @@
+# infrastructure/aws/cloudformation/monitoring.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Monitoring and Alerting Configuration'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: Environment name prefix
+  
+  ECSClusterName:
+    Type: String
+    Description: ECS Cluster name
+  
+  AlertEmail:
+    Type: String
+    Description: Email for alerts
+    Default: ""
+
+Resources:
+  # SNS Topic for Alerts
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${EnvironmentName}-alerts
+      DisplayName: !Sub ${EnvironmentName} System Alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmail
+          Protocol: email
+    Condition: HasAlertEmail
+
+  # CloudWatch Dashboards
+  SystemDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${EnvironmentName}-system-dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ECS", "CPUUtilization", "ServiceName", "${EnvironmentName}-backend", "ClusterName", "${ECSClusterName}" ],
+                  [ ".", "MemoryUtilization", ".", ".", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "ECS Service Utilization"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", { "stat": "Sum" } ],
+                  [ ".", "Errors", { "stat": "Sum" } ],
+                  [ ".", "Duration", { "stat": "Average" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Lambda Functions"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${EnvironmentName}-webhook-queue" ],
+                  [ ".", ".", ".", "${EnvironmentName}-webhook-dlq" ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "SQS Queue Depth"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApiGateway", "Count", "ApiName", "${EnvironmentName}-api" ],
+                  [ ".", "4XXError", ".", "." ],
+                  [ ".", "5XXError", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "API Gateway Requests"
+              }
+            }
+          ]
+        }
+
+  # CloudWatch Alarms
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-high-cpu
+      AlarmDescription: Triggers when CPU utilization is high
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ServiceName
+          Value: !Sub ${EnvironmentName}-backend
+        - Name: ClusterName
+          Value: !Ref ECSClusterName
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+      TreatMissingData: notBreaching
+
+  HighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-high-memory
+      AlarmDescription: Triggers when memory utilization is high
+      MetricName: MemoryUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ServiceName
+          Value: !Sub ${EnvironmentName}-backend
+        - Name: ClusterName
+          Value: !Ref ECSClusterName
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+      TreatMissingData: notBreaching
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-lambda-errors
+      AlarmDescription: Triggers when Lambda functions have errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+      TreatMissingData: notBreaching
+
+  APIGateway5XXAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-api-5xx-errors
+      AlarmDescription: Triggers when API Gateway has 5XX errors
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ApiName
+          Value: !Sub ${EnvironmentName}-api
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+      TreatMissingData: notBreaching
+
+  # Log Groups
+  ApplicationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/application/${EnvironmentName}
+      RetentionInDays: 30
+
+  # Metric Filters
+  ErrorLogMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: '[timestamp, level = ERROR, ...]'
+      MetricTransformations:
+        - MetricName: ApplicationErrors
+          MetricNamespace: !Sub ${EnvironmentName}/Application
+          MetricValue: '1'
+          DefaultValue: 0
+
+  # CloudWatch Insights Queries
+  # These would be created programmatically or through the console
+  # as CloudFormation doesn't support Insights query creation
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Outputs:
+  DashboardURL:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${SystemDashboard}
+
+  AlertTopicArn:
+    Condition: HasAlertEmail
+    Description: SNS Topic ARN for alerts
+    Value: !Ref AlertTopic
+    Export:
+      Name: !Sub ${AWS::StackName}-AlertTopicArn

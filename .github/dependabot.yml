@@ -1,0 +1,80 @@
+version: 2
+updates:
+  # Backend dependencies
+  - package-ecosystem: "npm"
+    directory: "/packages/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    groups:
+      aws:
+        patterns:
+          - "aws-*"
+          - "@aws-*"
+      testing:
+        patterns:
+          - "jest*"
+          - "@types/jest"
+          - "supertest"
+    ignore:
+      - dependency-name: "mongodb"
+        versions: ["6.x"]
+
+  # Frontend dependencies
+  - package-ecosystem: "npm"
+    directory: "/packages/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    groups:
+      react:
+        patterns:
+          - "react*"
+          - "@types/react*"
+      mui:
+        patterns:
+          - "@mui/*"
+          - "@emotion/*"
+
+  # Shared dependencies
+  - package-ecosystem: "npm"
+    directory: "/packages/shared"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 3
+
+  # Lambda dependencies
+  - package-ecosystem: "npm"
+    directory: "/packages/lambda"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/infrastructure/docker/backend"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+
+  - package-ecosystem: "docker"
+    directory: "/infrastructure/docker/frontend"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+
+---
+

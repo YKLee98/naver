@@ -1,0 +1,98 @@
+
+# .github/workflows/cd.yml
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  AWS_REGION: ap-northeast-2
+  NODE_VERSION: '18'
+  PNPM_VERSION: '8'
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'staging' }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Deploy infrastructure
+        run: |
+          cd infrastructure/aws/cloudformation
+          aws cloudformation deploy \
+            --template-file main.yaml \
+            --stack-name hallyu-${{ github.event.inputs.environment || 'staging' }} \
+            --parameter-overrides \
+              EnvironmentName=${{ github.event.inputs.environment || 'staging' }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Build and push Docker images
+        run: |
+          ./scripts/deploy/deploy-backend.sh ${{ github.event.inputs.environment || 'staging' }}
+
+      - name: Deploy Lambda functions
+        run: |
+          ./scripts/deploy/deploy-lambda.sh ${{ github.event.inputs.environment || 'staging' }}
+
+      - name: Deploy frontend
+        run: |
+          ./scripts/deploy/deploy-frontend.sh ${{ github.event.inputs.environment || 'staging' }}
+
+      - name: Run post-deployment checks
+        run: |
+          HEALTH_URL=$(aws cloudformation describe-stacks \
+            --stack-name hallyu-${{ github.event.inputs.environment || 'staging' }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`ALBEndpoint`].OutputValue' \
+            --output text)/api/v1/health
+          
+          curl -f $HEALTH_URL || exit 1
+
+      - name: Notify deployment status
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Deployment to ${{ github.event.inputs.environment || 'staging' }} ${{ job.status }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+

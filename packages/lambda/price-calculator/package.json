@@ -1,0 +1,19 @@
+{
+  "name": "price-calculator",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "aws-sdk": "^2.1490.0",
+    "axios": "^1.6.5"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.109",
+    "@types/node": "^18.11.18",
+    "typescript": "^4.9.4"
+  },
+  "scripts": {
+    "build": "tsc",
+    "package": "npm run build && zip -r function.zip . -x '*.ts' -x 'tsconfig.json' -x 'package*.json'"
+  }
+}
+

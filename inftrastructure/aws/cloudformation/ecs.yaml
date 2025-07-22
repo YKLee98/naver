@@ -1,0 +1,746 @@
+# infrastructure/aws/cloudformation/ecs.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Cluster and Services Configuration'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: Environment name prefix
+  
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+  
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 1 ID
+  
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 2 ID
+  
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet 1 ID
+  
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet 2 ID
+  
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: ECS Security Group ID
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 4
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-alb
+      Type: application
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+        - Key: deletion_protection.enabled
+          Value: 'false'
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref SecurityGroup
+
+  # Target Groups
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-backend-tg
+      Port: 3000
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /api/v1/health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+
+  WebSocketTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-ws-tg
+      Port: 3001
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  # ALB Listeners
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # Listener Rules
+  APIListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+
+  WebSocketListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebSocketTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /socket.io/*
+      ListenerArn: !Ref ALBListener
+      Priority: 2
+
+  # IAM Roles
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-ecs-task-execution-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/*
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-ecs-task-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${EnvironmentName}-assets/*
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${EnvironmentName}-*
+
+  # CloudWatch Log Groups
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}/backend
+      RetentionInDays: 30
+
+  # Task Definitions
+  BackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-backend
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '1024'
+      Memory: '2048'
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: backend
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-backend:latest
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+            - ContainerPort: 3001
+              Protocol: tcp
+          Environment:
+            - Name: NODE_ENV
+              Value: production
+            - Name: PORT
+              Value: '3000'
+            - Name: WS_PORT
+              Value: '3001'
+          Secrets:
+            - Name: MONGODB_URI
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/mongodb:uri::
+            - Name: REDIS_HOST
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/redis:host::
+            - Name: NAVER_CLIENT_ID
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/naver:client_id::
+            - Name: NAVER_CLIENT_SECRET
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/naver:client_secret::
+            - Name: SHOPIFY_ACCESS_TOKEN
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/shopify:access_token::
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BackendLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: backend
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:3000/api/v1/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  # ECS Services
+  BackendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ALBListener
+      - APIListenerRule
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-backend
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref BackendTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref SecurityGroup
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+      LoadBalancers:
+        - ContainerName: backend
+          ContainerPort: 3000
+          TargetGroupArn: !Ref BackendTargetGroup
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+
+  # Auto Scaling
+  ServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: 2
+      ResourceId: !Sub service/${ECSCluster}/${BackendService.Name}
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ServiceScalingPolicyCPU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${EnvironmentName}-backend-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ServiceScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70
+
+  ServiceScalingPolicyMemory:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${EnvironmentName}-backend-memory-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ServiceScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+        TargetValue: 80
+
+Outputs:
+  ClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterName
+
+  ALBDNSName:
+    Description: ALB DNS Name
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-ALBDNSName
+
+  ALBEndpoint:
+    Description: ALB Endpoint URL
+    Value: !Sub http://${ApplicationLoadBalancer.DNSName}
+    Export:
+      Name: !Sub ${AWS::StackName}-ALBEndpoint
+
+# infrastructure/aws/cloudformation/lambda.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Lambda Functions Configuration'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: Environment name prefix
+  
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+  
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 1 ID
+  
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 2 ID
+  
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Lambda Security Group ID
+
+Resources:
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-lambda-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${EnvironmentName}-*
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EnvironmentName}-*
+
+  # Lambda Layer for Common Dependencies
+  CommonLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub ${EnvironmentName}-common-layer
+      Description: Common dependencies for Lambda functions
+      Content:
+        S3Bucket: !Sub ${EnvironmentName}-lambda-artifacts
+        S3Key: layers/common-layer.zip
+      CompatibleRuntimes:
+        - nodejs18.x
+
+  # Webhook Handler Lambda
+  WebhookHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${EnvironmentName}-webhook-handler
+      Description: Handles Shopify webhooks
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Sub ${EnvironmentName}-lambda-artifacts
+        S3Key: functions/webhook-handler.zip
+      MemorySize: 512
+      Timeout: 30
+      ReservedConcurrentExecutions: 100
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+          SQS_QUEUE_URL: !Sub https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${EnvironmentName}-webhook-queue
+          SHOPIFY_WEBHOOK_SECRET: !Sub '{{resolve:secretsmanager:${EnvironmentName}/shopify:SecretString:webhook_secret}}'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref SecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Layers:
+        - !Ref CommonLayer
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # Sync Scheduler Lambda
+  SyncSchedulerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${EnvironmentName}-sync-scheduler
+      Description: Schedules periodic sync tasks
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Sub ${EnvironmentName}-lambda-artifacts
+        S3Key: functions/sync-scheduler.zip
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+          ECS_CLUSTER_NAME: !Sub ${EnvironmentName}-cluster
+          TASK_DEFINITION: !Sub ${EnvironmentName}-sync-task
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # Inventory Updater Lambda
+  InventoryUpdaterFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${EnvironmentName}-inventory-updater
+      Description: Updates inventory based on events
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Sub ${EnvironmentName}-lambda-artifacts
+        S3Key: functions/inventory-updater.zip
+      MemorySize: 512
+      Timeout: 120
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+          MONGODB_URI: !Sub '{{resolve:secretsmanager:${EnvironmentName}/mongodb:SecretString:uri}}'
+          NAVER_API_URL: https://api.commerce.naver.com
+          SHOPIFY_API_URL: !Sub '{{resolve:secretsmanager:${EnvironmentName}/shopify:SecretString:shop_domain}}'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref SecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Layers:
+        - !Ref CommonLayer
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # Price Calculator Lambda
+  PriceCalculatorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${EnvironmentName}-price-calculator
+      Description: Calculates prices with exchange rates
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Sub ${EnvironmentName}-lambda-artifacts
+        S3Key: functions/price-calculator.zip
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+          EXCHANGE_RATE_API_KEY: !Sub '{{resolve:secretsmanager:${EnvironmentName}/exchange-rate:SecretString:api_key}}'
+      Layers:
+        - !Ref CommonLayer
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # DLQ Processor Lambda
+  DLQProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${EnvironmentName}-dlq-processor
+      Description: Processes messages from Dead Letter Queues
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Sub ${EnvironmentName}-lambda-artifacts
+        S3Key: functions/dlq-processor.zip
+      MemorySize: 256
+      Timeout: 300
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+          NOTIFICATION_EMAIL: !Sub '{{resolve:secretsmanager:${EnvironmentName}/notifications:SecretString:email}}'
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # EventBridge Rules
+  SyncSchedulerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${EnvironmentName}-sync-scheduler-rule
+      Description: Triggers sync scheduler every 15 minutes
+      ScheduleExpression: rate(15 minutes)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SyncSchedulerFunction.Arn
+          Id: '1'
+
+  SyncSchedulerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SyncSchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SyncSchedulerRule.Arn
+
+  # SQS Event Source Mappings
+  WebhookQueueEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${EnvironmentName}-webhook-queue
+      FunctionName: !GetAtt InventoryUpdaterFunction.Arn
+      BatchSize: 10
+      MaximumBatchingWindowInSeconds: 5
+
+  DLQEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${EnvironmentName}-dlq
+      FunctionName: !GetAtt DLQProcessorFunction.Arn
+      BatchSize: 1
+      MaximumBatchingWindowInSeconds: 0
+
+Outputs:
+  WebhookHandlerArn:
+    Description: Webhook Handler Lambda ARN
+    Value: !GetAtt WebhookHandlerFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-WebhookHandlerArn
+
+  SyncSchedulerArn:
+    Description: Sync Scheduler Lambda ARN
+    Value: !GetAtt SyncSchedulerFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-SyncSchedulerArn
+
+  InventoryUpdaterArn:
+    Description: Inventory Updater Lambda ARN
+    Value: !GetAtt InventoryUpdaterFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-InventoryUpdaterArn
+# infrastructure/aws/cloudformation/sqs.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SQS Queues Configuration'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: Environment name prefix
+
+Resources:
+  # Webhook Processing Queue
+  WebhookQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-webhook-queue
+      VisibilityTimeout: 180
+      MessageRetentionPeriod: 1209600  # 14 days
+      ReceiveMessageWaitTimeSeconds: 20  # Long polling
+      ReddrivePolicy:
+        deadLetterTargetArn: !GetAtt WebhookDLQ.Arn
+        maxReceiveCount: 3
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Webhook Dead Letter Queue
+  WebhookDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-webhook-dlq
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Sync Task Queue
+  SyncTaskQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-sync-task-queue
+      VisibilityTimeout: 900  # 15 minutes
+      MessageRetentionPeriod: 86400  # 1 day
+      ReceiveMessageWaitTimeSeconds: 20
+      ReddrivePolicy:
+        deadLetterTargetArn: !GetAtt SyncTaskDLQ.Arn
+        maxReceiveCount: 2
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Sync Task Dead Letter Queue
+  SyncTaskDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-sync-task-dlq
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Notification Queue
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-notification-queue
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 345600  # 4 days
+      ReceiveMessageWaitTimeSeconds: 20
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Queue Policies
+  WebhookQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref WebhookQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt WebhookQueue.Arn
+
+  # CloudWatch Alarms
+  WebhookQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-webhook-queue-depth
+      AlarmDescription: Alert when webhook queue has too many messages
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1000
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt WebhookQueue.QueueName
+      TreatMissingData: notBreaching
+
+  DLQDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-dlq-depth
+      AlarmDescription: Alert when DLQ has messages
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt WebhookDLQ.QueueName
+      TreatMissingData: notBreaching
+
+Outputs:
+  WebhookQueueUrl:
+    Description: Webhook Queue URL
+    Value: !Ref WebhookQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-WebhookQueueUrl
+
+  WebhookQueueArn:
+    Description: Webhook Queue ARN
+    Value: !GetAtt WebhookQueue.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-WebhookQueueArn
+
+  SyncTaskQueueUrl:
+    Description: Sync Task Queue URL
+    Value: !Ref SyncTaskQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-SyncTaskQueueUrl
+
+  NotificationQueueUrl:
+    Description: Notification Queue URL
+    Value: !Ref NotificationQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-NotificationQueueUrl
+
