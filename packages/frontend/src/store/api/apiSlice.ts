@@ -1,6 +1,6 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { ApiResponse, PaginatedResponse } from '@/types';
-
+import { Product, InventoryStatus, PriceHistory, Mapping, DashboardStats } from '@/types/models';
 const baseQuery = fetchBaseQuery({
   baseUrl: '/api/v1',
   prepareHeaders: (headers) => {

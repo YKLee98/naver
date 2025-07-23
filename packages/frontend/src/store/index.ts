@@ -1,4 +1,4 @@
-packages/frontend/src/store/index.ts
+// packages/frontend/src/store/index.ts
 import { configureStore } from '@reduxjs/toolkit';
 import { apiSlice } from './api/apiSlice';
 import inventoryReducer from './slices/inventorySlice';
@@ -19,7 +19,12 @@ export const store = configureStore({
     notification: notificationReducer,
   },
   middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(apiSlice.middleware),
+    getDefaultMiddleware({
+      serializableCheck: {
+        ignoredActions: ['notification/addNotification'],
+        ignoredPaths: ['notification.notifications'],
+      },
+    }).concat(apiSlice.middleware),
 });
 
 export type RootState = ReturnType<typeof store.getState>;
