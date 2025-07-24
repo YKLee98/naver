@@ -5,86 +5,109 @@ export interface IExchangeRate extends Document {
   baseCurrency: string;
   targetCurrency: string;
   rate: number;
-  source: string;
+  source: 'api' | 'manual';
+  apiSource?: string;
   isManual: boolean;
   validFrom: Date;
   validUntil: Date;
-  metadata: {
-    apiResponse?: Record<string, any>;
+  metadata?: {
     manualReason?: string;
+    setBy?: string;
+    apiResponse?: any;
   };
   createdAt: Date;
   updatedAt: Date;
 }
 
-const ExchangeRateSchema = new Schema<IExchangeRate>(
-  {
-    baseCurrency: {
-      type: String,
-      required: true,
-      default: 'KRW',
-    },
-    targetCurrency: {
-      type: String,
-      required: true,
-      default: 'USD',
-    },
-    rate: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-    source: {
-      type: String,
-      required: true,
-      default: 'api',
-    },
-    isManual: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
-    validFrom: {
-      type: Date,
-      required: true,
-      default: Date.now,
-    },
-    validUntil: {
-      type: Date,
-      required: true,
-      default: () => new Date(Date.now() + 24 * 60 * 60 * 1000), // 24시간 후
-    },
-    metadata: {
-      apiResponse: {
-        type: Map,
-        of: Schema.Types.Mixed,
-      },
-      manualReason: String,
-    },
+const ExchangeRateSchema = new Schema<IExchangeRate>({
+  baseCurrency: {
+    type: String,
+    required: true,
+    uppercase: true,
+    default: 'KRW'
   },
-  {
-    timestamps: true,
-    collection: 'exchange_rates',
+  targetCurrency: {
+    type: String,
+    required: true,
+    uppercase: true,
+    default: 'USD'
+  },
+  rate: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  source: {
+    type: String,
+    required: true,
+    enum: ['api', 'manual']
+  },
+  apiSource: {
+    type: String
+  },
+  isManual: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  validFrom: {
+    type: Date,
+    required: true,
+    index: true
+  },
+  validUntil: {
+    type: Date,
+    required: true,
+    index: true
+  },
+  metadata: {
+    manualReason: String,
+    setBy: String,
+    apiResponse: Schema.Types.Mixed
   }
-);
+}, {
+  timestamps: true
+});
 
 // 복합 인덱스
-ExchangeRateSchema.index({ baseCurrency: 1, targetCurrency: 1, validFrom: -1 });
-ExchangeRateSchema.index({ validUntil: 1 }, { expireAfterSeconds: 0 });
+ExchangeRateSchema.index({ 
+  baseCurrency: 1, 
+  targetCurrency: 1, 
+  validFrom: -1 
+});
 
-// 현재 유효한 환율 조회를 위한 메서드
-ExchangeRateSchema.statics.getCurrentRate = async function (
-  baseCurrency = 'KRW',
-  targetCurrency = 'USD'
-) {
+ExchangeRateSchema.index({ 
+  isManual: 1, 
+  validFrom: 1, 
+  validUntil: 1 
+});
+
+// 현재 유효한 환율 조회 메서드
+ExchangeRateSchema.statics.getCurrentRate = async function(
+  baseCurrency: string = 'KRW',
+  targetCurrency: string = 'USD'
+): Promise<IExchangeRate | null> {
   const now = new Date();
+  
+  // 먼저 수동 설정 환율 확인
+  const manualRate = await this.findOne({
+    baseCurrency,
+    targetCurrency,
+    isManual: true,
+    validFrom: { $lte: now },
+    validUntil: { $gte: now }
+  }).sort({ createdAt: -1 });
+
+  if (manualRate) return manualRate;
+
+  // API 환율 확인
   return this.findOne({
     baseCurrency,
     targetCurrency,
+    isManual: false,
     validFrom: { $lte: now },
-    validUntil: { $gte: now },
-  }).sort({ validFrom: -1 });
+    validUntil: { $gte: now }
+  }).sort({ createdAt: -1 });
 };
 
 export const ExchangeRate = model<IExchangeRate>('ExchangeRate', ExchangeRateSchema);
-

@@ -2,6 +2,7 @@
 import 'dotenv/config';
 import { App } from './app';
 import { logger } from './utils/logger';
+import { connectDatabase, disconnectDatabase } from './config/database';
 import { setupCronJobs ,setCronServices} from './utils/cronjobs';
 import { getRedisClient } from './config/redis'; 
 import{

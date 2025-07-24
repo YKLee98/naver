@@ -2,6 +2,7 @@
   "name": "hallyu-fomaholic-sync",
   "version": "1.0.0",
   "description": "Shopify-Naver Smart Store Real-time Sync System",
+  "author": "YUKYUNG <math.makes.you.free@gmail.com>",
   "private": true,
   "workspaces": [
     "packages/*"
