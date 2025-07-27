@@ -1,26 +1,30 @@
+// packages/frontend/src/hooks/useWebSocket.ts
 import { useEffect, useRef } from 'react';
-import { useDispatch } from 'react-redux';
-import webSocketService from '@/services/websocket';
-import { AppDispatch } from '@/store';
+import { useAppDispatch } from '@/hooks';
+import websocketService from '@/services/websocket';
 
 export function useWebSocket() {
-  const dispatch = useDispatch<AppDispatch>();
-  const isInitialized = useRef(false);
+  const dispatch = useAppDispatch();
+  const isConnected = useRef(false);
 
   useEffect(() => {
-    if (!isInitialized.current) {
-      webSocketService.connect(dispatch);
-      isInitialized.current = true;
+    if (!isConnected.current) {
+      websocketService.connect(dispatch);
+      isConnected.current = true;
     }
 
     return () => {
-      if (isInitialized.current) {
-        webSocketService.disconnect();
-        isInitialized.current = false;
+      if (isConnected.current) {
+        websocketService.disconnect();
+        isConnected.current = false;
       }
     };
   }, [dispatch]);
 
-  return webSocketService;
+  return {
+    emit: websocketService.emit.bind(websocketService),
+    on: websocketService.on.bind(websocketService),
+    off: websocketService.off.bind(websocketService),
+    isConnected: websocketService.isConnected,
+  };
 }
-

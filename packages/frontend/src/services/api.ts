@@ -1,4 +1,5 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+// packages/frontend/src/services/api.ts
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { ApiResponse } from '@/types';
 
 class ApiService {
@@ -6,21 +7,17 @@ class ApiService {
 
   constructor() {
     this.instance = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || '/api/v1',
+      baseURL: '/api/v1',
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
-    this.setupInterceptors();
-  }
-
-  private setupInterceptors() {
-    // 요청 인터셉터
+    // Request interceptor
     this.instance.interceptors.request.use(
       (config) => {
-        const token = this.getToken();
+        const token = localStorage.getItem('token');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
@@ -31,68 +28,94 @@ class ApiService {
       }
     );
 
-    // 응답 인터셉터
+    // Response interceptor
     this.instance.interceptors.response.use(
-      (response) => response,
-      async (error: AxiosError<ApiResponse<any>>) => {
-        if (error.response?.status === 401) {
-          // 토큰 만료 처리
-          this.clearToken();
-          window.location.href = '/login';
+      (response) => {
+        return response;
+      },
+      async (error) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          originalRequest._retry = true;
+
+          try {
+            const refreshToken = localStorage.getItem('refreshToken');
+            if (refreshToken) {
+              const response = await this.post('/auth/refresh', { refreshToken });
+              const { token } = response;
+              
+              localStorage.setItem('token', token);
+              originalRequest.headers.Authorization = `Bearer ${token}`;
+              
+              return this.instance(originalRequest);
+            }
+          } catch (refreshError) {
+            // Refresh failed, redirect to login
+            localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
+            window.location.href = '/login';
+            return Promise.reject(refreshError);
+          }
         }
 
-        const message = error.response?.data?.message || error.message || 'An error occurred';
-        
-        return Promise.reject({
-          message,
-          status: error.response?.status,
-          data: error.response?.data,
-        });
+        // Handle other errors
+        if (error.response?.status === 403) {
+          // Handle forbidden
+        } else if (error.response?.status === 404) {
+          // Handle not found
+        } else if (error.response?.status >= 500) {
+          // Handle server errors
+        }
+
+        return Promise.reject(error);
       }
     );
   }
 
-  private getToken(): string | null {
-    return localStorage.getItem('token');
-  }
-
-  private setToken(token: string): void {
-    localStorage.setItem('token', token);
-  }
-
-  private clearToken(): void {
-    localStorage.removeItem('token');
-  }
-
-  async get<T>(url: string, params?: any): Promise<T> {
-    const response = await this.instance.get<ApiResponse<T>>(url, { params });
+  async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.get<ApiResponse<T>>(url, config);
     return response.data.data!;
   }
 
-  async post<T>(url: string, data?: any): Promise<T> {
-    const response = await this.instance.post<ApiResponse<T>>(url, data);
+  async post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.post<ApiResponse<T>>(url, data, config);
     return response.data.data!;
   }
 
-  async put<T>(url: string, data?: any): Promise<T> {
-    const response = await this.instance.put<ApiResponse<T>>(url, data);
+  async put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.put<ApiResponse<T>>(url, data, config);
     return response.data.data!;
   }
 
-  async delete<T>(url: string): Promise<T> {
-    const response = await this.instance.delete<ApiResponse<T>>(url);
+  async patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.patch<ApiResponse<T>>(url, data, config);
     return response.data.data!;
   }
 
-  async upload<T>(url: string, formData: FormData): Promise<T> {
+  async delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.delete<ApiResponse<T>>(url, config);
+    return response.data.data!;
+  }
+
+  async upload<T = any>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.instance.post<ApiResponse<T>>(url, formData, {
+      ...config,
       headers: {
+        ...config?.headers,
         'Content-Type': 'multipart/form-data',
       },
     });
     return response.data.data!;
   }
+
+  async download(url: string, config?: AxiosRequestConfig): Promise<Blob> {
+    const response = await this.instance.get(url, {
+      ...config,
+      responseType: 'blob',
+    });
+    return response.data;
+  }
 }
 
 export default new ApiService();
-

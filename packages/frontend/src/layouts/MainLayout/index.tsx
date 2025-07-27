@@ -22,6 +22,10 @@ import {
   useMediaQuery,
   Collapse,
   Alert,
+  Fade,
+  Paper,
+  Chip,
+  Button,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -36,23 +40,53 @@ import {
   ExpandLess,
   ExpandMore,
   Sync,
-  Error,
-  Warning,
+  Logout,
+  Circle,
 } from '@mui/icons-material';
 import { useAppSelector, useAppDispatch } from '@/hooks';
 import { toggleNotificationDrawer } from '@/store/slices/notificationSlice';
 import NotificationDrawer from '@/components/NotificationDrawer';
 import WebSocketStatus from '@/components/WebSocketStatus';
 
-const drawerWidth = 240;
+const drawerWidth = 280;
 
 const menuItems = [
-  { path: '/dashboard', label: '대시보드', icon: <Dashboard /> },
-  { path: '/products', label: '상품 매핑', icon: <LinkIcon /> },
-  { path: '/inventory', label: '재고 관리', icon: <Inventory2 /> },
-  { path: '/pricing', label: '가격 관리', icon: <AttachMoney /> },
-  { path: '/reports', label: '리포트', icon: <Assessment /> },
-  { path: '/settings', label: '설정', icon: <Settings /> },
+  { 
+    path: '/dashboard', 
+    label: '대시보드', 
+    icon: <Dashboard />,
+    description: '전체 현황을 한눈에'
+  },
+  { 
+    path: '/products', 
+    label: '상품 매핑', 
+    icon: <LinkIcon />,
+    description: 'SKU 연결 관리'
+  },
+  { 
+    path: '/inventory', 
+    label: '재고 관리', 
+    icon: <Inventory2 />,
+    description: '실시간 재고 동기화'
+  },
+  { 
+    path: '/pricing', 
+    label: '가격 관리', 
+    icon: <AttachMoney />,
+    description: '환율 기반 가격 설정'
+  },
+  { 
+    path: '/reports', 
+    label: '리포트', 
+    icon: <Assessment />,
+    description: '분석 보고서'
+  },
+  { 
+    path: '/settings', 
+    label: '설정', 
+    icon: <Settings />,
+    description: 'API 및 시스템 설정'
+  },
 ];
 
 const MainLayout: React.FC = () => {
@@ -60,14 +94,14 @@ const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useAppDispatch();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   
   const { unreadCount } = useAppSelector((state) => state.notifications);
-  const { isConnected } = useAppSelector((state) => state.websocket);
+  const { connected } = useAppSelector((state) => state.websocket);
   const { syncStatus, error: syncError } = useAppSelector((state) => state.sync);
   const user = useAppSelector((state) => state.auth.user);
 
@@ -91,115 +125,240 @@ const MainLayout: React.FC = () => {
   };
 
   const handleLogout = () => {
-    // Logout logic
+    // TODO: Implement logout logic
     navigate('/login');
   };
 
   const drawer = (
-    <div>
-      <Toolbar>
-        <Typography variant="h6" noWrap component="div">
-          Hallyu Sync
-        </Typography>
-      </Toolbar>
-      <Divider />
-      <List>
-        {menuItems.map((item) => (
-          <ListItem key={item.path} disablePadding>
-            <ListItemButton
-              selected={location.pathname === item.path}
-              onClick={() => handleNavigation(item.path)}
-            >
-              <ListItemIcon
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Logo Section */}
+      <Box
+        sx={{
+          p: 3,
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Avatar
+            sx={{
+              width: 48,
+              height: 48,
+              bgcolor: 'rgba(255, 255, 255, 0.2)',
+              backdropFilter: 'blur(10px)',
+              fontSize: '1.2rem',
+              fontWeight: 'bold',
+            }}
+          >
+            NS
+          </Avatar>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Naver to Shopify
+            </Typography>
+            <Typography variant="caption" sx={{ opacity: 0.8 }}>
+              ERP System v1.0
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Navigation Menu */}
+      <Box sx={{ flex: 1, overflow: 'auto', py: 2 }}>
+        <List sx={{ px: 2 }}>
+          {menuItems.map((item) => (
+            <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
+              <ListItemButton
+                selected={location.pathname === item.path}
+                onClick={() => handleNavigation(item.path)}
                 sx={{
-                  color: location.pathname === item.path ? 'primary.main' : 'inherit',
+                  borderRadius: 2,
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    backgroundColor: 'action.hover',
+                    transform: 'translateX(4px)',
+                  },
+                  '&.Mui-selected': {
+                    backgroundColor: 'primary.main',
+                    color: 'white',
+                    '&:hover': {
+                      backgroundColor: 'primary.dark',
+                    },
+                    '& .MuiListItemIcon-root': {
+                      color: 'white',
+                    },
+                  },
                 }}
               >
-                {item.icon}
+                <ListItemIcon
+                  sx={{
+                    color: location.pathname === item.path ? 'white' : 'text.secondary',
+                    minWidth: 45,
+                  }}
+                >
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText 
+                  primary={
+                    <Typography variant="body1" sx={{ fontWeight: location.pathname === item.path ? 600 : 400 }}>
+                      {item.label}
+                    </Typography>
+                  }
+                  secondary={
+                    !isMobile && (
+                      <Typography 
+                        variant="caption" 
+                        sx={{ 
+                          color: location.pathname === item.path ? 'rgba(255,255,255,0.8)' : 'text.secondary',
+                          display: 'block',
+                        }}
+                      >
+                        {item.description}
+                      </Typography>
+                    )
+                  }
+                />
+              </ListItemButton>
+            </ListItem>
+          ))}
+        </List>
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* Sync Status */}
+        <List sx={{ px: 2 }}>
+          <ListItem disablePadding>
+            <ListItemButton onClick={() => setSyncMenuOpen(!syncMenuOpen)} sx={{ borderRadius: 2 }}>
+              <ListItemIcon>
+                <Box sx={{ position: 'relative' }}>
+                  <Sync color={syncStatus.isRunning ? 'primary' : 'inherit'} />
+                  {syncStatus.isRunning && (
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: -4,
+                        right: -4,
+                        animation: 'pulse 2s infinite',
+                        '@keyframes pulse': {
+                          '0%': { transform: 'scale(1)', opacity: 1 },
+                          '50%': { transform: 'scale(1.2)', opacity: 0.7 },
+                          '100%': { transform: 'scale(1)', opacity: 1 },
+                        },
+                      }}
+                    >
+                      <Circle sx={{ fontSize: 8, color: 'success.main' }} />
+                    </Box>
+                  )}
+                </Box>
               </ListItemIcon>
-              <ListItemText primary={item.label} />
+              <ListItemText primary="동기화 상태" />
+              {syncMenuOpen ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
           </ListItem>
-        ))}
-      </List>
-      <Divider />
-      <List>
-        <ListItem disablePadding>
-          <ListItemButton onClick={() => setSyncMenuOpen(!syncMenuOpen)}>
-            <ListItemIcon>
-              <Sync color={syncStatus.isRunning ? 'primary' : 'inherit'} />
-            </ListItemIcon>
-            <ListItemText primary="동기화 상태" />
-            {syncMenuOpen ? <ExpandLess /> : <ExpandMore />}
-          </ListItemButton>
-        </ListItem>
-        <Collapse in={syncMenuOpen} timeout="auto" unmountOnExit>
-          <Box sx={{ pl: 4, pr: 2, pb: 2 }}>
-            <Typography variant="caption" color="textSecondary">
-              {syncStatus.isRunning ? '동기화 진행 중...' : '대기 중'}
-            </Typography>
-            {syncStatus.lastSync && (
-              <Typography variant="caption" display="block">
-                마지막 동기화: {new Date(syncStatus.lastSync).toLocaleTimeString()}
-              </Typography>
-            )}
-          </Box>
-        </Collapse>
-      </List>
-    </div>
+          <Collapse in={syncMenuOpen} timeout="auto" unmountOnExit>
+            <Paper sx={{ mx: 2, my: 1, p: 2, bgcolor: 'grey.50' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <Circle sx={{ fontSize: 10, color: syncStatus.isRunning ? 'success.main' : 'grey.400' }} />
+                <Typography variant="body2" color="text.secondary">
+                  {syncStatus.isRunning ? '동기화 진행 중...' : '대기 중'}
+                </Typography>
+              </Box>
+              {syncStatus.lastSync && (
+                <Typography variant="caption" color="text.secondary">
+                  마지막 동기화: {new Date(syncStatus.lastSync).toLocaleString()}
+                </Typography>
+              )}
+            </Paper>
+          </Collapse>
+        </List>
+      </Box>
+    </Box>
   );
 
   return (
-    <Box sx={{ display: 'flex' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f5f7fa' }}>
+      {/* AppBar */}
       <AppBar
         position="fixed"
         sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
+          width: { md: `calc(100% - ${drawerWidth}px)` },
+          ml: { md: `${drawerWidth}px` },
+          bgcolor: 'white',
+          color: 'text.primary',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ px: { xs: 2, sm: 3 } }}>
           <IconButton
             color="inherit"
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' } }}
+            sx={{ mr: 2, display: { md: 'none' } }}
           >
             <MenuIcon />
           </IconButton>
           
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {menuItems.find(item => item.path === location.pathname)?.label || ''}
-          </Typography>
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 600 }}>
+              {menuItems.find(item => item.path === location.pathname)?.label || ''}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {menuItems.find(item => item.path === location.pathname)?.description || ''}
+            </Typography>
+          </Box>
 
-          <WebSocketStatus />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip
+              icon={<Circle sx={{ fontSize: 10 }} />}
+              label={connected ? '연결됨' : '연결 끊김'}
+              size="small"
+              color={connected ? 'success' : 'error'}
+              variant="outlined"
+            />
 
-          <IconButton
-            color="inherit"
-            onClick={() => dispatch(toggleNotificationDrawer())}
-          >
-            <Badge badgeContent={unreadCount} color="error">
-              <Notifications />
-            </Badge>
-          </IconButton>
+            <IconButton
+              color="inherit"
+              onClick={() => dispatch(toggleNotificationDrawer())}
+              sx={{
+                '&:hover': {
+                  bgcolor: 'action.hover',
+                },
+              }}
+            >
+              <Badge badgeContent={unreadCount} color="error">
+                <Notifications />
+              </Badge>
+            </IconButton>
 
-          <IconButton
-            onClick={handleProfileMenuOpen}
-            color="inherit"
-          >
-            {user?.avatar ? (
-              <Avatar src={user.avatar} sx={{ width: 32, height: 32 }} />
-            ) : (
-              <AccountCircle />
-            )}
-          </IconButton>
+            <IconButton
+              onClick={handleProfileMenuOpen}
+              sx={{
+                ml: 1,
+                '&:hover': {
+                  bgcolor: 'action.hover',
+                },
+              }}
+            >
+              <Avatar 
+                src={user?.avatar} 
+                sx={{ 
+                  width: 36, 
+                  height: 36,
+                  bgcolor: 'primary.main',
+                }}
+              >
+                {user?.name?.[0] || 'U'}
+              </Avatar>
+            </IconButton>
+          </Box>
         </Toolbar>
       </AppBar>
 
+      {/* Drawer */}
       <Box
         component="nav"
-        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+        sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
       >
         <Drawer
           variant="temporary"
@@ -209,8 +368,13 @@ const MainLayout: React.FC = () => {
             keepMounted: true,
           }}
           sx={{
-            display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            display: { xs: 'block', md: 'none' },
+            '& .MuiDrawer-paper': { 
+              boxSizing: 'border-box', 
+              width: drawerWidth,
+              borderRight: 'none',
+              boxShadow: '2px 0 8px rgba(0,0,0,0.1)',
+            },
           }}
         >
           {drawer}
@@ -218,8 +382,13 @@ const MainLayout: React.FC = () => {
         <Drawer
           variant="permanent"
           sx={{
-            display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            display: { xs: 'none', md: 'block' },
+            '& .MuiDrawer-paper': { 
+              boxSizing: 'border-box', 
+              width: drawerWidth,
+              borderRight: 'none',
+              boxShadow: '2px 0 8px rgba(0,0,0,0.05)',
+            },
           }}
           open
         >
@@ -227,30 +396,45 @@ const MainLayout: React.FC = () => {
         </Drawer>
       </Box>
 
+      {/* Main Content */}
       <Box
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          width: { md: `calc(100% - ${drawerWidth}px)` },
+          ml: { md: `${drawerWidth}px` },
         }}
       >
         <Toolbar />
         
-        {/* Global Alerts */}
-        {!isConnected && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            WebSocket 연결이 끊어졌습니다. 실시간 업데이트가 작동하지 않을 수 있습니다.
-          </Alert>
-        )}
-        
-        {syncError && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => {}}>
-            동기화 오류: {syncError}
-          </Alert>
-        )}
+        <Box sx={{ p: { xs: 2, sm: 3, md: 4 } }}>
+          {/* Global Alerts */}
+          <Fade in={!connected}>
+            <Alert 
+              severity="warning" 
+              sx={{ mb: 2 }}
+              action={
+                <Button color="inherit" size="small">
+                  재연결
+                </Button>
+              }
+            >
+              WebSocket 연결이 끊어졌습니다. 실시간 업데이트가 작동하지 않을 수 있습니다.
+            </Alert>
+          </Fade>
+          
+          <Fade in={!!syncError}>
+            <Alert 
+              severity="error" 
+              sx={{ mb: 2 }} 
+              onClose={() => {}}
+            >
+              동기화 오류: {syncError}
+            </Alert>
+          </Fade>
 
-        <Outlet />
+          <Outlet />
+        </Box>
       </Box>
 
       {/* Profile Menu */}
@@ -258,12 +442,24 @@ const MainLayout: React.FC = () => {
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={handleProfileMenuClose}
+        PaperProps={{
+          sx: {
+            mt: 1.5,
+            minWidth: 200,
+          },
+        }}
       >
+        <Box sx={{ px: 2, py: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="subtitle2">{user?.name || 'User'}</Typography>
+          <Typography variant="caption" color="text.secondary">
+            {user?.email || 'user@example.com'}
+          </Typography>
+        </Box>
         <MenuItem onClick={handleProfileMenuClose}>
           <ListItemIcon>
             <AccountCircle fontSize="small" />
           </ListItemIcon>
-          프로필
+          프로필 설정
         </MenuItem>
         <MenuItem onClick={handleProfileMenuClose}>
           <ListItemIcon>
@@ -273,6 +469,9 @@ const MainLayout: React.FC = () => {
         </MenuItem>
         <Divider />
         <MenuItem onClick={handleLogout}>
+          <ListItemIcon>
+            <Logout fontSize="small" />
+          </ListItemIcon>
           로그아웃
         </MenuItem>
       </Menu>

@@ -20,12 +20,13 @@ import {
   Alert,
   IconButton,
   InputAdornment,
+  Chip,
 } from '@mui/material';
 import {
   Save as SaveIcon,
   Visibility as VisibilityIcon,
   VisibilityOff as VisibilityOffIcon,
-  TestTube as TestIcon,
+  Science as TestIcon,
 } from '@mui/icons-material';
 import { useForm, Controller } from 'react-hook-form';
 import { SYNC_INTERVALS } from '@/utils/constants';

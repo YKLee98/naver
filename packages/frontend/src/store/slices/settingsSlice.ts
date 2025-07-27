@@ -1,60 +1,137 @@
+// packages/frontend/src/store/slices/settingsSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { SyncSettings } from '@/types';
 
 interface SettingsState {
-  syncSettings: SyncSettings | null;
-  isAutoSyncEnabled: boolean;
-  selectedInterval: number;
-  priceMargin: number;
-  theme: 'light' | 'dark';
-  language: 'ko' | 'en';
+  api: {
+    naver: {
+      clientId: string;
+      clientSecret: string;
+      storeId: string;
+    };
+    shopify: {
+      shopDomain: string;
+      accessToken: string;
+    };
+  };
+  sync: {
+    autoSync: boolean;
+    syncInterval: number; // minutes
+    inventorySync: boolean;
+    priceSync: boolean;
+    lowStockThreshold: number;
+    criticalStockThreshold: number;
+  };
+  notification: {
+    email: boolean;
+    browser: boolean;
+    sound: boolean;
+    lowStockAlert: boolean;
+    syncErrorAlert: boolean;
+    priceChangeAlert: boolean;
+  };
+  general: {
+    language: 'ko' | 'en';
+    timezone: string;
+    dateFormat: string;
+    currency: string;
+  };
+  loading: boolean;
+  error: string | null;
 }
 
 const initialState: SettingsState = {
-  syncSettings: null,
-  isAutoSyncEnabled: true,
-  selectedInterval: 30,
-  priceMargin: 1.15,
-  theme: 'light',
-  language: 'ko',
+  api: {
+    naver: {
+      clientId: '',
+      clientSecret: '',
+      storeId: '',
+    },
+    shopify: {
+      shopDomain: '',
+      accessToken: '',
+    },
+  },
+  sync: {
+    autoSync: true,
+    syncInterval: 30,
+    inventorySync: true,
+    priceSync: true,
+    lowStockThreshold: 10,
+    criticalStockThreshold: 5,
+  },
+  notification: {
+    email: true,
+    browser: true,
+    sound: true,
+    lowStockAlert: true,
+    syncErrorAlert: true,
+    priceChangeAlert: true,
+  },
+  general: {
+    language: 'ko',
+    timezone: 'Asia/Seoul',
+    dateFormat: 'YYYY-MM-DD',
+    currency: 'KRW',
+  },
+  loading: false,
+  error: null,
 };
 
 const settingsSlice = createSlice({
   name: 'settings',
   initialState,
   reducers: {
-    setSyncSettings: (state, action: PayloadAction<SyncSettings>) => {
-      state.syncSettings = action.payload;
-      state.isAutoSyncEnabled = action.payload.autoSync;
-      state.selectedInterval = parseInt(action.payload.syncInterval);
-      state.priceMargin = parseFloat(action.payload.priceMargin);
+    setSettings: (state, action: PayloadAction<Partial<SettingsState>>) => {
+      return { ...state, ...action.payload };
     },
-    toggleAutoSync: (state) => {
-      state.isAutoSyncEnabled = !state.isAutoSyncEnabled;
+    
+    updateApiSettings: (state, action: PayloadAction<Partial<SettingsState['api']>>) => {
+      state.api = { ...state.api, ...action.payload };
     },
-    setSelectedInterval: (state, action: PayloadAction<number>) => {
-      state.selectedInterval = action.payload;
+    
+    updateSyncSettings: (state, action: PayloadAction<Partial<SettingsState['sync']>>) => {
+      state.sync = { ...state.sync, ...action.payload };
     },
-    setPriceMargin: (state, action: PayloadAction<number>) => {
-      state.priceMargin = action.payload;
+    
+    updateNotificationSettings: (state, action: PayloadAction<Partial<SettingsState['notification']>>) => {
+      state.notification = { ...state.notification, ...action.payload };
     },
-    setTheme: (state, action: PayloadAction<'light' | 'dark'>) => {
-      state.theme = action.payload;
+    
+    updateGeneralSettings: (state, action: PayloadAction<Partial<SettingsState['general']>>) => {
+      state.general = { ...state.general, ...action.payload };
     },
-    setLanguage: (state, action: PayloadAction<'ko' | 'en'>) => {
-      state.language = action.payload;
+    
+    updateSettings: (state, action: PayloadAction<{ category: string; settings: any }>) => {
+      const { category, settings } = action.payload;
+      if (category in state) {
+        (state as any)[category] = { ...(state as any)[category], ...settings };
+      }
+    },
+    
+    resetSettings: (state) => {
+      return initialState;
+    },
+    
+    setLoading: (state, action: PayloadAction<boolean>) => {
+      state.loading = action.payload;
+    },
+    
+    setError: (state, action: PayloadAction<string | null>) => {
+      state.error = action.payload;
     },
   },
 });
 
 export const {
-  setSyncSettings,
-  toggleAutoSync,
-  setSelectedInterval,
-  setPriceMargin,
-  setTheme,
-  setLanguage,
+  setSettings,
+  updateApiSettings,
+  updateSyncSettings,
+  updateNotificationSettings,
+  updateGeneralSettings,
+  updateSettings,
+  resetSettings,
+  setLoading,
+  setError,
 } = settingsSlice.actions;
 
 export default settingsSlice.reducer;
-

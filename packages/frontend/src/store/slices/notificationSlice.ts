@@ -1,18 +1,15 @@
+// packages/frontend/src/store/slices/notificationSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { Notification } from '@/types';
+import { Notification } from '@/types/models';
 
 interface NotificationState {
   notifications: Notification[];
   unreadCount: number;
-  isDrawerOpen: boolean;
-  soundEnabled: boolean;
 }
 
 const initialState: NotificationState = {
   notifications: [],
   unreadCount: 0,
-  isDrawerOpen: false,
-  soundEnabled: true,
 };
 
 const notificationSlice = createSlice({
@@ -21,62 +18,64 @@ const notificationSlice = createSlice({
   reducers: {
     addNotification: (state, action: PayloadAction<Omit<Notification, 'id' | 'timestamp' | 'read'>>) => {
       const notification: Notification = {
+        ...action.payload,
         id: Date.now().toString(),
         timestamp: new Date().toISOString(),
         read: false,
-        ...action.payload,
       };
-      state.notifications.unshift(notification);
-      state.unreadCount++;
       
-      // 최대 100개까지만 유지
+      state.notifications.unshift(notification);
+      state.unreadCount += 1;
+      
+      // 최대 100개까지만 보관
       if (state.notifications.length > 100) {
         state.notifications = state.notifications.slice(0, 100);
       }
     },
-    markAsRead: (state, action: PayloadAction<string>) => {
-      const notification = state.notifications.find(n => n.id === action.payload);
-      if (notification && !notification.read) {
-        notification.read = true;
-        state.unreadCount = Math.max(0, state.unreadCount - 1);
-      }
-    },
-    markAllAsRead: (state) => {
-      state.notifications.forEach(n => n.read = true);
-      state.unreadCount = 0;
-    },
+    
     removeNotification: (state, action: PayloadAction<string>) => {
       const index = state.notifications.findIndex(n => n.id === action.payload);
-      if (index > -1) {
+      if (index !== -1) {
         const notification = state.notifications[index];
         if (!notification.read) {
-          state.unreadCount = Math.max(0, state.unreadCount - 1);
+          state.unreadCount -= 1;
         }
         state.notifications.splice(index, 1);
       }
     },
-    clearNotifications: (state) => {
-      state.notifications = [];
+    
+    markAsRead: (state, action: PayloadAction<string>) => {
+      const notification = state.notifications.find(n => n.id === action.payload);
+      if (notification && !notification.read) {
+        notification.read = true;
+        state.unreadCount -= 1;
+      }
+    },
+    
+    markAllAsRead: (state) => {
+      state.notifications.forEach(notification => {
+        notification.read = true;
+      });
       state.unreadCount = 0;
     },
-    toggleDrawer: (state) => {
-      state.isDrawerOpen = !state.isDrawerOpen;
-    },
-    toggleSound: (state) => {
-      state.soundEnabled = !state.soundEnabled;
+    
+    clearAllNotifications: (state) => {
+      state.notifications = [];
+      state.unreadCount = 0;
     },
   },
 });
 
 export const {
   addNotification,
+  removeNotification,
   markAsRead,
   markAllAsRead,
-  removeNotification,
-  clearNotifications,
-  toggleDrawer,
-  toggleSound,
+  clearAllNotifications,
 } = notificationSlice.actions;
 
-export default notificationSlice.reducer;
+// 별칭 export 추가
+export const clearNotifications = clearAllNotifications;
+export const toggleNotificationDrawer = () => ({ type: 'ui/toggleNotificationDrawer' });
 
+export default notificationSlice.reducer;

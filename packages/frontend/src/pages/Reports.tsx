@@ -1,3 +1,4 @@
+// packages/frontend/src/pages/Reports.tsx
 import React, { useState } from 'react';
 import {
   Container,
@@ -11,13 +12,14 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  DatePicker,
   Card,
   CardContent,
   CardActions,
+  TextField,
 } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import {
   Download as DownloadIcon,
   Assessment as ReportIcon,
@@ -25,7 +27,7 @@ import {
   Email as EmailIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
-import ko from 'date-fns/locale/ko';
+import { ko } from 'date-fns/locale';
 
 const reportTypes = [
   {
@@ -97,14 +99,14 @@ const Reports: React.FC = () => {
               label="시작일"
               value={dateRange.start}
               onChange={(date) => date && setDateRange({ ...dateRange, start: date })}
-              renderInput={(params) => <TextField {...params} />}
+              slotProps={{ textField: { fullWidth: true } }}
             />
             <Typography>~</Typography>
             <DatePicker
               label="종료일"
               value={dateRange.end}
               onChange={(date) => date && setDateRange({ ...dateRange, end: date })}
-              renderInput={(params) => <TextField {...params} />}
+              slotProps={{ textField: { fullWidth: true } }}
             />
             <Button variant="outlined">
               빠른 선택
@@ -180,4 +182,3 @@ const Reports: React.FC = () => {
 };
 
 export default Reports;
-

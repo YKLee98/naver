@@ -1,6 +1,16 @@
+// packages/frontend/src/store/api/apiSlice.ts
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { ApiResponse, PaginatedResponse } from '@/types';
-import { Product, InventoryStatus, PriceHistory, Mapping, DashboardStats } from '@/types/models';
+import { 
+  Product, 
+  InventoryStatus, 
+  PriceHistory, 
+  Mapping, 
+  DashboardStats,
+  InventoryTransaction,
+  ExchangeRate 
+} from '@/types/models';
+
 const baseQuery = fetchBaseQuery({
   baseUrl: '/api/v1',
   prepareHeaders: (headers) => {
@@ -18,7 +28,7 @@ export const apiSlice = createApi({
   tagTypes: ['Product', 'Inventory', 'Price', 'Mapping', 'Settings', 'Dashboard'],
   endpoints: (builder) => ({
     // 상품 엔드포인트
-    getProducts: builder.query({
+    getProducts: builder.query<PaginatedResponse<Product>, any>({
       query: (params) => ({
         url: '/products',
         params,
@@ -26,18 +36,18 @@ export const apiSlice = createApi({
       providesTags: ['Product'],
     }),
     
-    getProductBySku: builder.query({
+    getProductBySku: builder.query<Product, string>({
       query: (sku) => `/products/${sku}`,
       providesTags: ['Product'],
     }),
     
     // 재고 엔드포인트
-    getInventoryStatus: builder.query({
+    getInventoryStatus: builder.query<InventoryStatus, string>({
       query: (sku) => `/inventory/${sku}/status`,
       providesTags: ['Inventory'],
     }),
     
-    getInventoryHistory: builder.query({
+    getInventoryHistory: builder.query<PaginatedResponse<InventoryTransaction>, any>({
       query: ({ sku, ...params }) => ({
         url: `/inventory/${sku}/history`,
         params,
@@ -45,61 +55,80 @@ export const apiSlice = createApi({
       providesTags: ['Inventory'],
     }),
     
-    adjustInventory: builder.mutation({
+    adjustInventory: builder.mutation<void, any>({
       query: ({ sku, ...body }) => ({
         url: `/inventory/${sku}/adjust`,
         method: 'POST',
         body,
       }),
-      invalidatesTags: ['Inventory'],
+      invalidatesTags: ['Inventory', 'Product'],
     }),
     
-    getLowStockProducts: builder.query({
-      query: (params) => ({
-        url: '/inventory/low-stock',
-        params,
+    bulkUpdateInventory: builder.mutation<void, { items: any[] }>({
+      query: (body) => ({
+        url: '/inventory/bulk-update',
+        method: 'POST',
+        body,
       }),
+      invalidatesTags: ['Inventory', 'Product'],
+    }),
+    
+    getLowStockItems: builder.query<Product[], void>({
+      query: () => '/inventory/low-stock',
       providesTags: ['Inventory'],
     }),
     
-    // 동기화 엔드포인트
-    performFullSync: builder.mutation({
-      query: () => ({
-        url: '/sync/full',
-        method: 'POST',
+    // 가격 엔드포인트
+    getPriceHistory: builder.query<PaginatedResponse<PriceHistory>, any>({
+      query: (params) => ({
+        url: '/prices/history',
+        params,
       }),
-      invalidatesTags: ['Product', 'Inventory', 'Price'],
+      providesTags: ['Price'],
     }),
     
-    syncSingleSku: builder.mutation({
-      query: (sku) => ({
-        url: `/sync/sku/${sku}`,
-        method: 'POST',
-      }),
-      invalidatesTags: ['Product', 'Inventory', 'Price'],
-    }),
-    
-    getSyncStatus: builder.query({
-      query: () => '/sync/status',
-      providesTags: ['Settings'],
-    }),
-    
-    getSyncSettings: builder.query({
-      query: () => '/sync/settings',
-      providesTags: ['Settings'],
-    }),
-    
-    updateSyncSettings: builder.mutation({
-      query: (body) => ({
-        url: '/sync/settings',
+    updatePrice: builder.mutation<void, any>({
+      query: ({ sku, ...body }) => ({
+        url: `/prices/${sku}`,
         method: 'PUT',
         body,
       }),
-      invalidatesTags: ['Settings'],
+      invalidatesTags: ['Price', 'Product'],
+    }),
+    
+    bulkUpdatePrices: builder.mutation<void, { items: any[] }>({
+      query: (body) => ({
+        url: '/prices/bulk-update',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Price', 'Product'],
+    }),
+    
+    getExchangeRate: builder.query<ExchangeRate, void>({
+      query: () => '/prices/exchange-rate',
+      providesTags: ['Price'],
+    }),
+    
+    updateExchangeRate: builder.mutation<ExchangeRate, { rate: number; isManual: boolean }>({
+      query: (body) => ({
+        url: '/prices/exchange-rate',
+        method: 'PUT',
+        body,
+      }),
+      invalidatesTags: ['Price'],
     }),
     
     // 매핑 엔드포인트
-    createMapping: builder.mutation({
+    getMappings: builder.query<PaginatedResponse<Mapping>, any>({
+      query: (params) => ({
+        url: '/mappings',
+        params,
+      }),
+      providesTags: ['Mapping'],
+    }),
+    
+    createMapping: builder.mutation<Mapping, Partial<Mapping>>({
       query: (body) => ({
         url: '/mappings',
         method: 'POST',
@@ -108,16 +137,16 @@ export const apiSlice = createApi({
       invalidatesTags: ['Mapping'],
     }),
     
-    updateMapping: builder.mutation({
-      query: ({ id, ...body }) => ({
+    updateMapping: builder.mutation<Mapping, { id: string; data: Partial<Mapping> }>({
+      query: ({ id, data }) => ({
         url: `/mappings/${id}`,
         method: 'PUT',
-        body,
+        body: data,
       }),
       invalidatesTags: ['Mapping'],
     }),
     
-    deleteMapping: builder.mutation({
+    deleteMapping: builder.mutation<void, string>({
       query: (id) => ({
         url: `/mappings/${id}`,
         method: 'DELETE',
@@ -125,99 +154,136 @@ export const apiSlice = createApi({
       invalidatesTags: ['Mapping'],
     }),
     
-    autoDiscoverMappings: builder.mutation({
+    autoDiscoverMappings: builder.mutation<{ discovered: number; created: number }, void>({
       query: () => ({
         url: '/mappings/auto-discover',
         method: 'POST',
       }),
-    }),
-    
-    validateMapping: builder.mutation({
-      query: (id) => ({
-        url: `/mappings/${id}/validate`,
-        method: 'POST',
-      }),
-    }),
-    
-    bulkUploadMappings: builder.mutation({
-      query: (body) => ({
-        url: '/mappings/bulk',
-        method: 'POST',
-        body,
-      }),
       invalidatesTags: ['Mapping'],
     }),
     
+    // 동기화 엔드포인트
+    performFullSync: builder.mutation<void, void>({
+      query: () => ({
+        url: '/sync/full',
+        method: 'POST',
+      }),
+      invalidatesTags: ['Product', 'Inventory', 'Price'],
+    }),
+    
+    syncInventory: builder.mutation<void, { sku?: string }>({
+      query: (params) => ({
+        url: '/sync/inventory',
+        method: 'POST',
+        body: params,
+      }),
+      invalidatesTags: ['Inventory'],
+    }),
+    
+    syncPrices: builder.mutation<void, { sku?: string }>({
+      query: (params) => ({
+        url: '/sync/prices',
+        method: 'POST',
+        body: params,
+      }),
+      invalidatesTags: ['Price'],
+    }),
+    
     // 대시보드 엔드포인트
-    getDashboardStats: builder.query({
-      query: () => '/dashboard/statistics',
+    getDashboardStats: builder.query<DashboardStats, void>({
+      query: () => '/dashboard/stats',
       providesTags: ['Dashboard'],
     }),
     
-    getRecentActivities: builder.query({
-      query: (params) => ({
-        url: '/dashboard/activities',
-        params,
-      }),
-      providesTags: ['Dashboard'],
+    // 설정 엔드포인트
+    getSettings: builder.query<any, string>({
+      query: (category) => `/settings/${category}`,
+      providesTags: ['Settings'],
     }),
     
-    getPriceChartData: builder.query({
-      query: (params) => ({
-        url: '/dashboard/charts/price',
-        params,
+    updateSettings: builder.mutation<void, { category: string; settings: any }>({
+      query: ({ category, settings }) => ({
+        url: `/settings/${category}`,
+        method: 'PUT',
+        body: settings,
       }),
-      providesTags: ['Price'],
+      invalidatesTags: ['Settings'],
     }),
     
-    getInventoryChartData: builder.query({
-      query: (params) => ({
-        url: '/dashboard/charts/inventory',
-        params,
-      }),
-      providesTags: ['Inventory'],
-    }),
-    
-    // Naver 상품 검색
-    searchNaverProducts: builder.query({
-      query: (params) => ({
-        url: '/products/search/naver',
-        params,
+    testConnection: builder.mutation<{ success: boolean; message: string }, { platform: string; config: any }>({
+      query: (body) => ({
+        url: '/settings/test-connection',
+        method: 'POST',
+        body,
       }),
     }),
     
-    // Shopify 상품 검색
-    searchShopifyProducts: builder.query({
+    // 리포트 엔드포인트
+    generateReport: builder.mutation<Blob, { type: string; params: any }>({
+      query: ({ type, params }) => ({
+        url: `/reports/${type}`,
+        method: 'POST',
+        body: params,
+        responseHandler: (response) => response.blob(),
+      }),
+    }),
+    
+    // 활동 로그
+    getActivities: builder.query<any[], any>({
       query: (params) => ({
-        url: '/products/search/shopify',
+        url: '/activities',
         params,
       }),
     }),
   }),
 });
 
+// Export hooks for usage in functional components
 export const {
+  // Products
   useGetProductsQuery,
   useGetProductBySkuQuery,
+  
+  // Inventory
   useGetInventoryStatusQuery,
   useGetInventoryHistoryQuery,
   useAdjustInventoryMutation,
-  useGetLowStockProductsQuery,
-  usePerformFullSyncMutation,
-  useSyncSingleSkuMutation,
-  useGetSyncStatusQuery,
-  useGetSyncSettingsQuery,
-  useUpdateSyncSettingsMutation,
+  useBulkUpdateInventoryMutation,
+  useGetLowStockItemsQuery,
+  
+  // Prices
+  useGetPriceHistoryQuery,
+  useUpdatePriceMutation,
+  useBulkUpdatePricesMutation,
+  useGetExchangeRateQuery,
+  useUpdateExchangeRateMutation,
+  
+  // Mappings
+  useGetMappingsQuery,
   useCreateMappingMutation,
   useUpdateMappingMutation,
   useDeleteMappingMutation,
   useAutoDiscoverMappingsMutation,
-  useValidateMappingMutation,
-  useBulkUploadMappingsMutation,
+  
+  // Sync
+  usePerformFullSyncMutation,
+  useSyncInventoryMutation,
+  useSyncPricesMutation,
+  
+  // Dashboard
   useGetDashboardStatsQuery,
-  useGetRecentActivitiesQuery,
-  useGetPriceChartDataQuery,
-  useGetInventoryChartDataQuery,
-  useSearchNaverProductsQuery,
-  useSearchShopifyProductsQuery,
+  
+  // Settings
+  useGetSettingsQuery,
+  useUpdateSettingsMutation,
+  useTestConnectionMutation,
+  
+  // Reports
+  useGenerateReportMutation,
+  
+  // Activities
+  useGetActivitiesQuery,
 } = apiSlice;
+
+// 별칭 export 추가
+export const useUpdatePricingMutation = useUpdatePriceMutation;
