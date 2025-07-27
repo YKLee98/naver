@@ -20,6 +20,20 @@ interface NaverOrder {
     unitPrice: number;
     sellerProductCode: string;
   }>;
+  orderer: {
+    name: string;
+    email: string;
+    safeNumber?: string;
+    phoneNumber: string;
+  };
+  delivery: {
+    receiverName: string;
+    receiverTel1: string;
+    receiverZipCode: string;
+    receiverAddress1: string;
+    receiverAddress2: string;
+    deliveryMessage?: string;
+  };
 }
 
 interface NaverOrderListResponse {
@@ -50,6 +64,20 @@ export class NaverOrderService {
       config.headers = { ...config.headers, ...headers };
       return config;
     });
+
+    // 응답 인터셉터 - 에러 처리
+    this.axiosInstance.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        if (error.response?.status === 401) {
+          // 토큰 갱신 후 재시도
+          logger.warn('Naver API token expired, refreshing...');
+          await this.authService.refreshToken();
+          return this.axiosInstance.request(error.config);
+        }
+        throw error;
+      }
+    );
   }
 
   /**
@@ -82,6 +110,7 @@ export class NaverOrderService {
         }
       );
 
+      logger.debug(`Fetched ${response.data.lastChangeStatuses.length} orders`);
       return response.data;
     } catch (error) {
       logger.error('Failed to fetch Naver orders', error);
@@ -90,9 +119,40 @@ export class NaverOrderService {
   }
 
   /**
+   * 최근 결제 완료 주문 조회
+   */
+  async getRecentPaidOrders(since: Date): Promise<NaverOrder[]> {
+    const orders: NaverOrder[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const response = await this.getOrders({
+        lastChangedFrom: since,
+        lastChangedTo: new Date(),
+        lastChangedType: 'PAYED',
+        page,
+        size: 100,
+      });
+
+      orders.push(...response.lastChangeStatuses);
+
+      hasMore = response.lastChangeStatuses.length === 100;
+      page++;
+
+      // Rate limiting을 위한 딜레이
+      if (hasMore) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    return orders;
+  }
+
+  /**
    * 주문 상세 조회
    */
-  async getOrder(orderId: string): Promise<NaverOrder> {
+  async getOrderDetail(orderId: string): Promise<NaverOrder> {
     await this.rateLimiter.consume();
 
     try {
@@ -107,22 +167,32 @@ export class NaverOrderService {
 
       return response.data;
     } catch (error) {
-      logger.error(`Failed to fetch Naver order: ${orderId}`, error);
+      logger.error(`Failed to fetch order detail: ${orderId}`, error);
       throw error;
     }
   }
 
   /**
-   * 발주 확인
+   * 발송 처리
    */
-  async acknowledgeOrder(productOrderId: string): Promise<void> {
+  async dispatchOrder(params: {
+    productOrderIds: string[];
+    deliveryCompanyCode: string;
+    trackingNumber: string;
+    dispatchDate?: Date;
+  }): Promise<void> {
     await this.rateLimiter.consume();
 
     try {
       await retry(
-        () => this.axiosInstance.post(
-          `/external/v1/pay-order/seller/product-orders/${productOrderId}/acknowledge`
-        ),
+        () => this.axiosInstance.put('/external/v1/pay-order/seller/dispatch', {
+          dispatchProductOrders: params.productOrderIds.map(id => ({
+            productOrderId: id,
+            deliveryCompanyCode: params.deliveryCompanyCode,
+            trackingNumber: params.trackingNumber,
+            dispatchDate: (params.dispatchDate || new Date()).toISOString(),
+          })),
+        }),
         {
           retries: 3,
           minTimeout: 1000,
@@ -130,41 +200,191 @@ export class NaverOrderService {
         }
       );
 
-      logger.info(`Naver order acknowledged: ${productOrderId}`);
+      logger.info(`Dispatched orders: ${params.productOrderIds.join(', ')}`);
     } catch (error) {
-      logger.error(`Failed to acknowledge Naver order: ${productOrderId}`, error);
+      logger.error('Failed to dispatch orders', error);
       throw error;
     }
   }
 
   /**
-   * 최근 결제 완료 주문 조회
+   * 주문 취소 승인
    */
-  async getRecentPaidOrders(since: Date): Promise<NaverOrder[]> {
-    const now = new Date();
-    const orders: NaverOrder[] = [];
-    let page = 1;
-    let hasMore = true;
+  async approveCancellation(productOrderId: string): Promise<void> {
+    await this.rateLimiter.consume();
 
-    while (hasMore) {
-      const response = await this.getOrders({
-        lastChangedFrom: since,
-        lastChangedTo: now,
-        lastChangedType: 'PAYED',
-        page,
-        size: 100,
-      });
+    try {
+      await retry(
+        () => this.axiosInstance.post(`/external/v1/pay-order/seller/cancel/approve`, {
+          productOrderId,
+        }),
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 5000,
+        }
+      );
 
-      orders.push(...response.lastChangeStatuses);
-      hasMore = response.lastChangeStatuses.length === 100;
-      page++;
-
-      // Rate limit 고려
-      if (hasMore) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+      logger.info(`Approved cancellation for order: ${productOrderId}`);
+    } catch (error) {
+      logger.error(`Failed to approve cancellation: ${productOrderId}`, error);
+      throw error;
     }
+  }
 
-    return orders;
+  /**
+   * 주문 취소 거부
+   */
+  async rejectCancellation(productOrderId: string, rejectReason: string): Promise<void> {
+    await this.rateLimiter.consume();
+
+    try {
+      await retry(
+        () => this.axiosInstance.post(`/external/v1/pay-order/seller/cancel/reject`, {
+          productOrderId,
+          rejectReason,
+        }),
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 5000,
+        }
+      );
+
+      logger.info(`Rejected cancellation for order: ${productOrderId}`);
+    } catch (error) {
+      logger.error(`Failed to reject cancellation: ${productOrderId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 반품 승인
+   */
+  async approveReturn(productOrderId: string, collectDeliveryCompanyCode?: string): Promise<void> {
+    await this.rateLimiter.consume();
+
+    try {
+      await retry(
+        () => this.axiosInstance.post(`/external/v1/pay-order/seller/return/approve`, {
+          productOrderId,
+          ...(collectDeliveryCompanyCode && { collectDeliveryCompanyCode }),
+        }),
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 5000,
+        }
+      );
+
+      logger.info(`Approved return for order: ${productOrderId}`);
+    } catch (error) {
+      logger.error(`Failed to approve return: ${productOrderId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 반품 거부
+   */
+  async rejectReturn(productOrderId: string, rejectReason: string): Promise<void> {
+    await this.rateLimiter.consume();
+
+    try {
+      await retry(
+        () => this.axiosInstance.post(`/external/v1/pay-order/seller/return/reject`, {
+          productOrderId,
+          rejectReason,
+        }),
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 5000,
+        }
+      );
+
+      logger.info(`Rejected return for order: ${productOrderId}`);
+    } catch (error) {
+      logger.error(`Failed to reject return: ${productOrderId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 교환 승인
+   */
+  async approveExchange(params: {
+    productOrderId: string;
+    collectDeliveryCompanyCode?: string;
+    reDeliveryCompanyCode: string;
+    reDeliveryTrackingNumber: string;
+  }): Promise<void> {
+    await this.rateLimiter.consume();
+
+    try {
+      await retry(
+        () => this.axiosInstance.post(`/external/v1/pay-order/seller/exchange/approve`, params),
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 5000,
+        }
+      );
+
+      logger.info(`Approved exchange for order: ${params.productOrderId}`);
+    } catch (error) {
+      logger.error(`Failed to approve exchange: ${params.productOrderId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 교환 거부
+   */
+  async rejectExchange(productOrderId: string, rejectReason: string): Promise<void> {
+    await this.rateLimiter.consume();
+
+    try {
+      await retry(
+        () => this.axiosInstance.post(`/external/v1/pay-order/seller/exchange/reject`, {
+          productOrderId,
+          rejectReason,
+        }),
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 5000,
+        }
+      );
+
+      logger.info(`Rejected exchange for order: ${productOrderId}`);
+    } catch (error) {
+      logger.error(`Failed to reject exchange: ${productOrderId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 주문별 SKU 추출
+   */
+  extractSkusFromOrder(order: NaverOrder): Array<{ sku: string; quantity: number }> {
+    return order.orderItems.map(item => ({
+      sku: item.sellerProductCode,
+      quantity: item.quantity,
+    }));
+  }
+
+  /**
+   * 주문 상태 확인
+   */
+  isOrderPaid(order: NaverOrder): boolean {
+    return order.orderStatus === 'PAYED';
+  }
+
+  /**
+   * 주문 취소 여부 확인
+   */
+  isOrderCanceled(order: NaverOrder): boolean {
+    return ['CANCELED', 'RETURNED', 'EXCHANGED'].includes(order.orderStatus);
   }
 }

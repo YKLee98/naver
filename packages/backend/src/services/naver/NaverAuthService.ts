@@ -79,48 +79,77 @@ export class NaverAuthService {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
-          timeout: 30000,
+          timeout: 10000,
         }
       );
 
       const tokenData: NaverToken = response.data;
-      
-      // 토큰 캐싱 (만료 5분 전까지)
-      const cacheDuration = tokenData.expires_in - 300;
+
+      // 토큰 캐싱 (만료 시간의 90%만 캐싱)
+      const cacheDuration = Math.floor(tokenData.expires_in * 0.9);
       await this.redis.setex(
         this.tokenKey,
         cacheDuration,
         JSON.stringify(tokenData)
       );
 
-      logger.info('New Naver token obtained and cached');
+      logger.info('Naver token refreshed successfully');
       return tokenData.access_token;
-
-    } catch (error: any) {
-      logger.error('Failed to get Naver access token:', {
-        error: error.message,
-        response: error.response?.data,
-      });
-      throw new Error(`Naver authentication failed: ${error.message}`);
+    } catch (error) {
+      logger.error('Failed to get Naver access token:', error);
+      throw new Error('Failed to authenticate with Naver API');
     }
   }
 
   /**
-   * 토큰 무효화
+   * API 요청용 인증 헤더 생성
    */
-  async invalidateToken(): Promise<void> {
-    await this.redis.del(this.tokenKey);
-    logger.info('Naver token invalidated');
+  async getAuthHeaders(): Promise<Record<string, string>> {
+    const accessToken = await this.getAccessToken();
+    
+    return {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    };
   }
 
   /**
-   * API 요청 헤더 생성
+   * 토큰 유효성 검증
    */
-  async getAuthHeaders(): Promise<Record<string, string>> {
-    const token = await this.getAccessToken();
-    return {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    };
+  async validateToken(): Promise<boolean> {
+    try {
+      const cachedToken = await this.redis.get(this.tokenKey);
+      
+      if (!cachedToken) {
+        return false;
+      }
+
+      const ttl = await this.redis.ttl(this.tokenKey);
+      
+      // TTL이 5분 이상 남아있으면 유효
+      return ttl > 300;
+    } catch (error) {
+      logger.error('Failed to validate token:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 토큰 강제 갱신
+   */
+  async refreshToken(): Promise<string> {
+    // 캐시된 토큰 삭제
+    await this.redis.del(this.tokenKey);
+    
+    // 새 토큰 발급
+    return this.getAccessToken();
+  }
+
+  /**
+   * 토큰 삭제 (로그아웃)
+   */
+  async revokeToken(): Promise<void> {
+    await this.redis.del(this.tokenKey);
+    logger.info('Naver token revoked');
   }
 }
