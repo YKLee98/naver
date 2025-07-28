@@ -1,39 +1,36 @@
 // packages/frontend/src/store/index.ts
 import { configureStore } from '@reduxjs/toolkit';
-import { apiSlice } from './api/apiSlice';
-import inventoryReducer from './slices/inventorySlice';
-import pricingReducer from './slices/pricingSlice';
-import mappingReducer from './slices/mappingSlice';
-import settingsReducer from './slices/settingsSlice';
-import dashboardReducer from './slices/dashboardSlice';
-import notificationReducer from './slices/notificationSlice';
-import websocketReducer from './slices/websocketSlice';
-import syncReducer from './slices/syncSlice';
 import authReducer from './slices/authSlice';
-import uiReducer from './slices/uiSlice';
+import productReducer from './slices/productSlice';
+import inventoryReducer from './slices/inventorySlice';
+import priceReducer from './slices/pricingSlice';
+import syncReducer from './slices/syncSlice';
+import dashboardReducer from './slices/dashboardSlice';
+import settingsReducer from './slices/settingsSlice';
+import notificationReducer from './slices/notificationSlice';
 
 export const store = configureStore({
   reducer: {
-    [apiSlice.reducerPath]: apiSlice.reducer,
-    inventory: inventoryReducer,
-    pricing: pricingReducer,
-    mapping: mappingReducer,
-    settings: settingsReducer,
-    dashboard: dashboardReducer,
-    notification: notificationReducer,
-    notifications: notificationReducer, // alias
-    websocket: websocketReducer,
-    sync: syncReducer,
     auth: authReducer,
-    ui: uiReducer,
+    product: productReducer,
+    inventory: inventoryReducer,
+    price: priceReducer,
+    sync: syncReducer,
+    dashboard: dashboardReducer,
+    settings: settingsReducer,
+    notification: notificationReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
+        // Ignore these action types
         ignoredActions: ['notification/addNotification'],
-        ignoredPaths: ['notification.notifications'],
+        // Ignore these field paths in all actions
+        ignoredActionPaths: ['meta.arg', 'payload.timestamp'],
+        // Ignore these paths in the state
+        ignoredPaths: ['items.dates'],
       },
-    }).concat(apiSlice.middleware),
+    }),
 });
 
 export type RootState = ReturnType<typeof store.getState>;

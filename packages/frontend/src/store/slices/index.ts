@@ -1,7 +1,7 @@
 // packages/frontend/src/store/slices/index.ts
 
 export { default as inventorySlice } from './inventorySlice';
-export { default as pricingSlice } from './pricingSlice';
+export { default as pricingSlice } from './priceSlice';
 export { default as mappingSlice } from './mappingSlice';
 export { default as settingsSlice } from './settingsSlice';
 export { default as dashboardSlice } from './dashboardSlice';

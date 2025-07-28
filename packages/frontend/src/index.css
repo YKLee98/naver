@@ -1,23 +1,66 @@
- {
-  box-sizing: border-box;
+/* packages/frontend/src/index.css */
+* {
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-  width: 100%;
+:root {
+  font-family: 'Inter', 'Noto Sans KR', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+
+  /* Custom properties */
+  --primary-color: #1976d2;
+  --secondary-color: #dc004e;
+  --success-color: #4caf50;
+  --warning-color: #ff9800;
+  --error-color: #f44336;
+  --info-color: #2196f3;
+  
+  --text-primary: rgba(0, 0, 0, 0.87);
+  --text-secondary: rgba(0, 0, 0, 0.6);
+  --text-disabled: rgba(0, 0, 0, 0.38);
+  
+  --background-default: #fafafa;
+  --background-paper: #ffffff;
+  
+  --border-color: rgba(0, 0, 0, 0.12);
+  --hover-color: rgba(0, 0, 0, 0.04);
 }
 
 body {
-  font-family: 'Roboto', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--background-default);
+  color: var(--text-primary);
 }
 
-/* 스크롤바 스타일 */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+a {
+  font-weight: 500;
+  color: var(--primary-color);
+  text-decoration: inherit;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -36,8 +79,11 @@ body {
   background: #555;
 }
 
-/* 로딩 애니메이션 */
+/* Loading animation */
 @keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
   to {
     transform: rotate(360deg);
   }
@@ -47,59 +93,60 @@ body {
   animation: spin 1s linear infinite;
 }
 
-/* 차트 스타일 */
-.recharts-wrapper {
-  font-size: 14px;
+/* Utility classes */
+.text-center {
+  text-align: center;
 }
 
-.recharts-cartesian-axis-tick {
-  font-size: 12px;
+.text-right {
+  text-align: right;
 }
 
-/* 테이블 스타일 */
-.MuiDataGrid-root {
-  border: none;
+.text-left {
+  text-align: left;
 }
 
-.MuiDataGrid-cell:focus {
-  outline: none;
+.mt-1 { margin-top: 0.25rem; }
+.mt-2 { margin-top: 0.5rem; }
+.mt-3 { margin-top: 1rem; }
+.mt-4 { margin-top: 1.5rem; }
+.mt-5 { margin-top: 3rem; }
+
+.mb-1 { margin-bottom: 0.25rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-3 { margin-bottom: 1rem; }
+.mb-4 { margin-bottom: 1.5rem; }
+.mb-5 { margin-bottom: 3rem; }
+
+.p-1 { padding: 0.25rem; }
+.p-2 { padding: 0.5rem; }
+.p-3 { padding: 1rem; }
+.p-4 { padding: 1.5rem; }
+.p-5 { padding: 3rem; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  :root {
+    font-size: 14px;
+  }
 }
 
-.MuiDataGrid-columnHeader:focus {
-  outline: none;
-}
-
-/* 상태 표시 뱃지 */
-.status-badge {
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  text-transform: uppercase;
-}
-
-.status-badge.active {
-  background-color: #4caf50;
-  color: white;
-}
-
-.status-badge.inactive {
-  background-color: #f44336;
-  color: white;
-}
-
-.status-badge.pending {
-  background-color: #ff9800;
-  color: white;
-}
-
-.status-badge.synced {
-  background-color: #2196f3;
-  color: white;
-}
-
-.status-badge.error {
-  background-color: #f44336;
-  color: white;
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text-primary: rgba(255, 255, 255, 0.87);
+    --text-secondary: rgba(255, 255, 255, 0.6);
+    --text-disabled: rgba(255, 255, 255, 0.38);
+    
+    --background-default: #121212;
+    --background-paper: #1e1e1e;
+    
+    --border-color: rgba(255, 255, 255, 0.12);
+    --hover-color: rgba(255, 255, 255, 0.04);
+  }
+  
+  body {
+    background-color: var(--background-default);
+    color: var(--text-primary);
+  }
 }

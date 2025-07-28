@@ -6,6 +6,7 @@ import healthRoutes from './health.routes';
 import priceSyncRoutes from './priceSync.routes';
 import exchangeRateRoutes from './exchangeRate.routes';
 import settingsRoutes from './settings.routes';
+import dashboardRoutes from './dashboard.routes';
 
 const router = Router();
 
@@ -17,6 +18,9 @@ router.use('/webhooks', webhookRoutes);
 
 // API routes
 router.use('/api/v1', apiRoutes);
+
+// Dashboard routes
+router.use('/api/v1/dashboard', dashboardRoutes);
 
 // Price sync routes
 router.use('/api/price-sync', priceSyncRoutes);

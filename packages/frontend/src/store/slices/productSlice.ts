@@ -1,137 +1,136 @@
 // packages/frontend/src/store/slices/productSlice.ts
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { Mapping } from '@/types/models';
-import apiService from '@/services/api';
+import { productApi } from '@/services/api/product.service';
+import { Product, Mapping } from '@/types/models';
 
 interface ProductState {
+  products: Product[];
   mappings: Mapping[];
-  naverSearchResults: any[];
-  shopifySearchResults: any[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
-  };
+  selectedProduct: Product | null;
+  selectedMapping: Mapping | null;
   loading: boolean;
   error: string | null;
+  pagination: {
+    page: number;
+    totalPages: number;
+    total: number;
+  };
 }
 
 const initialState: ProductState = {
+  products: [],
   mappings: [],
-  naverSearchResults: [],
-  shopifySearchResults: [],
-  pagination: {
-    page: 1,
-    limit: 20,
-    total: 0,
-    pages: 0,
-  },
+  selectedProduct: null,
+  selectedMapping: null,
   loading: false,
   error: null,
+  pagination: {
+    page: 1,
+    totalPages: 1,
+    total: 0,
+  },
 };
 
 // Async thunks
-export const fetchProductMappings = createAsyncThunk(
-  'products/fetchMappings',
-  async (params: { page?: number; limit?: number; search?: string } = {}) => {
-    const response = await apiService.get('/mappings', { params });
+export const fetchProducts = createAsyncThunk(
+  'product/fetchProducts',
+  async (params?: Parameters<typeof productApi.getProducts>[0]) => {
+    const response = await productApi.getProducts(params);
+    return response;
+  }
+);
+
+export const fetchMappings = createAsyncThunk(
+  'product/fetchMappings',
+  async (params?: Parameters<typeof productApi.getMappings>[0]) => {
+    const response = await productApi.getMappings(params);
     return response;
   }
 );
 
 export const createMapping = createAsyncThunk(
-  'products/createMapping',
-  async (data: Partial<Mapping>) => {
-    const response = await apiService.post('/mappings', data);
+  'product/createMapping',
+  async (data: Parameters<typeof productApi.createMapping>[0]) => {
+    const response = await productApi.createMapping(data);
     return response;
   }
 );
 
 export const updateMapping = createAsyncThunk(
-  'products/updateMapping',
+  'product/updateMapping',
   async ({ id, data }: { id: string; data: Partial<Mapping> }) => {
-    const response = await apiService.put(`/mappings/${id}`, data);
+    const response = await productApi.updateMapping(id, data);
     return response;
   }
 );
 
 export const deleteMapping = createAsyncThunk(
-  'products/deleteMapping',
+  'product/deleteMapping',
   async (id: string) => {
-    await apiService.delete(`/mappings/${id}`);
+    await productApi.deleteMapping(id);
     return id;
   }
 );
 
-export const autoDiscoverMappings = createAsyncThunk(
-  'products/autoDiscover',
-  async () => {
-    const response = await apiService.post('/mappings/auto-discover');
-    return response;
-  }
-);
-
-export const searchNaverProducts = createAsyncThunk(
-  'products/searchNaver',
-  async (query: string) => {
-    const response = await apiService.get('/products/search/naver', {
-      params: { q: query },
-    });
-    return response;
-  }
-);
-
-export const searchShopifyProducts = createAsyncThunk(
-  'products/searchShopify',
-  async (query: string) => {
-    const response = await apiService.get('/products/search/shopify', {
-      params: { q: query },
-    });
+export const syncMapping = createAsyncThunk(
+  'product/syncMapping',
+  async (id: string) => {
+    const response = await productApi.syncMapping(id);
     return response;
   }
 );
 
 const productSlice = createSlice({
-  name: 'products',
+  name: 'product',
   initialState,
   reducers: {
-    setMappings: (state, action: PayloadAction<Mapping[]>) => {
-      state.mappings = action.payload;
+    setSelectedProduct: (state, action: PayloadAction<Product | null>) => {
+      state.selectedProduct = action.payload;
     },
-    
-    setPagination: (state, action: PayloadAction<ProductState['pagination']>) => {
-      state.pagination = action.payload;
+    setSelectedMapping: (state, action: PayloadAction<Mapping | null>) => {
+      state.selectedMapping = action.payload;
     },
-    
-    clearSearchResults: (state) => {
-      state.naverSearchResults = [];
-      state.shopifySearchResults = [];
-    },
-    
-    setLoading: (state, action: PayloadAction<boolean>) => {
-      state.loading = action.payload;
-    },
-    
-    setError: (state, action: PayloadAction<string | null>) => {
-      state.error = action.payload;
+    clearError: (state) => {
+      state.error = null;
     },
   },
   extraReducers: (builder) => {
     builder
-      // Fetch mappings
-      .addCase(fetchProductMappings.pending, (state) => {
+      // Fetch products
+      .addCase(fetchProducts.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(fetchProductMappings.fulfilled, (state, action) => {
-        state.mappings = action.payload.data;
-        state.pagination = action.payload.pagination;
+      .addCase(fetchProducts.fulfilled, (state, action) => {
         state.loading = false;
+        state.products = action.payload.data;
+        state.pagination = {
+          page: action.payload.page,
+          totalPages: action.payload.totalPages,
+          total: action.payload.total,
+        };
       })
-      .addCase(fetchProductMappings.rejected, (state, action) => {
-        state.error = action.error.message || 'Failed to fetch mappings';
+      .addCase(fetchProducts.rejected, (state, action) => {
         state.loading = false;
+        state.error = action.error.message || '상품 조회에 실패했습니다.';
+      })
+      // Fetch mappings
+      .addCase(fetchMappings.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchMappings.fulfilled, (state, action) => {
+        state.loading = false;
+        state.mappings = action.payload.data;
+        state.pagination = {
+          page: action.payload.page,
+          totalPages: action.payload.totalPages,
+          total: action.payload.total,
+        };
+      })
+      .addCase(fetchMappings.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || '매핑 조회에 실패했습니다.';
       })
       // Create mapping
       .addCase(createMapping.fulfilled, (state, action) => {
@@ -147,24 +146,9 @@ const productSlice = createSlice({
       // Delete mapping
       .addCase(deleteMapping.fulfilled, (state, action) => {
         state.mappings = state.mappings.filter(m => m._id !== action.payload);
-      })
-      // Search Naver
-      .addCase(searchNaverProducts.fulfilled, (state, action) => {
-        state.naverSearchResults = action.payload;
-      })
-      // Search Shopify
-      .addCase(searchShopifyProducts.fulfilled, (state, action) => {
-        state.shopifySearchResults = action.payload;
       });
   },
 });
 
-export const {
-  setMappings,
-  setPagination,
-  clearSearchResults,
-  setLoading,
-  setError,
-} = productSlice.actions;
-
+export const { setSelectedProduct, setSelectedMapping, clearError } = productSlice.actions;
 export default productSlice.reducer;

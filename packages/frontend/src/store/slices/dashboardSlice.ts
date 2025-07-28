@@ -1,13 +1,28 @@
 // packages/frontend/src/store/slices/dashboardSlice.ts
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { DashboardStats, Activity } from '@/types/models';
-import { apiSlice } from '@/store/api/apiSlice';
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { dashboardApi } from '@/services/api/dashboard.service';
+import { DashboardStats, Activity, Notification } from '@/types/models';
 
 interface DashboardState {
   stats: DashboardStats | null;
   activities: Activity[];
-  inventoryChartData: any[];
-  salesChartData: any[];
+  notifications: Notification[];
+  systemHealth: {
+    status: 'healthy' | 'degraded' | 'down';
+    services: {
+      api: boolean;
+      database: boolean;
+      redis: boolean;
+      naver: boolean;
+      shopify: boolean;
+    };
+    lastChecked: string;
+  } | null;
+  chartData: {
+    sales: any;
+    inventory: any;
+    sync: any;
+  };
   loading: boolean;
   error: string | null;
 }
@@ -15,45 +30,79 @@ interface DashboardState {
 const initialState: DashboardState = {
   stats: null,
   activities: [],
-  inventoryChartData: [],
-  salesChartData: [],
+  notifications: [],
+  systemHealth: null,
+  chartData: {
+    sales: null,
+    inventory: null,
+    sync: null,
+  },
   loading: false,
   error: null,
 };
 
 // Async thunks
-export const fetchInventoryChartData = createAsyncThunk(
-  'dashboard/fetchInventoryChart',
+export const fetchDashboardStats = createAsyncThunk(
+  'dashboard/fetchStats',
   async () => {
-    // Simulated data - replace with actual API call
-    return [
-      { category: '앨범', naver: 120, shopify: 118, difference: 2 },
-      { category: '굿즈', naver: 80, shopify: 75, difference: 5 },
-      { category: '포토북', naver: 45, shopify: 45, difference: 0 },
-      { category: '기타', naver: 30, shopify: 28, difference: 2 },
-    ];
+    const response = await dashboardApi.getStats();
+    return response;
   }
 );
 
-export const fetchSalesChartData = createAsyncThunk(
+export const fetchRecentActivity = createAsyncThunk(
+  'dashboard/fetchActivity',
+  async (limit?: number) => {
+    const response = await dashboardApi.getRecentActivity(limit);
+    return response.data;
+  }
+);
+
+export const fetchSalesChart = createAsyncThunk(
   'dashboard/fetchSalesChart',
+  async (params: Parameters<typeof dashboardApi.getSalesChartData>[0]) => {
+    const response = await dashboardApi.getSalesChartData(params);
+    return response;
+  }
+);
+
+export const fetchInventoryChart = createAsyncThunk(
+  'dashboard/fetchInventoryChart',
   async () => {
-    // Simulated data - replace with actual API call
-    const data = [];
-    const now = new Date();
-    
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-      
-      data.push({
-        date: date.toISOString().split('T')[0],
-        naver: Math.floor(Math.random() * 1000000) + 500000,
-        shopify: Math.floor(Math.random() * 800000) + 400000,
-      });
-    }
-    
-    return data;
+    const response = await dashboardApi.getInventoryChartData();
+    return response;
+  }
+);
+
+export const fetchSyncChart = createAsyncThunk(
+  'dashboard/fetchSyncChart',
+  async (params: Parameters<typeof dashboardApi.getSyncChartData>[0]) => {
+    const response = await dashboardApi.getSyncChartData(params);
+    return response;
+  }
+);
+
+export const fetchNotifications = createAsyncThunk(
+  'dashboard/fetchNotifications',
+  async (params?: Parameters<typeof dashboardApi.getNotifications>[0]) => {
+    const response = await dashboardApi.getNotifications(params);
+    return response;
+  }
+);
+
+export const markNotificationRead = createAsyncThunk(
+  'dashboard/markNotificationRead',
+  async (id: string) => {
+    const response = await dashboardApi.markNotificationAsRead(id);
+    return { id, response };
+  }
+);
+
+export const fetchSystemHealth = createAsyncThunk(
+  'dashboard/fetchSystemHealth',
+  async () => {
+    const response = await dashboardApi.getSystemHealth();
+    return response;
   }
 );
 
@@ -61,85 +110,61 @@ const dashboardSlice = createSlice({
   name: 'dashboard',
   initialState,
   reducers: {
-    setStats: (state, action: PayloadAction<DashboardStats>) => {
-      state.stats = action.payload;
+    clearError: (state) => {
+      state.error = null;
     },
-    
-    updateDashboardStats: (state, action: PayloadAction<Partial<DashboardStats>>) => {
-      if (state.stats) {
-        state.stats = { ...state.stats, ...action.payload };
-      }
+    addNotification: (state, action) => {
+      state.notifications.unshift(action.payload);
     },
-    
-    setActivities: (state, action: PayloadAction<Activity[]>) => {
-      state.activities = action.payload;
-    },
-    
-    addActivity: (state, action: PayloadAction<Activity>) => {
-      state.activities.unshift(action.payload);
-      // 최대 50개까지만 보관
-      if (state.activities.length > 50) {
-        state.activities = state.activities.slice(0, 50);
-      }
-      
-      // stats의 recentActivity도 업데이트
-      if (state.stats) {
-        state.stats.recentActivity.unshift(action.payload);
-        if (state.stats.recentActivity.length > 10) {
-          state.stats.recentActivity = state.stats.recentActivity.slice(0, 10);
-        }
-      }
-    },
-    
-    setLoading: (state, action: PayloadAction<boolean>) => {
-      state.loading = action.payload;
-    },
-    
-    setError: (state, action: PayloadAction<string | null>) => {
-      state.error = action.payload;
-    },
-    
-    clearDashboardState: (state) => {
-      return initialState;
+    removeNotification: (state, action) => {
+      state.notifications = state.notifications.filter(n => n.id !== action.payload);
     },
   },
   extraReducers: (builder) => {
     builder
-      // Inventory Chart
-      .addCase(fetchInventoryChartData.pending, (state) => {
+      // Fetch stats
+      .addCase(fetchDashboardStats.pending, (state) => {
         state.loading = true;
+        state.error = null;
       })
-      .addCase(fetchInventoryChartData.fulfilled, (state, action) => {
-        state.inventoryChartData = action.payload;
+      .addCase(fetchDashboardStats.fulfilled, (state, action) => {
         state.loading = false;
+        state.stats = action.payload;
       })
-      .addCase(fetchInventoryChartData.rejected, (state, action) => {
-        state.error = action.error.message || 'Failed to fetch inventory chart data';
+      .addCase(fetchDashboardStats.rejected, (state, action) => {
         state.loading = false;
+        state.error = action.error.message || '대시보드 통계 조회에 실패했습니다.';
       })
-      // Sales Chart
-      .addCase(fetchSalesChartData.pending, (state) => {
-        state.loading = true;
+      // Fetch activities
+      .addCase(fetchRecentActivity.fulfilled, (state, action) => {
+        state.activities = action.payload;
       })
-      .addCase(fetchSalesChartData.fulfilled, (state, action) => {
-        state.salesChartData = action.payload;
-        state.loading = false;
+      // Fetch charts
+      .addCase(fetchSalesChart.fulfilled, (state, action) => {
+        state.chartData.sales = action.payload;
       })
-      .addCase(fetchSalesChartData.rejected, (state, action) => {
-        state.error = action.error.message || 'Failed to fetch sales chart data';
-        state.loading = false;
+      .addCase(fetchInventoryChart.fulfilled, (state, action) => {
+        state.chartData.inventory = action.payload;
+      })
+      .addCase(fetchSyncChart.fulfilled, (state, action) => {
+        state.chartData.sync = action.payload;
+      })
+      // Notifications
+      .addCase(fetchNotifications.fulfilled, (state, action) => {
+        state.notifications = action.payload;
+      })
+      .addCase(markNotificationRead.fulfilled, (state, action) => {
+        const notification = state.notifications.find(n => n.id === action.payload.id);
+        if (notification) {
+          notification.read = true;
+        }
+      })
+      // System health
+      .addCase(fetchSystemHealth.fulfilled, (state, action) => {
+        state.systemHealth = action.payload;
       });
   },
 });
 
-export const {
-  setStats,
-  updateDashboardStats,
-  setActivities,
-  addActivity,
-  setLoading,
-  setError,
-  clearDashboardState,
-} = dashboardSlice.actions;
-
+export const { clearError, addNotification, removeNotification } = dashboardSlice.actions;
 export default dashboardSlice.reducer;
