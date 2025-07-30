@@ -4,7 +4,7 @@ import { App } from './app';
 import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase } from './config/database';
 import { setupCronJobs, setCronServices } from './utils/cronjobs';
-import { getRedisClient } from './config/redis'; 
+import { initializeRedis, getRedisClient } from './config/redis'; 
 import {
   NaverAuthService,
   NaverProductService,
@@ -18,8 +18,11 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 
 async function startServer() {
   try {
+    // 데이터베이스 연결
+    await connectDatabase();
+    
     // Redis 클라이언트 초기화
-    const redis = getRedisClient();
+    const redis = initializeRedis();
     
     // 서비스 인스턴스 생성 (의존성 주입)
     const naverAuthService = new NaverAuthService(redis);
