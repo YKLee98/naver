@@ -1,93 +1,76 @@
+// packages/backend/src/routes/health.routes.ts
 import { Router, Request, Response } from 'express';
-import mongoose from 'mongoose';
+import { connectDatabase } from '../config/database';
 import { getRedisClient } from '../config/redis';
-import { logger } from '../utils/logger';
 
 const router = Router();
 
+/**
+ * 기본 헬스 체크
+ */
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const health = {
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
+    const healthcheck = {
       uptime: process.uptime(),
-      services: {
-        database: 'unknown',
-        redis: 'unknown',
-      },
+      message: 'OK',
+      timestamp: Date.now(),
+      environment: process.env['NODE_ENV'] || 'development',
     };
-
-    // MongoDB 상태 확인
-    if (mongoose.connection.readyState === 1) {
-      health.services.database = 'connected';
-    } else {
-      health.services.database = 'disconnected';
-    }
-
-    // Redis 상태 확인
-    try {
-      const redis = getRedisClient();
-      await redis.ping();
-      health.services.redis = 'connected';
-    } catch (error) {
-      health.services.redis = 'disconnected';
-    }
-
-    // 전체 상태 판단
-    const allHealthy = Object.values(health.services).every(
-      status => status === 'connected'
-    );
-
-    if (!allHealthy) {
-      health.status = 'degraded';
-    }
-
-    res.status(allHealthy ? 200 : 503).json(health);
+    
+    res.status(200).json(healthcheck);
   } catch (error) {
-    logger.error('Health check failed:', error);
-    res.status(503).json({
-      status: 'unhealthy',
-      timestamp: new Date().toISOString(),
-      error: 'Health check failed',
+    res.status(503).json({ 
+      message: 'Service Unavailable',
+      error: error instanceof Error ? error.message : 'Unknown error' 
     });
   }
 });
 
-router.get('/liveness', (req: Request, res: Response) => {
-  res.status(200).json({
-    status: 'alive',
+/**
+ * 상세 헬스 체크 (DB, Redis 포함)
+ */
+router.get('/detailed', async (req: Request, res: Response) => {
+  const checks = {
     timestamp: new Date().toISOString(),
-  });
-});
+    status: 'healthy',
+    checks: {
+      api: 'healthy',
+      database: 'unknown',
+      redis: 'unknown',
+    },
+  };
 
-router.get('/readiness', async (req: Request, res: Response) => {
   try {
-    // 데이터베이스 연결 확인
-    if (mongoose.connection.readyState !== 1) {
-      throw new Error('Database not ready');
+    // MongoDB 체크
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState === 1) {
+      checks.checks.database = 'healthy';
+    } else {
+      checks.checks.database = 'unhealthy';
+      checks.status = 'degraded';
     }
-
-    // Redis 연결 확인
-    const redis = getRedisClient();
-    await redis.ping();
-
-    res.status(200).json({
-      status: 'ready',
-      timestamp: new Date().toISOString(),
-    });
   } catch (error) {
-    res.status(503).json({
-      status: 'not ready',
-      timestamp: new Date().toISOString(),
-      error: error.message,
-    });
+    checks.checks.database = 'unhealthy';
+    checks.status = 'degraded';
   }
+
+  try {
+    // Redis 체크 - try-catch로 안전하게 처리
+    const redis = getRedisClient();
+    if (redis) {
+      await redis.ping();
+      checks.checks.redis = 'healthy';
+    } else {
+      checks.checks.redis = 'not initialized';
+      checks.status = 'degraded';
+    }
+  } catch (error) {
+    checks.checks.redis = 'unhealthy';
+    checks.status = 'degraded';
+  }
+
+  const statusCode = checks.status === 'healthy' ? 200 : 503;
+  res.status(statusCode).json(checks);
 });
 
 export default router;
-
-
-
-
-
-

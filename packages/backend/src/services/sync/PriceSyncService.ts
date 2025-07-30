@@ -329,41 +329,78 @@ export class PriceSyncService extends EventEmitter {
   }
 
   /**
-   * 가격 계산
+   * 간단한 Shopify 가격 계산 메서드 (기존 코드와의 호환성을 위해 추가)
+   */
+  async calculateShopifyPrice(
+    naverPrice: number,
+    margin: number = 1.15
+  ): Promise<number> {
+    try {
+      // 현재 환율 조회
+      const exchangeRate = await this.getCurrentExchangeRate();
+      
+      // 가격 계산
+      const shopifyPrice = this.calculatePrice(
+        naverPrice,
+        exchangeRate,
+        margin,
+        'nearest' // default rounding strategy
+      );
+      
+      return shopifyPrice;
+    } catch (error) {
+      logger.error('Failed to calculate Shopify price', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 가격 계산 헬퍼 메서드
    */
   private calculatePrice(
     naverPrice: number,
     exchangeRate: number,
     marginRate: number,
-    roundingStrategy?: string
+    roundingStrategy: 'up' | 'down' | 'nearest' = 'nearest'
   ): number {
-    const basePrice = naverPrice * exchangeRate * marginRate;
-
+    const baseUsdPrice = naverPrice * exchangeRate;
+    const priceWithMargin = baseUsdPrice * marginRate;
+    
+    // 라운딩 전략 적용
     switch (roundingStrategy) {
       case 'up':
-        return Math.ceil(basePrice * 100) / 100;
+        return Math.ceil(priceWithMargin * 100) / 100;
       case 'down':
-        return Math.floor(basePrice * 100) / 100;
+        return Math.floor(priceWithMargin * 100) / 100;
       case 'nearest':
       default:
-        return Math.round(basePrice * 100) / 100;
+        return Math.round(priceWithMargin * 100) / 100;
     }
   }
 
   /**
-   * 규칙 매칭 확인
+   * 가격 규칙 매칭 확인
    */
   private matchRule(mapping: any, rule: PriceSyncRule): boolean {
-    if (rule.type === 'category' && rule.value === mapping.category) {
-      return true;
+    // 카테고리 매칭
+    if (rule.condition.category && mapping.category !== rule.condition.category) {
+      return false;
     }
-    if (rule.type === 'sku' && rule.value === mapping.sku) {
-      return true;
+    
+    // 가격 범위 매칭
+    if (rule.condition.priceRange) {
+      const { min, max } = rule.condition.priceRange;
+      if (min && mapping.naverPrice < min) return false;
+      if (max && mapping.naverPrice > max) return false;
     }
-    if (rule.type === 'brand' && rule.value === mapping.brand) {
-      return true;
+    
+    // SKU 패턴 매칭
+    if (rule.condition.skuPattern) {
+      const pattern = new RegExp(rule.condition.skuPattern);
+      if (!pattern.test(mapping.sku)) return false;
     }
-    return false;
+    
+    return true;
   }
 
   /**
@@ -468,7 +505,7 @@ export class PriceSyncService extends EventEmitter {
   }
 
   /**
-   * 배열을 청크로 나누기
+   * 배열을 청크로 나누는 헬퍼 메서드
    */
   private chunkArray<T>(array: T[], size: number): T[][] {
     const chunks: T[][] = [];
@@ -551,18 +588,187 @@ export class PriceSyncService extends EventEmitter {
       avgChange: number;
     }>;
   }> {
-    // 분석 로직 구현
+    // 가격 이력 조회
     const history = await PriceHistory.find({
       createdAt: { $gte: dateRange.start, $lte: dateRange.end }
     }).lean();
 
-    // ... 분석 로직
+    // 평균 마진 계산
+    const margins = history
+      .filter(h => h.metadata?.marginRate)
+      .map(h => h.metadata.marginRate);
+    
+    const avgMargin = margins.length > 0
+      ? margins.reduce((sum, m) => sum + m, 0) / margins.length
+      : 0;
+
+    // SKU별 변경 횟수 집계
+    const skuChanges: { [sku: string]: { count: number; changes: number[] } } = {};
+    
+    history.forEach(h => {
+      if (!skuChanges[h.sku]) {
+        skuChanges[h.sku] = { count: 0, changes: [] };
+      }
+      skuChanges[h.sku].count++;
+      
+      if (h.oldPrice && h.newPrice) {
+        const changePercent = ((h.newPrice - h.oldPrice) / h.oldPrice) * 100;
+        skuChanges[h.sku].changes.push(changePercent);
+      }
+    });
+
+    // Top 변경 상품
+    const topChangedProducts = Object.entries(skuChanges)
+      .map(([sku, data]) => ({
+        sku,
+        changeCount: data.count,
+        avgChange: data.changes.length > 0
+          ? data.changes.reduce((sum, c) => sum + c, 0) / data.changes.length
+          : 0
+      }))
+      .sort((a, b) => b.changeCount - a.changeCount)
+      .slice(0, 10);
 
     return {
-      avgMargin: 0,
+      avgMargin,
       priceChanges: history.length,
-      totalRevenue: 0,
-      topChangedProducts: []
+      totalRevenue: 0, // 실제 판매 데이터와 연계 필요
+      topChangedProducts
     };
+  }
+
+  /**
+   * 대량 가격 동기화 (배치 처리)
+   */
+  async syncPricesInBulk(
+    options: PriceSyncOptions & { batchSize?: number }
+  ): Promise<{
+    totalProcessed: number;
+    success: number;
+    failed: number;
+    errors: Array<{ sku: string; error: string }>;
+  }> {
+    const batchSize = options.batchSize || 50;
+    const errors: Array<{ sku: string; error: string }> = [];
+    let totalProcessed = 0;
+    let success = 0;
+    let failed = 0;
+
+    // 활성 매핑 조회
+    const mappings = await ProductMapping.find({ isActive: true })
+      .select('sku')
+      .lean();
+
+    const skus = mappings.map(m => m.sku);
+    const batches = this.chunkArray(skus, batchSize);
+
+    logger.info(`Starting bulk price sync for ${skus.length} SKUs in ${batches.length} batches`);
+
+    for (const [index, batch] of batches.entries()) {
+      logger.info(`Processing batch ${index + 1} of ${batches.length}`);
+      
+      try {
+        const result = await this.syncPrices(batch, options);
+        totalProcessed += batch.length;
+        success += result.success;
+        failed += result.failed;
+        
+        // 에러 수집
+        result.results
+          .filter(r => !r.success)
+          .forEach(r => errors.push({ sku: r.sku, error: r.error || 'Unknown error' }));
+        
+        // Rate limiting between batches
+        if (index < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      } catch (error) {
+        logger.error(`Batch ${index + 1} failed:`, error);
+        batch.forEach(sku => errors.push({ 
+          sku, 
+          error: error instanceof Error ? error.message : 'Batch processing failed' 
+        }));
+        failed += batch.length;
+      }
+    }
+
+    logger.info(`Bulk price sync completed: ${success} success, ${failed} failed`);
+
+    return {
+      totalProcessed,
+      success,
+      failed,
+      errors
+    };
+  }
+
+  /**
+   * 가격 변동 알림 설정 확인
+   */
+  async checkPriceAlerts(sku: string, oldPrice: number, newPrice: number): Promise<void> {
+    const changePercent = Math.abs((newPrice - oldPrice) / oldPrice) * 100;
+    
+    // 20% 이상 변동 시 알림
+    if (changePercent >= 20) {
+      this.emit('price:alert', {
+        sku,
+        oldPrice,
+        newPrice,
+        changePercent,
+        message: `Price changed by ${changePercent.toFixed(2)}% for SKU ${sku}`
+      });
+    }
+  }
+
+  /**
+   * 가격 동기화 작업 스케줄링
+   */
+  async schedulePriceSync(cronExpression: string): Promise<void> {
+    // 스케줄링 로직은 별도의 스케줄러 서비스에서 구현
+    logger.info(`Price sync scheduled with cron: ${cronExpression}`);
+    this.emit('schedule:created', { cron: cronExpression });
+  }
+
+  /**
+   * 가격 롤백
+   */
+  async rollbackPrice(sku: string, targetDate: Date): Promise<void> {
+    // 특정 날짜의 가격으로 롤백
+    const historyRecord = await PriceHistory.findOne({
+      sku,
+      createdAt: { $lte: targetDate }
+    })
+    .sort({ createdAt: -1 })
+    .lean();
+
+    if (!historyRecord) {
+      throw new Error(`No price history found for SKU ${sku} before ${targetDate}`);
+    }
+
+    const mapping = await ProductMapping.findOne({ sku }).lean();
+    if (!mapping) {
+      throw new Error(`Mapping not found for SKU ${sku}`);
+    }
+
+    // Shopify 가격 업데이트
+    await this.shopifyService.updateProductPrice(
+      mapping.shopify_variant_id,
+      historyRecord.oldPrice
+    );
+
+    // 롤백 이력 저장
+    await PriceHistory.create({
+      sku,
+      platform: 'shopify',
+      oldPrice: historyRecord.newPrice,
+      newPrice: historyRecord.oldPrice,
+      reason: `Rollback to ${targetDate.toISOString()}`,
+      metadata: {
+        rollbackTargetDate: targetDate,
+        rollbackFromId: historyRecord._id
+      }
+    });
+
+    logger.info(`Price rolled back for SKU ${sku} to ${historyRecord.oldPrice}`);
   }
 }

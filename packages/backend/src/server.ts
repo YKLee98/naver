@@ -10,7 +10,10 @@ import {
   NaverProductService,
   NaverOrderService
 } from './services/naver';
-import { ShopifyBulkService } from './services/shopify';
+import { 
+  ShopifyBulkService,
+  ShopifyGraphQLService 
+} from './services/shopify';
 import { SyncService } from './services/sync';
 import { ExchangeRateService } from './services/exchangeRate';  
 
@@ -29,11 +32,14 @@ async function startServer() {
     const naverProductService = new NaverProductService(naverAuthService);
     const naverOrderService = new NaverOrderService(naverAuthService);
     const shopifyBulkService = new ShopifyBulkService();
+    const shopifyGraphQLService = new ShopifyGraphQLService();
     
+    // SyncService에 모든 필요한 의존성 전달
     const syncService = new SyncService(
       naverProductService,
       naverOrderService,
       shopifyBulkService,
+      shopifyGraphQLService,
       redis
     );
     
@@ -46,7 +52,7 @@ async function startServer() {
     });
 
     // 앱 인스턴스 생성 및 초기화
-    const app = new App();
+    const app = new App(redis);
     await app.initialize();
     
     // 크론 작업 시작
