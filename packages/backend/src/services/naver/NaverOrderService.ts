@@ -1,9 +1,9 @@
 // packages/backend/src/services/naver/NaverOrderService.ts
-import { AxiosInstance } from 'axios';
+import { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { NaverAuthService } from './NaverAuthService';
 import { NaverRateLimiter } from './NaverRateLimiter';
-import { logger } from '@/utils/logger';
-import { retry } from '@/utils/retry';
+import { logger } from '../../utils/logger';
+import { retry } from '../../utils/retry';
 import axios from 'axios';
 
 interface NaverOrder {
@@ -51,7 +51,7 @@ export class NaverOrderService {
   constructor(authService: NaverAuthService) {
     this.authService = authService;
     this.rateLimiter = new NaverRateLimiter();
-    this.apiBaseUrl = process.env.NAVER_API_BASE_URL!;
+    this.apiBaseUrl = process.env.NAVER_API_BASE_URL || 'https://api.commerce.naver.com';
     
     this.axiosInstance = axios.create({
       baseURL: this.apiBaseUrl,
@@ -59,9 +59,14 @@ export class NaverOrderService {
     });
 
     // 인터셉터 설정
-    this.axiosInstance.interceptors.request.use(async (config) => {
+    this.axiosInstance.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
       const headers = await this.authService.getAuthHeaders();
-      config.headers = { ...config.headers, ...headers };
+      
+      // 헤더 병합
+      Object.keys(headers).forEach(key => {
+        config.headers[key] = headers[key];
+      });
+      
       return config;
     });
 
@@ -73,6 +78,12 @@ export class NaverOrderService {
           // 토큰 갱신 후 재시도
           logger.warn('Naver API token expired, refreshing...');
           await this.authService.refreshToken();
+          
+          const headers = await this.authService.getAuthHeaders();
+          Object.keys(headers).forEach(key => {
+            error.config.headers[key] = headers[key];
+          });
+          
           return this.axiosInstance.request(error.config);
         }
         throw error;

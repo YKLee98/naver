@@ -1,367 +1,577 @@
 // packages/backend/src/controllers/DashboardController.ts
-import { Request, Response } from 'express';
-import { Product, InventoryTransaction, Activity } from '@/models';
-import { catchAsync } from '@/utils/catchAsync';
-import { AppError } from '@/utils/errors';
-import { getRedisClient } from '@/config/redis';
+import { Request, Response, NextFunction } from 'express';
+import { ProductMapping, InventoryTransaction, Activity } from '../models';
+import { getRedisClient } from '../config/redis';
+import { logger } from '../utils/logger';
+
+// Extended Request type with user
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    email: string;
+    role: string;
+  };
+}
+
+interface DashboardStats {
+  totalProducts: number;
+  activeProducts: number;
+  totalSales: {
+    count: number;
+    quantity: number;
+  };
+  syncStatus: {
+    synced: number;
+    pending: number;
+    error: number;
+  };
+  inventoryStatus: {
+    inStock: number;
+    lowStock: number;
+    outOfStock: number;
+  };
+  recentActivity: any[];
+}
+
+interface ChartDataQuery {
+  period?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+interface NotificationQuery {
+  unreadOnly?: string;
+  limit?: string;
+}
 
 export class DashboardController {
   /**
    * 대시보드 통계 조회
    */
-  getStats = catchAsync(async (req: Request, res: Response) => {
-    const [
-      totalProducts,
-      activeProducts,
-      syncedProducts,
-      pendingProducts,
-      errorProducts,
-      recentTransactions,
-    ] = await Promise.all([
-      Product.countDocuments(),
-      Product.countDocuments({ isActive: true }),
-      Product.countDocuments({ syncStatus: 'synced' }),
-      Product.countDocuments({ syncStatus: 'pending' }),
-      Product.countDocuments({ syncStatus: 'error' }),
-      InventoryTransaction.find()
-        .sort({ createdAt: -1 })
-        .limit(100)
-        .lean(),
-    ]);
+  getStats = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const [
+        totalProducts,
+        activeProducts,
+        syncedProducts,
+        pendingProducts,
+        errorProducts,
+        recentTransactions,
+        recentActivity,
+      ] = await Promise.all([
+        ProductMapping.countDocuments(),
+        ProductMapping.countDocuments({ isActive: true }),
+        ProductMapping.countDocuments({ syncStatus: 'synced' }),
+        ProductMapping.countDocuments({ syncStatus: 'pending' }),
+        ProductMapping.countDocuments({ syncStatus: 'error' }),
+        InventoryTransaction.find()
+          .sort({ createdAt: -1 })
+          .limit(100)
+          .lean(),
+        Activity.find()
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .lean(),
+      ]);
 
-    // 재고 상태 계산
-    const inventoryStatus = await Product.aggregate([
-      {
-        $group: {
-          _id: null,
-          inStock: {
-            $sum: {
-              $cond: [{ $gt: ['$naverQuantity', 10] }, 1, 0],
-            },
-          },
-          lowStock: {
-            $sum: {
-              $cond: [
-                { $and: [{ $lte: ['$naverQuantity', 10] }, { $gt: ['$naverQuantity', 0] }] },
-                1,
-                0,
-              ],
-            },
-          },
-          outOfStock: {
-            $sum: {
-              $cond: [{ $eq: ['$naverQuantity', 0] }, 1, 0],
-            },
-          },
+      // 재고 상태 계산 - 최신 트랜잭션 기반
+      const inventoryAggregation = await InventoryTransaction.aggregate([
+        {
+          $sort: { sku: 1, createdAt: -1 }
         },
-      },
-    ]);
-
-    // 최근 활동 조회
-    const recentActivity = await Activity.find()
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
-
-    // 판매 통계 계산
-    const salesStats = recentTransactions.reduce(
-      (acc, transaction) => {
-        if (transaction.transactionType === 'sale') {
-          acc.count++;
-          acc.quantity += Math.abs(transaction.quantity);
+        {
+          $group: {
+            _id: '$sku',
+            latestQuantity: { $first: '$newQuantity' },
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            inStock: {
+              $sum: {
+                $cond: [{ $gt: ['$latestQuantity', 10] }, 1, 0]
+              }
+            },
+            lowStock: {
+              $sum: {
+                $cond: [
+                  { $and: [
+                    { $lte: ['$latestQuantity', 10] },
+                    { $gt: ['$latestQuantity', 0] }
+                  ]},
+                  1,
+                  0
+                ]
+              }
+            },
+            outOfStock: {
+              $sum: {
+                $cond: [{ $eq: ['$latestQuantity', 0] }, 1, 0]
+              }
+            }
+          }
         }
-        return acc;
-      },
-      { count: 0, quantity: 0 }
-    );
+      ]);
 
-    res.json({
-      totalProducts,
-      activeProducts,
-      totalSales: salesStats.count,
-      syncStatus: {
-        synced: syncedProducts,
-        pending: pendingProducts,
-        error: errorProducts,
-      },
-      inventoryStatus: inventoryStatus[0] || {
+      const inventoryStatus = inventoryAggregation[0] || {
         inStock: 0,
         lowStock: 0,
         outOfStock: 0,
-      },
-      recentActivity,
-    });
-  });
+      };
+
+      // 판매 통계 계산
+      const salesStats = recentTransactions.reduce(
+        (acc: { count: number; quantity: number }, transaction: any) => {
+          if (transaction.transactionType === 'sale') {
+            acc.count++;
+            acc.quantity += Math.abs(transaction.quantity);
+          }
+          return acc;
+        },
+        { count: 0, quantity: 0 }
+      );
+
+      const stats: DashboardStats = {
+        totalProducts,
+        activeProducts,
+        totalSales: salesStats,
+        syncStatus: {
+          synced: syncedProducts,
+          pending: pendingProducts,
+          error: errorProducts,
+        },
+        inventoryStatus,
+        recentActivity,
+      };
+
+      logger.debug('Dashboard stats retrieved successfully');
+
+      res.json({
+        success: true,
+        data: stats,
+      });
+    } catch (error) {
+      logger.error('Error in getStats:', error);
+      next(error);
+    }
+  };
 
   /**
    * 최근 활동 조회
    */
-  getRecentActivity = catchAsync(async (req: Request, res: Response) => {
-    const { limit = 10 } = req.query;
+  getRecentActivity = async (
+    req: Request<{}, {}, {}, { limit?: string }>,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { limit = '10' } = req.query;
+      const limitNum = Math.min(parseInt(limit), 100); // 최대 100개
 
-    const activities = await Activity.find()
-      .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .lean();
+      const activities = await Activity.find()
+        .sort({ createdAt: -1 })
+        .limit(limitNum)
+        .lean();
 
-    res.json({
-      data: activities,
-    });
-  });
+      res.json({
+        success: true,
+        data: activities,
+        total: activities.length,
+      });
+    } catch (error) {
+      logger.error('Error in getRecentActivity:', error);
+      next(error);
+    }
+  };
 
   /**
    * 판매 차트 데이터 조회
    */
-  getSalesChartData = catchAsync(async (req: Request, res: Response) => {
-    const { period = 'week', startDate, endDate } = req.query;
+  getSalesChartData = async (
+    req: Request<{}, {}, {}, ChartDataQuery>,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { period = 'week', startDate, endDate } = req.query;
 
-    let dateFilter: any = {};
-    const now = new Date();
+      const dateFilter = this.getDateFilter(period, startDate, endDate);
 
-    if (startDate && endDate) {
-      dateFilter = {
-        createdAt: {
-          $gte: new Date(startDate as string),
-          $lte: new Date(endDate as string),
-        },
-      };
-    } else {
-      // 기본 기간 설정
-      switch (period) {
-        case 'day':
-          dateFilter.createdAt = {
-            $gte: new Date(now.getTime() - 24 * 60 * 60 * 1000),
-          };
-          break;
-        case 'week':
-          dateFilter.createdAt = {
-            $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
-          };
-          break;
-        case 'month':
-          dateFilter.createdAt = {
-            $gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
-          };
-          break;
-      }
-    }
-
-    const salesData = await InventoryTransaction.aggregate([
-      {
-        $match: {
-          ...dateFilter,
-          transactionType: 'sale',
-        },
-      },
-      {
-        $group: {
-          _id: {
-            platform: '$platform',
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+      const salesData = await InventoryTransaction.aggregate([
+        {
+          $match: {
+            ...dateFilter,
+            transactionType: 'sale',
           },
-          count: { $sum: 1 },
-          quantity: { $sum: { $abs: '$quantity' } },
         },
-      },
-      {
-        $sort: { '_id.date': 1 },
-      },
-    ]);
+        {
+          $group: {
+            _id: {
+              platform: '$platform',
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            },
+            count: { $sum: 1 },
+            quantity: { $sum: { $abs: '$quantity' } },
+          },
+        },
+        {
+          $sort: { '_id.date': 1 },
+        },
+        {
+          $group: {
+            _id: '$_id.date',
+            platforms: {
+              $push: {
+                platform: '$_id.platform',
+                count: '$count',
+                quantity: '$quantity',
+              },
+            },
+            totalCount: { $sum: '$count' },
+            totalQuantity: { $sum: '$quantity' },
+          },
+        },
+        {
+          $sort: { _id: 1 },
+        },
+      ]);
 
-    res.json(salesData);
-  });
+      res.json({
+        success: true,
+        data: salesData,
+        period,
+      });
+    } catch (error) {
+      logger.error('Error in getSalesChartData:', error);
+      next(error);
+    }
+  };
 
   /**
    * 재고 차트 데이터 조회
    */
-  getInventoryChartData = catchAsync(async (req: Request, res: Response) => {
-    const inventoryData = await Product.aggregate([
-      {
-        $facet: {
-          byStatus: [
-            {
-              $group: {
-                _id: {
-                  $cond: [
-                    { $gt: ['$naverQuantity', 10] },
-                    'inStock',
-                    {
-                      $cond: [
-                        { $gt: ['$naverQuantity', 0] },
-                        'lowStock',
-                        'outOfStock',
-                      ],
-                    },
-                  ],
-                },
-                count: { $sum: 1 },
-              },
-            },
-          ],
-          byRange: [
-            {
-              $bucket: {
-                groupBy: '$naverQuantity',
-                boundaries: [0, 10, 50, 100, 500, 1000],
-                default: 'over1000',
-                output: {
+  getInventoryChartData = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      // 최신 재고 상태 기반 차트 데이터
+      const inventoryData = await InventoryTransaction.aggregate([
+        {
+          $sort: { sku: 1, createdAt: -1 }
+        },
+        {
+          $group: {
+            _id: '$sku',
+            latestQuantity: { $first: '$newQuantity' },
+            platform: { $first: '$platform' },
+          }
+        },
+        {
+          $facet: {
+            byStatus: [
+              {
+                $group: {
+                  _id: {
+                    $cond: [
+                      { $gt: ['$latestQuantity', 10] },
+                      'inStock',
+                      {
+                        $cond: [
+                          { $gt: ['$latestQuantity', 0] },
+                          'lowStock',
+                          'outOfStock',
+                        ],
+                      },
+                    ],
+                  },
                   count: { $sum: 1 },
                 },
               },
-            },
-          ],
+            ],
+            byRange: [
+              {
+                $bucket: {
+                  groupBy: '$latestQuantity',
+                  boundaries: [0, 10, 50, 100, 500, 1000],
+                  default: 'over1000',
+                  output: {
+                    count: { $sum: 1 },
+                  },
+                },
+              },
+            ],
+            byPlatform: [
+              {
+                $group: {
+                  _id: '$platform',
+                  averageQuantity: { $avg: '$latestQuantity' },
+                  totalQuantity: { $sum: '$latestQuantity' },
+                  count: { $sum: 1 },
+                },
+              },
+            ],
+          },
         },
-      },
-    ]);
+      ]);
 
-    res.json(inventoryData[0]);
-  });
+      res.json({
+        success: true,
+        data: inventoryData[0] || { byStatus: [], byRange: [], byPlatform: [] },
+      });
+    } catch (error) {
+      logger.error('Error in getInventoryChartData:', error);
+      next(error);
+    }
+  };
 
   /**
    * 동기화 차트 데이터 조회
    */
-  getSyncChartData = catchAsync(async (req: Request, res: Response) => {
-    const { period = 'week' } = req.query;
+  getSyncChartData = async (
+    req: Request<{}, {}, {}, ChartDataQuery>,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { period = 'week' } = req.query;
 
-    const dateFilter = this.getDateFilter(period as string);
+      const dateFilter = this.getDateFilter(period);
 
-    const syncData = await Activity.aggregate([
-      {
-        $match: {
-          type: 'sync',
-          ...dateFilter,
-        },
-      },
-      {
-        $group: {
-          _id: {
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-            action: '$action',
+      const syncData = await Activity.aggregate([
+        {
+          $match: {
+            type: 'sync',
+            ...dateFilter,
           },
-          count: { $sum: 1 },
         },
-      },
-      {
-        $sort: { '_id.date': 1 },
-      },
-    ]);
+        {
+          $group: {
+            _id: {
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              action: '$action',
+            },
+            count: { $sum: 1 },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.date',
+            actions: {
+              $push: {
+                action: '$_id.action',
+                count: '$count',
+              },
+            },
+            totalCount: { $sum: '$count' },
+          },
+        },
+        {
+          $sort: { _id: 1 },
+        },
+      ]);
 
-    res.json(syncData);
-  });
+      res.json({
+        success: true,
+        data: syncData,
+        period,
+      });
+    } catch (error) {
+      logger.error('Error in getSyncChartData:', error);
+      next(error);
+    }
+  };
 
   /**
    * 알림 조회
    */
-  getNotifications = catchAsync(async (req: Request, res: Response) => {
-    const { unreadOnly = false, limit = 20 } = req.query;
-    const redis = getRedisClient();
+  getNotifications = async (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { unreadOnly = 'false', limit = '20' } = req.query as NotificationQuery;
+      const redis = getRedisClient();
 
-    const key = `notifications:${req.user?.id || 'system'}`;
-    const notifications = await redis.lrange(key, 0, Number(limit) - 1);
+      const userId = req.user?.id || 'system';
+      const key = `notifications:${userId}`;
+      
+      const notifications = await redis.lrange(key, 0, parseInt(limit) - 1);
 
-    const parsedNotifications = notifications.map(n => JSON.parse(n));
+      const parsedNotifications = notifications.map(n => {
+        try {
+          return JSON.parse(n);
+        } catch (e) {
+          logger.error('Failed to parse notification:', e);
+          return null;
+        }
+      }).filter(Boolean);
 
-    if (unreadOnly === 'true') {
-      const filtered = parsedNotifications.filter(n => !n.read);
-      res.json(filtered);
-    } else {
-      res.json(parsedNotifications);
+      const filtered = unreadOnly === 'true' 
+        ? parsedNotifications.filter(n => !n.read)
+        : parsedNotifications;
+
+      res.json({
+        success: true,
+        data: filtered,
+        total: filtered.length,
+      });
+    } catch (error) {
+      logger.error('Error in getNotifications:', error);
+      next(error);
     }
-  });
+  };
 
   /**
    * 알림 읽음 처리
    */
-  markNotificationAsRead = catchAsync(async (req: Request, res: Response) => {
-    const { id } = req.params;
-    const redis = getRedisClient();
+  markNotificationAsRead = async (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const redis = getRedisClient();
 
-    const key = `notifications:${req.user?.id || 'system'}`;
-    const notifications = await redis.lrange(key, 0, -1);
+      const userId = req.user?.id || 'system';
+      const key = `notifications:${userId}`;
+      
+      const notifications = await redis.lrange(key, 0, -1);
 
-    const updated = notifications.map(n => {
-      const notification = JSON.parse(n);
-      if (notification.id === id) {
-        notification.read = true;
+      const updated = notifications.map(n => {
+        const notification = JSON.parse(n);
+        if (notification.id === id) {
+          notification.read = true;
+          notification.readAt = new Date();
+        }
+        return JSON.stringify(notification);
+      });
+
+      await redis.del(key);
+      if (updated.length > 0) {
+        await redis.rpush(key, ...updated);
       }
-      return JSON.stringify(notification);
-    });
 
-    await redis.del(key);
-    await redis.rpush(key, ...updated);
+      logger.info(`Notification marked as read: ${id}`);
 
-    res.json({ message: 'Notification marked as read' });
-  });
+      res.json({
+        success: true,
+        message: 'Notification marked as read',
+      });
+    } catch (error) {
+      logger.error('Error in markNotificationAsRead:', error);
+      next(error);
+    }
+  };
 
   /**
    * 시스템 상태 조회
    */
-  getSystemHealth = catchAsync(async (req: Request, res: Response) => {
-    const redis = getRedisClient();
-
-    const checks = {
-      database: false,
-      redis: false,
-      naver: false,
-      shopify: false,
-    };
-
-    // Database 체크
+  getSystemHealth = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
-      await Product.findOne().limit(1);
-      checks.database = true;
+      const redis = getRedisClient();
+
+      const checks = {
+        database: false,
+        redis: false,
+        naver: false,
+        shopify: false,
+      };
+
+      // Database 체크
+      try {
+        await ProductMapping.findOne().limit(1);
+        checks.database = true;
+      } catch (error) {
+        logger.error('Database health check failed:', error);
+        checks.database = false;
+      }
+
+      // Redis 체크
+      try {
+        await redis.ping();
+        checks.redis = true;
+      } catch (error) {
+        logger.error('Redis health check failed:', error);
+        checks.redis = false;
+      }
+
+      // API 연결 상태 (캐시된 값 사용)
+      const [naverHealth, shopifyHealth] = await Promise.all([
+        redis.get('health:naver'),
+        redis.get('health:shopify'),
+      ]);
+
+      checks.naver = naverHealth === 'ok';
+      checks.shopify = shopifyHealth === 'ok';
+
+      const anyDown = Object.values(checks).some(v => v === false);
+      const status = anyDown ? 'degraded' : 'healthy';
+
+      res.json({
+        success: true,
+        data: {
+          status,
+          services: {
+            api: true,
+            ...checks,
+          },
+          lastChecked: new Date().toISOString(),
+        },
+      });
     } catch (error) {
-      checks.database = false;
+      logger.error('Error in getSystemHealth:', error);
+      next(error);
     }
-
-    // Redis 체크
-    try {
-      await redis.ping();
-      checks.redis = true;
-    } catch (error) {
-      checks.redis = false;
-    }
-
-    // API 연결 상태 (캐시된 값 사용)
-    checks.naver = (await redis.get('health:naver')) === 'ok';
-    checks.shopify = (await redis.get('health:shopify')) === 'ok';
-
-    const allHealthy = Object.values(checks).every(v => v === true);
-    const anyDown = Object.values(checks).some(v => v === false);
-
-    res.json({
-      status: anyDown ? 'degraded' : 'healthy',
-      services: {
-        api: true,
-        ...checks,
-      },
-      lastChecked: new Date().toISOString(),
-    });
-  });
+  };
 
   /**
    * 날짜 필터 생성 헬퍼
    */
-  private getDateFilter(period: string): any {
+  private getDateFilter(period: string, startDate?: string, endDate?: string): any {
+    if (startDate && endDate) {
+      return {
+        createdAt: {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        },
+      };
+    }
+
     const now = new Date();
-    let startDate: Date;
+    let start: Date;
 
     switch (period) {
       case 'day':
-        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         break;
       case 'week':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         break;
       case 'month':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case 'year':
+        start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
         break;
       default:
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     }
 
     return {
-      createdAt: { $gte: startDate },
+      createdAt: { $gte: start },
     };
   }
 }

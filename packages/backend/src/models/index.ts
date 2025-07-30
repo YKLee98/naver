@@ -8,3 +8,4 @@ export * from './PriceSyncJob';
 export { PriceSyncRule } from './PriceSyncRule';
 export { SystemLog } from './SystemLog';
 export { Settings } from './Settings';
+export { OrderSyncStatus } from './OrderSyncStatus';

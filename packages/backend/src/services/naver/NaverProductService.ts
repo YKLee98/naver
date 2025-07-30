@@ -1,9 +1,9 @@
 // packages/backend/src/services/naver/NaverProductService.ts
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { NaverAuthService } from './NaverAuthService';
 import { NaverRateLimiter } from './NaverRateLimiter';
-import { logger } from '@/utils/logger';
-import { AppError } from '@/utils/errors';
+import { logger } from '../../utils/logger';
+import { AppError } from '../../utils/errors';
 
 interface NaverProduct {
   productId: string;
@@ -13,6 +13,7 @@ interface NaverProduct {
   productStatusType: string;
   saleStartDate: string;
   saleEndDate: string;
+  sellerManagementCode?: string;
   images: {
     imageUrl: string;
     imageOrder: number;
@@ -22,6 +23,13 @@ interface NaverProduct {
 interface NaverInventoryUpdate {
   productId: string;
   stockQuantity: number;
+}
+
+interface NaverProductListResponse {
+  contents: NaverProduct[];
+  total: number;
+  page: number;
+  size: number;
 }
 
 export class NaverProductService {
@@ -39,9 +47,14 @@ export class NaverProductService {
     });
 
     // 요청 인터셉터 - 인증 헤더 추가
-    this.apiClient.interceptors.request.use(async (config) => {
+    this.apiClient.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
       const headers = await this.authService.getAuthHeaders();
-      config.headers = { ...config.headers, ...headers };
+      
+      // 헤더 병합을 위한 안전한 방식
+      Object.keys(headers).forEach(key => {
+        config.headers[key] = headers[key];
+      });
+      
       return config;
     });
 
@@ -51,10 +64,17 @@ export class NaverProductService {
       async (error) => {
         if (error.response?.status === 401) {
           // 토큰 갱신 후 재시도
-          await this.authService.refreshAccessToken();
+          logger.warn('Naver API token expired, refreshing...');
+          await this.authService.refreshToken();
+          
           const originalRequest = error.config;
           const headers = await this.authService.getAuthHeaders();
-          originalRequest.headers = { ...originalRequest.headers, ...headers };
+          
+          // 재시도 요청에 새 헤더 적용
+          Object.keys(headers).forEach(key => {
+            originalRequest.headers[key] = headers[key];
+          });
+          
           return this.apiClient(originalRequest);
         }
         throw error;
@@ -69,12 +89,8 @@ export class NaverProductService {
     page?: number;
     size?: number;
     productStatusType?: string;
-  }): Promise<{
-    contents: NaverProduct[];
-    total: number;
-    page: number;
-    size: number;
-  }> {
+    searchKeyword?: string;
+  }): Promise<NaverProductListResponse> {
     await this.rateLimiter.consume();
 
     try {
@@ -146,6 +162,45 @@ export class NaverProductService {
     } catch (error) {
       logger.error('Failed to update Naver inventory:', error);
       throw new AppError('Failed to update inventory on Naver', 500);
+    }
+  }
+
+  /**
+   * 재고 수량 업데이트 (단일 상품)
+   */
+  async updateStock(
+    productId: string,
+    quantity: number,
+    operation: 'ADD' | 'SUBTRACT' | 'SET'
+  ): Promise<void> {
+    await this.rateLimiter.consume();
+
+    try {
+      // 현재 재고 조회 (SET이 아닌 경우)
+      let newQuantity = quantity;
+      
+      if (operation !== 'SET') {
+        const currentStock = await this.getInventory([productId]);
+        const currentQuantity = currentStock.get(productId) || 0;
+        
+        if (operation === 'ADD') {
+          newQuantity = currentQuantity + quantity;
+        } else if (operation === 'SUBTRACT') {
+          newQuantity = Math.max(0, currentQuantity - quantity);
+        }
+      }
+
+      await this.updateInventory([
+        {
+          productId,
+          stockQuantity: newQuantity,
+        },
+      ]);
+
+      logger.info(`Updated stock for product ${productId}: ${operation} ${quantity} (new: ${newQuantity})`);
+    } catch (error) {
+      logger.error(`Failed to update stock for ${productId}:`, error);
+      throw new AppError('Failed to update stock on Naver', 500);
     }
   }
 
@@ -223,5 +278,39 @@ export class NaverProductService {
       // 청크 간 지연 (rate limit 고려)
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
+  }
+
+  /**
+   * 상품 검색 (키워드 기반)
+   * 네이버 API가 직접적인 검색을 지원하지 않는 경우 클라이언트 측 필터링
+   */
+  async searchProducts(
+    keyword: string,
+    params?: {
+      page?: number;
+      size?: number;
+    }
+  ): Promise<NaverProductListResponse> {
+    const products = await this.getProducts({
+      ...params,
+      searchKeyword: keyword,
+    });
+
+    // 클라이언트 측 필터링 (API가 검색을 지원하지 않는 경우)
+    if (keyword && products.contents) {
+      const filtered = products.contents.filter(product => 
+        product.name.toLowerCase().includes(keyword.toLowerCase()) ||
+        product.productId.includes(keyword) ||
+        product.sellerManagementCode?.includes(keyword)
+      );
+
+      return {
+        ...products,
+        contents: filtered,
+        total: filtered.length,
+      };
+    }
+
+    return products;
   }
 }
