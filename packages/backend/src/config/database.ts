@@ -1,8 +1,9 @@
+// packages/backend/src/config/database.ts
 import mongoose from 'mongoose';
 import { logger } from '../utils/logger';
 
 export async function connectDatabase(): Promise<void> {
-  const uri = process.env.MONGODB_URI;
+  const uri = process.env['MONGODB_URI'];
   
   if (!uri) {
     throw new Error('MONGODB_URI environment variable is not defined');
@@ -61,5 +62,3 @@ export async function disconnectDatabase(): Promise<void> {
   await mongoose.connection.close();
   logger.info('MongoDB connection closed');
 }
-
-

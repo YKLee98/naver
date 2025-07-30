@@ -18,7 +18,7 @@ export interface IPriceSyncJob extends Document {
     roundingStrategy?: 'up' | 'down' | 'nearest';
     skus?: string[];
   };
-  errors: Array<{
+  syncErrors: Array<{  // errors를 syncErrors로 변경
     sku: string;
     error: string;
     timestamp: Date;
@@ -87,7 +87,7 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     },
     skus: [String]
   },
-  errors: [{
+  syncErrors: [{  // errors를 syncErrors로 변경
     sku: String,
     error: String,
     timestamp: {

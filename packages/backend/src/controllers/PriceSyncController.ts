@@ -380,7 +380,7 @@ export class PriceSyncController {
       startedAt: job.startedAt,
       completedAt: job.completedAt,
       executionTime: job.executionTime,
-      errors: job.errors
+      syncErrors: job.syncErrors  // errors를 syncErrors로 변경
     });
   });
 
@@ -509,7 +509,7 @@ export class PriceSyncController {
 
       // 실패 항목 기록
       if (result.results) {
-        job.errors = result.results
+        job.syncErrors = result.results  // errors를 syncErrors로 변경
           .filter(r => !r.success)
           .map(r => ({
             sku: r.sku,
@@ -532,7 +532,7 @@ export class PriceSyncController {
       await PriceSyncJob.findByIdAndUpdate(jobId, {
         status: 'failed',
         completedAt: new Date(),
-        errors: [{
+        syncErrors: [{  // errors를 syncErrors로 변경
           sku: 'system',
           error: error.message,
           timestamp: new Date()

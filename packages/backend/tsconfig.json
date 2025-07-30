@@ -16,7 +16,8 @@
       "@websocket/*": ["websocket/*"]
     },
     "lib": ["ES2022"],
-    "types": ["node", "jest"]
+    "types": ["node", "jest"],
+    "noPropertyAccessFromIndexSignature": false 
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "**/*.test.ts", "**/*.spec.ts"],

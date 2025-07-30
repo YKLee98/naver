@@ -4,7 +4,7 @@ import { ProductMapping } from '../models';
 import { NaverProductService } from '../services/naver';
 import { ShopifyGraphQLService } from '../services/shopify';
 import { AppError } from '../middlewares/error.middleware';
-import { logger } from '../utils/logger';
+// logger 제거 (사용하지 않음)
 
 export class ProductController {
   private naverProductService: NaverProductService;
@@ -98,10 +98,13 @@ export class ProductController {
         throw new AppError('Product mapping not found', 404);
       }
 
+      // SKU가 undefined가 아님을 보장
+      const skuValue = mapping.sku;
+      
       // 실시간 정보 조회
       const [naverProduct, shopifyVariant] = await Promise.all([
         this.naverProductService.getProduct(mapping.naverProductId),
-        this.shopifyGraphQLService.findVariantBySku(sku),
+        this.shopifyGraphQLService.findVariantBySku(skuValue),
       ]);
 
       res.json({
@@ -128,11 +131,14 @@ export class ProductController {
     try {
       const { keyword, page = 1, size = 20 } = req.query;
 
-      const result = await this.naverProductService.getProducts({
-        searchKeyword: keyword as string,
-        page: Number(page),
-        size: Number(size),
-      });
+      // NaverProductService의 getProducts 메서드가 받는 파라미터 타입에 맞게 수정
+      const result = await this.naverProductService.searchProducts(
+        keyword as string,
+        {
+          page: Number(page),
+          size: Number(size),
+        }
+      );
 
       res.json({
         success: true,
@@ -153,7 +159,10 @@ export class ProductController {
   ): Promise<void> => {
     try {
       const { vendor = 'album' } = req.query;
-
+      const result = await this.naverProductService.getProducts({
+        page: Number(page),
+        size: Number(size) 
+       })
       const products = await this.shopifyGraphQLService.getProductsByVendor(
         vendor as string
       );
@@ -167,4 +176,3 @@ export class ProductController {
     }
   };
 }
-

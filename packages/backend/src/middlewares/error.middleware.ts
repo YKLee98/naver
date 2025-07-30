@@ -19,7 +19,7 @@ export const errorMiddleware = async (
   err: Error | AppError,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction  // next를 _next로 변경 (사용하지 않음을 표시)
 ): Promise<void> => {
   const error = err as AppError;
   const statusCode = error.statusCode || 500;
@@ -62,6 +62,6 @@ export const errorMiddleware = async (
   res.status(statusCode).json({
     success: false,
     message,
-    ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
+    ...(process.env['NODE_ENV'] === 'development' && { stack: error.stack }),  // NODE_ENV를 ['NODE_ENV']로 변경
   });
 };

@@ -21,12 +21,13 @@ export const authMiddleware = async (
 ): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
-    const token =
-      typeof authHeader === 'string'
-        ? authHeader.replace('Bearer ', '')
-        : Array.isArray(authHeader)
-        ? authHeader[0].replace('Bearer ', '')
-        : undefined;
+    let token: string | undefined;
+
+    if (typeof authHeader === 'string') {
+      token = authHeader.replace('Bearer ', '');
+    } else if (Array.isArray(authHeader) && authHeader.length > 0 && authHeader[0]) {
+      token = authHeader[0].replace('Bearer ', '');
+    }
 
     if (!token) {
       res.status(401).json({
@@ -52,4 +53,3 @@ export const authMiddleware = async (
     });
   }
 };
-

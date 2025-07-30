@@ -4,7 +4,7 @@ import { App } from './app';
 import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase } from './config/database';
 import { setupCronJobs, setCronServices } from './utils/cronjobs';
-import { initializeRedis, getRedisClient } from './config/redis'; 
+import { connectRedis } from './config/redis'; 
 import {
   NaverAuthService,
   NaverProductService,
@@ -14,7 +14,7 @@ import { ShopifyBulkService } from './services/shopify';
 import { SyncService } from './services/sync';
 import { ExchangeRateService } from './services/exchangeRate';  
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT = parseInt(process.env['PORT'] || '3000', 10);
 
 async function startServer() {
   try {
@@ -22,7 +22,7 @@ async function startServer() {
     await connectDatabase();
     
     // Redis 클라이언트 초기화
-    const redis = initializeRedis();
+    const redis = connectRedis();
     
     // 서비스 인스턴스 생성 (의존성 주입)
     const naverAuthService = new NaverAuthService(redis);

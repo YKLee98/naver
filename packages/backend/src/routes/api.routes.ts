@@ -1,3 +1,4 @@
+// packages/backend/src/routes/api.routes.ts
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares';
 import { 
@@ -19,8 +20,8 @@ import {
 import { 
   SyncService,
   InventorySyncService,
-  MappingService,
-  PriceSyncService
+  MappingService
+  // PriceSyncService 제거
 } from '../services/sync';
 import { getRedisClient } from '../config/redis';
 
@@ -91,12 +92,10 @@ router.post('/mappings/auto-discover', mappingController.autoDiscoverMappings);
 router.post('/mappings/:id/validate', mappingController.validateMapping);
 router.post('/mappings/bulk', mappingController.bulkUploadMappings);
 
-// 대시보드 관련 라우트
-router.get('/dashboard/statistics', dashboardController.getStatistics);
-router.get('/dashboard/activities', dashboardController.getRecentActivities);
-router.get('/dashboard/charts/price', dashboardController.getPriceChartData);
+// 대시보드 관련 라우트 - 메서드 이름 수정
+router.get('/dashboard/statistics', dashboardController.getStats);
+router.get('/dashboard/activities', dashboardController.getRecentActivity);
+router.get('/dashboard/charts/price', dashboardController.getSalesChartData);
 router.get('/dashboard/charts/inventory', dashboardController.getInventoryChartData);
 
 export default router;
-
-
