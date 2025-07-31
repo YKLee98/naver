@@ -18,7 +18,7 @@ export class ShopifyService {
       apiKey: process.env.SHOPIFY_API_KEY!,
       apiSecretKey: process.env.SHOPIFY_API_SECRET!,
       scopes: ['read_products', 'write_products', 'read_inventory', 'write_inventory', 'read_orders'],
-      hostName: process.env.HOST_NAME!,
+      hostName: process.env.SHOPIFY_SHOP_DOMAIN!,
       apiVersion: (process.env.SHOPIFY_API_VERSION as import('@shopify/shopify-api').ApiVersion) || '2025-04',
       isEmbeddedApp: false,
       isCustomStoreApp: true, // Private app 사용 시
