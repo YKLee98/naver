@@ -8,7 +8,7 @@ import { createServer, Server } from 'http';
 import { Redis } from 'ioredis';
 import { config } from './config';
 import { logger, stream } from './utils/logger';
-import { errorHandler } from './middlewares/error.middleware';
+import { errorMiddleware } from './middlewares/error.middleware';  // 수정된 부분
 import { rateLimiter } from './middlewares/rateLimit.middleware';
 
 // Route creators
@@ -114,7 +114,7 @@ export class App {
    */
   private setupErrorHandlers(): void {
     // Global error handler
-    this.app.use(errorHandler);
+    this.app.use(errorMiddleware);  // 수정된 부분
   }
 
   /**

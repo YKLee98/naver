@@ -1,4 +1,5 @@
 // packages/backend/src/controllers/index.ts
+export { AuthController } from './AuthController';
 export { ProductController } from './ProductController';
 export { InventoryController } from './InventoryController';
 export { SyncController } from './SyncController';

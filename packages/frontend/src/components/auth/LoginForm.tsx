@@ -15,10 +15,11 @@ import {
   Email as EmailIcon,
   Lock as LockIcon,
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useFormik } from 'formik';
 import * as yup from 'yup';
-import authService from '@/services/auth';
+import { useAppDispatch, useAppSelector } from '@/hooks';
+import { login } from '@/store/slices/authSlice';
 
 const validationSchema = yup.object({
   email: yup
@@ -33,9 +34,13 @@ const validationSchema = yup.object({
 
 const LoginForm: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const dispatch = useAppDispatch();
+  const { loading, error } = useAppSelector((state) => state.auth);
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // 로그인 후 이동할 경로 (이전 페이지 또는 대시보드)
+  const from = location.state?.from?.pathname || '/dashboard';
 
   const formik = useFormik({
     initialValues: {
@@ -44,16 +49,12 @@ const LoginForm: React.FC = () => {
     },
     validationSchema,
     onSubmit: async (values) => {
-      setLoading(true);
-      setError(null);
-      
       try {
-        await authService.login(values);
-        navigate('/dashboard');
-      } catch (err: any) {
-        setError(err.response?.data?.message || '로그인에 실패했습니다.');
-      } finally {
-        setLoading(false);
+        await dispatch(login(values)).unwrap();
+        navigate(from, { replace: true });
+      } catch (err) {
+        // 에러는 Redux state에서 처리
+        console.error('Login failed:', err);
       }
     },
   });
@@ -80,6 +81,8 @@ const LoginForm: React.FC = () => {
         error={formik.touched.email && Boolean(formik.errors.email)}
         helperText={formik.touched.email && formik.errors.email}
         margin="normal"
+        autoComplete="email"
+        autoFocus
         InputProps={{
           startAdornment: (
             <InputAdornment position="start">
@@ -100,6 +103,7 @@ const LoginForm: React.FC = () => {
         error={formik.touched.password && Boolean(formik.errors.password)}
         helperText={formik.touched.password && formik.errors.password}
         margin="normal"
+        autoComplete="current-password"
         InputProps={{
           startAdornment: (
             <InputAdornment position="start">
@@ -125,7 +129,7 @@ const LoginForm: React.FC = () => {
         fullWidth
         variant="contained"
         sx={{ mt: 3, mb: 2 }}
-        disabled={loading}
+        disabled={loading || !formik.isValid}
       >
         {loading ? <CircularProgress size={24} /> : '로그인'}
       </Button>
@@ -138,6 +142,15 @@ const LoginForm: React.FC = () => {
           비밀번호를 잊으셨나요?
         </Button>
       </Box>
+
+      {/* 개발 환경에서 테스트 계정 정보 표시 */}
+      {process.env.NODE_ENV === 'development' && (
+        <Alert severity="info" sx={{ mt: 2 }}>
+          <strong>테스트 계정:</strong><br />
+          이메일: admin@example.com<br />
+          비밀번호: password123
+        </Alert>
+      )}
     </Box>
   );
 };

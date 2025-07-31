@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "seed": "ts-node -r tsconfig-paths/register src/scripts/seed.ts",
     "migrate": "ts-node -r tsconfig-paths/register src/scripts/migrate.ts",
-    "sync-check": "ts-node -r tsconfig-paths/register src/scripts/sync-check.ts"
+    "sync-check": "ts-node -r tsconfig-paths/register src/scripts/sync-check.ts",
+    "seed:admin": "ts-node src/scripts/seedAdmin.ts"
   },
   "dependencies": {
     "@shopify/shopify-api": "^8.1.1",

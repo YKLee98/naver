@@ -1,4 +1,5 @@
 // packages/backend/src/models/index.ts
+export { User } from './User';
 export { ProductMapping } from './ProductMapping';
 export { InventoryTransaction } from './InventoryTransaction';
 export { PriceHistory } from './PriceHistory';

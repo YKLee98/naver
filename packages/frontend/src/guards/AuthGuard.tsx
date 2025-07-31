@@ -1,30 +1,18 @@
 // packages/frontend/src/guards/AuthGuard.tsx
-import React, { useEffect } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import React from 'react';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import { useAppSelector } from '@/hooks';
-import authService from '@/services/auth';
 
 interface AuthGuardProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   const location = useLocation();
   const { isAuthenticated, loading } = useAppSelector((state) => state.auth);
 
-  useEffect(() => {
-    // Check if user is authenticated on mount
-    const checkAuth = async () => {
-      const token = authService.getToken();
-      if (token) {
-        // Verify token validity
-        await authService.verifyToken();
-      }
-    };
-    checkAuth();
-  }, []);
-
+  // 초기 로딩 중일 때
   if (loading) {
     return (
       <Box
@@ -40,12 +28,14 @@ const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
     );
   }
 
+  // 인증되지 않았을 때
   if (!isAuthenticated) {
-    // Redirect to login page but save the attempted location
+    // 로그인 페이지로 리다이렉트하면서 원래 가려던 경로 저장
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  return <>{children}</>;
+  // 인증되었을 때
+  return children ? <>{children}</> : <Outlet />;
 };
 
 export default AuthGuard;

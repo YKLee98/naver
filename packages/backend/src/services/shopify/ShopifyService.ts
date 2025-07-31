@@ -22,6 +22,7 @@ export class ShopifyService {
       apiVersion: (process.env.SHOPIFY_API_VERSION as import('@shopify/shopify-api').ApiVersion) || '2025-04',
       isEmbeddedApp: false,
       isCustomStoreApp: true, // Private app 사용 시
+      adminApiAccessToken:process.env.SHOPIFY_ACCESS_TOKEN!
     });
   }
 

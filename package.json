@@ -19,6 +19,7 @@
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up",
     "docker:down": "docker-compose down"
+
   },
   "devDependencies": {
     "@types/lodash": "^4.17.20",
