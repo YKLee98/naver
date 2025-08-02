@@ -24,6 +24,12 @@ interface SyncState {
     };
   };
   schedules: any[];
+  syncProgress: {
+    current: number;
+    total: number;
+    percentage: number;
+    message?: string;
+  };
   loading: boolean;
   error: string | null;
 }
@@ -35,11 +41,16 @@ const initialState: SyncState = {
     isRunning: false,
   },
   schedules: [],
+  syncProgress: {
+    current: 0,
+    total: 0,
+    percentage: 0,
+  },
   loading: false,
   error: null,
 };
 
-// Async thunks
+// Async thunks - 기존 이름 유지하면서 alias 추가
 export const fetchSyncJobs = createAsyncThunk(
   'sync/fetchJobs',
   async (params?: Parameters<typeof syncApi.getSyncJobs>[0]) => {
@@ -56,34 +67,35 @@ export const fetchSyncStatus = createAsyncThunk(
   }
 );
 
-export const startFullSync = createAsyncThunk(
-  'sync/startFull',
+// Renamed async thunks to match index.ts expectations
+export const performFullSync = createAsyncThunk(
+  'sync/performFull',
   async () => {
     const response = await syncApi.startFullSync();
     return response;
   }
 );
 
-export const startInventorySync = createAsyncThunk(
-  'sync/startInventory',
+export const performInventorySync = createAsyncThunk(
+  'sync/performInventory',
   async (skus?: string[]) => {
     const response = await syncApi.startInventorySync(skus);
     return response;
   }
 );
 
-export const startPriceSync = createAsyncThunk(
-  'sync/startPrice',
+export const performPriceSync = createAsyncThunk(
+  'sync/performPrice',
   async (skus?: string[]) => {
     const response = await syncApi.startPriceSync(skus);
     return response;
   }
 );
 
-export const startMappingSync = createAsyncThunk(
-  'sync/startMapping',
-  async () => {
-    const response = await syncApi.startMappingSync();
+export const syncSingleProduct = createAsyncThunk(
+  'sync/singleProduct',
+  async (sku: string) => {
+    const response = await syncApi.startInventorySync([sku]);
     return response;
   }
 );
@@ -127,6 +139,66 @@ const syncSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
+    // 필요한 동기 액션들 추가
+    startSync: (state) => {
+      state.status.isRunning = true;
+      state.error = null;
+      state.syncProgress = {
+        current: 0,
+        total: 0,
+        percentage: 0,
+      };
+    },
+    syncSuccess: (state, action: PayloadAction<{
+      type: string;
+      stats: { processed: number; success: number; failed: number };
+    }>) => {
+      state.status.isRunning = false;
+      state.status.lastSync = {
+        type: action.payload.type,
+        completedAt: new Date().toISOString(),
+        status: 'success',
+        stats: action.payload.stats,
+      };
+      state.syncProgress.percentage = 100;
+    },
+    syncFailure: (state, action: PayloadAction<string>) => {
+      state.status.isRunning = false;
+      state.error = action.payload;
+      state.status.lastSync = {
+        type: 'unknown',
+        completedAt: new Date().toISOString(),
+        status: 'failed',
+        stats: {
+          processed: 0,
+          success: 0,
+          failed: 0,
+        },
+      };
+    },
+    updateSyncProgress: (state, action: PayloadAction<{
+      current: number;
+      total: number;
+      message?: string;
+    }>) => {
+      state.syncProgress = {
+        current: action.payload.current,
+        total: action.payload.total,
+        percentage: action.payload.total > 0 
+          ? Math.round((action.payload.current / action.payload.total) * 100)
+          : 0,
+        message: action.payload.message,
+      };
+    },
+    cancelSync: (state) => {
+      state.status.isRunning = false;
+      state.currentJob = null;
+      state.syncProgress = {
+        current: 0,
+        total: 0,
+        percentage: 0,
+      };
+    },
     setCurrentJob: (state, action: PayloadAction<SyncJob | null>) => {
       state.currentJob = action.payload;
     },
@@ -161,24 +233,24 @@ const syncSlice = createSlice({
         state.currentJob = action.payload.currentJob || null;
       })
       // Start sync jobs
-      .addCase(startFullSync.pending, (state) => {
+      .addCase(performFullSync.pending, (state) => {
         state.status.isRunning = true;
       })
-      .addCase(startFullSync.fulfilled, (state, action) => {
+      .addCase(performFullSync.fulfilled, (state, action) => {
         state.currentJob = action.payload;
         state.jobs.unshift(action.payload);
       })
-      .addCase(startInventorySync.pending, (state) => {
+      .addCase(performInventorySync.pending, (state) => {
         state.status.isRunning = true;
       })
-      .addCase(startInventorySync.fulfilled, (state, action) => {
+      .addCase(performInventorySync.fulfilled, (state, action) => {
         state.currentJob = action.payload;
         state.jobs.unshift(action.payload);
       })
-      .addCase(startPriceSync.pending, (state) => {
+      .addCase(performPriceSync.pending, (state) => {
         state.status.isRunning = true;
       })
-      .addCase(startPriceSync.fulfilled, (state, action) => {
+      .addCase(performPriceSync.fulfilled, (state, action) => {
         state.currentJob = action.payload;
         state.jobs.unshift(action.payload);
       })
@@ -200,5 +272,15 @@ const syncSlice = createSlice({
   },
 });
 
-export const { clearError, setCurrentJob, updateJobProgress } = syncSlice.actions;
+export const { 
+  clearError, 
+  startSync,
+  syncSuccess,
+  syncFailure,
+  updateSyncProgress,
+  cancelSync,
+  setCurrentJob, 
+  updateJobProgress 
+} = syncSlice.actions;
+
 export default syncSlice.reducer;

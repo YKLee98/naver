@@ -15,14 +15,27 @@ interface LoginResponse {
 
 class AuthService {
   async login(data: LoginData): Promise<LoginResponse> {
-    const response = await apiService.post<LoginResponse>('/auth/login', data);
+    // 백엔드 응답 형식에 맞춰 수정
+    const response = await apiService.post<{
+      user: User;
+      accessToken: string;
+      refreshToken: string;
+    }>('/auth/login', data);
+    
+    // 응답을 프론트엔드 형식으로 변환
+    const loginResponse: LoginResponse = {
+      token: response.accessToken,
+      refreshToken: response.refreshToken,
+      user: response.user
+    };
     
     // 토큰 저장
-    localStorage.setItem('token', response.token);
-    localStorage.setItem('refreshToken', response.refreshToken);
-    localStorage.setItem('user', JSON.stringify(response.user));
+    localStorage.setItem('token', loginResponse.token);
+    localStorage.setItem('authToken', loginResponse.token); // App.tsx에서 authToken을 찾음
+    localStorage.setItem('refreshToken', loginResponse.refreshToken);
+    localStorage.setItem('user', JSON.stringify(loginResponse.user));
     
-    return response;
+    return loginResponse;
   }
 
   async logout(): Promise<void> {
@@ -33,6 +46,7 @@ class AuthService {
     } finally {
       // 로컬 스토리지 정리
       localStorage.removeItem('token');
+      localStorage.removeItem('authToken');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
       
@@ -48,17 +62,21 @@ class AuthService {
       throw new Error('No refresh token available');
     }
     
-    const response = await apiService.post<{ token: string; refreshToken: string }>('/auth/refresh', {
+    const response = await apiService.post<{ 
+      accessToken: string; 
+      refreshToken: string 
+    }>('/auth/refresh', {
       refreshToken,
     });
     
     // 새 토큰 저장
-    localStorage.setItem('token', response.token);
+    localStorage.setItem('token', response.accessToken);
+    localStorage.setItem('authToken', response.accessToken);
     if (response.refreshToken) {
       localStorage.setItem('refreshToken', response.refreshToken);
     }
     
-    return response.token;
+    return response.accessToken;
   }
 
   async register(data: { email: string; password: string; name: string }): Promise<User> {
@@ -99,7 +117,8 @@ class AuthService {
   }
 
   isAuthenticated(): boolean {
-    return !!localStorage.getItem('token');
+    // token 또는 authToken 둘 중 하나라도 있으면 인증된 것으로 판단
+    return !!(localStorage.getItem('token') || localStorage.getItem('authToken'));
   }
 
   hasRole(role: string): boolean {
@@ -108,7 +127,8 @@ class AuthService {
   }
 
   getToken(): string | null {
-    return localStorage.getItem('token');
+    // authToken을 먼저 확인하고, 없으면 token 확인
+    return localStorage.getItem('authToken') || localStorage.getItem('token');
   }
 }
 

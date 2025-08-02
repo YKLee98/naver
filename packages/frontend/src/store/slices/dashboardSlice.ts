@@ -1,5 +1,5 @@
 // packages/frontend/src/store/slices/dashboardSlice.ts
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { dashboardApi } from '@/services/api/dashboard.service';
 import { DashboardStats, Activity, Notification } from '@/types/models';
 
@@ -23,6 +23,12 @@ interface DashboardState {
     inventory: any;
     sync: any;
   };
+  selectedDateRange: {
+    startDate: string;
+    endDate: string;
+  };
+  refreshInterval: number;
+  isAutoRefreshEnabled: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -37,6 +43,12 @@ const initialState: DashboardState = {
     inventory: null,
     sync: null,
   },
+  selectedDateRange: {
+    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    endDate: new Date().toISOString(),
+  },
+  refreshInterval: 30000, // 30초
+  isAutoRefreshEnabled: true,
   loading: false,
   error: null,
 };
@@ -113,11 +125,32 @@ const dashboardSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
-    addNotification: (state, action) => {
+    setDashboardStats: (state, action: PayloadAction<DashboardStats>) => {
+      state.stats = action.payload;
+    },
+    setActivities: (state, action: PayloadAction<Activity[]>) => {
+      state.activities = action.payload;
+    },
+    addActivity: (state, action: PayloadAction<Activity>) => {
+      state.activities.unshift(action.payload);
+      if (state.activities.length > 100) {
+        state.activities.pop();
+      }
+    },
+    addNotification: (state, action: PayloadAction<Notification>) => {
       state.notifications.unshift(action.payload);
     },
-    removeNotification: (state, action) => {
+    removeNotification: (state, action: PayloadAction<string>) => {
       state.notifications = state.notifications.filter(n => n.id !== action.payload);
+    },
+    setDateRange: (state, action: PayloadAction<typeof initialState.selectedDateRange>) => {
+      state.selectedDateRange = action.payload;
+    },
+    toggleAutoRefresh: (state) => {
+      state.isAutoRefreshEnabled = !state.isAutoRefreshEnabled;
+    },
+    setRefreshInterval: (state, action: PayloadAction<number>) => {
+      state.refreshInterval = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -166,5 +199,16 @@ const dashboardSlice = createSlice({
   },
 });
 
-export const { clearError, addNotification, removeNotification } = dashboardSlice.actions;
+export const { 
+  clearError, 
+  setDashboardStats,
+  setActivities,
+  addActivity,
+  addNotification, 
+  removeNotification,
+  setDateRange,
+  toggleAutoRefresh,
+  setRefreshInterval,
+} = dashboardSlice.actions;
+
 export default dashboardSlice.reducer;

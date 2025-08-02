@@ -114,6 +114,55 @@ const inventorySlice = createSlice({
         state.inventoryStatus[index] = action.payload;
       }
     },
+    // 실시간 재고 업데이트를 위한 액션 추가
+    updateInventoryRealTime: (state, action: PayloadAction<{
+      sku: string;
+      quantity: number;
+      platform: string;
+      transactionType: string;
+      timestamp: string;
+    }>) => {
+      const { sku, quantity } = action.payload;
+      const index = state.inventoryStatus.findIndex(item => item.sku === sku);
+      
+      if (index !== -1) {
+        // 기존 항목 업데이트
+        state.inventoryStatus[index] = {
+          ...state.inventoryStatus[index],
+          currentStock: quantity,
+          lastUpdated: new Date(action.payload.timestamp),
+        };
+      } else {
+        // 새로운 항목 추가
+        state.inventoryStatus.push({
+          sku,
+          currentStock: quantity,
+          naverStock: 0,
+          shopifyStock: 0,
+          status: 'synced',
+          lastSynced: new Date(action.payload.timestamp),
+          lastUpdated: new Date(action.payload.timestamp),
+        } as InventoryStatus);
+      }
+      
+      // 트랜잭션 기록도 추가 (선택적)
+      if (state.selectedSku === sku) {
+        const newTransaction: Partial<InventoryTransaction> = {
+          sku,
+          platform: action.payload.platform,
+          transactionType: action.payload.transactionType,
+          quantity: quantity,
+          newQuantity: quantity,
+          timestamp: new Date(action.payload.timestamp),
+        };
+        state.transactions.unshift(newTransaction as InventoryTransaction);
+        
+        // 최대 100개까지만 유지
+        if (state.transactions.length > 100) {
+          state.transactions = state.transactions.slice(0, 100);
+        }
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -171,5 +220,11 @@ const inventorySlice = createSlice({
   },
 });
 
-export const { setSelectedSku, clearError, updateInventoryStatus } = inventorySlice.actions;
+export const { 
+  setSelectedSku, 
+  clearError, 
+  updateInventoryStatus,
+  updateInventoryRealTime 
+} = inventorySlice.actions;
+
 export default inventorySlice.reducer;

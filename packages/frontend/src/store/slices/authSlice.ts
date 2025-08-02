@@ -1,6 +1,6 @@
 // packages/frontend/src/store/slices/authSlice.ts
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { authApi } from '@/services/api/auth.service';
+import authService from '@/services/auth';
 import { User } from '@/types/models';
 
 interface AuthState {
@@ -21,29 +21,28 @@ const initialState: AuthState = {
 export const login = createAsyncThunk(
   'auth/login',
   async (credentials: { email: string; password: string }) => {
-    const response = await authApi.login(credentials);
-    localStorage.setItem('authToken', response.accessToken);
-    localStorage.setItem('refreshToken', response.refreshToken);
+    const response = await authService.login(credentials);
     return response;
   }
 );
 
 export const logout = createAsyncThunk('auth/logout', async () => {
-  await authApi.logout();
-  localStorage.removeItem('authToken');
-  localStorage.removeItem('refreshToken');
+  await authService.logout();
 });
 
 export const getCurrentUser = createAsyncThunk('auth/getCurrentUser', async () => {
-  const response = await authApi.getCurrentUser();
-  return response;
+  const user = authService.getCurrentUser();
+  if (!user) {
+    throw new Error('No user found');
+  }
+  return user;
 });
 
 export const updateProfile = createAsyncThunk(
   'auth/updateProfile',
-  async (data: Parameters<typeof authApi.updateProfile>[0]) => {
-    const response = await authApi.updateProfile(data);
-    return response;
+  async (data: { name?: string; email?: string; currentPassword?: string; newPassword?: string; }) => {
+    // TODO: Implement profile update API call
+    throw new Error('Not implemented');
   }
 );
 
@@ -73,6 +72,7 @@ const authSlice = createSlice({
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
         state.error = action.error.message || '로그인에 실패했습니다.';
+        state.isAuthenticated = false;
       })
       // Logout
       .addCase(logout.fulfilled, (state) => {
@@ -86,10 +86,11 @@ const authSlice = createSlice({
       })
       .addCase(getCurrentUser.rejected, (state) => {
         state.isAuthenticated = false;
+        state.user = null;
       })
       // Update profile
       .addCase(updateProfile.fulfilled, (state, action) => {
-        state.user = action.payload;
+        // state.user = action.payload;
       });
   },
 });

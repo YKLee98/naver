@@ -6,12 +6,14 @@ interface NotificationState {
   notifications: Notification[];
   unreadCount: number;
   isDrawerOpen: boolean;
+  soundEnabled: boolean; // 사운드 설정 상태 추가
 }
 
 const initialState: NotificationState = {
   notifications: [],
   unreadCount: 0,
   isDrawerOpen: false,
+  soundEnabled: true, // 기본값은 true
 };
 
 const notificationSlice = createSlice({
@@ -26,6 +28,9 @@ const notificationSlice = createSlice({
     },
     closeDrawer: (state) => {
       state.isDrawerOpen = false;
+    },
+    toggleSound: (state) => {
+      state.soundEnabled = !state.soundEnabled;
     },
     addNotification: (state, action: PayloadAction<Notification>) => {
       state.notifications.unshift(action.payload);
@@ -70,6 +75,7 @@ export const {
   toggleDrawer,
   openDrawer,
   closeDrawer,
+  toggleSound, // toggleSound export 추가
   addNotification,
   removeNotification,
   markAsRead,
