@@ -18,7 +18,7 @@ export interface IPriceSyncJob extends Document {
     roundingStrategy?: 'up' | 'down' | 'nearest';
     skus?: string[];
   };
-  syncErrors: Array<{  // errors를 syncErrors로 변경
+  errors: Array<{
     sku: string;
     error: string;
     timestamp: Date;
@@ -36,7 +36,7 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     type: String,
     required: true,
     unique: true,
-    index: true
+    index: true  // 이미 여기에 인덱스 정의
   },
   type: {
     type: String,
@@ -48,7 +48,7 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     required: true,
     enum: ['pending', 'running', 'completed', 'failed'],
     default: 'pending',
-    index: true
+    index: true  // 이미 여기에 인덱스 정의
   },
   totalItems: {
     type: Number,
@@ -87,7 +87,7 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     },
     skus: [String]
   },
-  syncErrors: [{  // errors를 syncErrors로 변경
+  errors: [{
     sku: String,
     error: String,
     timestamp: {
@@ -106,8 +106,9 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
   timestamps: true
 });
 
-// 인덱스
-PriceSyncJobSchema.index({ status: 1, createdAt: -1 });
+// 인덱스 - 중복 제거
+// PriceSyncJobSchema.index({ status: 1, createdAt: -1 }); // status는 이미 스키마에 정의됨
+PriceSyncJobSchema.index({ createdAt: -1 }); // createdAt만 추가
 PriceSyncJobSchema.index({ type: 1, createdAt: -1 });
 
 // TTL 인덱스 (30일 후 자동 삭제)

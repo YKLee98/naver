@@ -1,30 +1,24 @@
 // packages/backend/src/routes/dashboard.routes.ts
 import { Router } from 'express';
-import { DashboardController } from '@/controllers';
-import { authenticate } from '@/middlewares';
+import { authMiddleware } from '../middlewares';
+import { DashboardController } from '../controllers';
 
 const router = Router();
+
+// 컨트롤러 인스턴스 생성
 const dashboardController = new DashboardController();
 
-// 모든 대시보드 라우트는 인증 필요
-router.use(authenticate);
+// 인증 미들웨어 적용
+router.use(authMiddleware);
 
 // 대시보드 통계
-router.get('/stats', dashboardController.getStats);
+router.get('/statistics', dashboardController.getStatistics);
 
 // 최근 활동
-router.get('/activity', dashboardController.getRecentActivity);
+router.get('/activities', dashboardController.getRecentActivities);
 
 // 차트 데이터
-router.get('/charts/sales', dashboardController.getSalesChartData);
+router.get('/charts/price', dashboardController.getPriceChartData);
 router.get('/charts/inventory', dashboardController.getInventoryChartData);
-router.get('/charts/sync', dashboardController.getSyncChartData);
-
-// 알림
-router.get('/notifications', dashboardController.getNotifications);
-router.put('/notifications/:id/read', dashboardController.markNotificationAsRead);
-
-// 시스템 상태
-router.get('/health', dashboardController.getSystemHealth);
 
 export default router;

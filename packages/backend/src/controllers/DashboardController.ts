@@ -236,15 +236,11 @@ export class DashboardController {
             totalQuantity: { $sum: '$quantity' },
           },
         },
-        {
-          $sort: { _id: 1 },
-        },
       ]);
 
       res.json({
         success: true,
         data: salesData,
-        period,
       });
     } catch (error) {
       logger.error('Error in getSalesChartData:', error);
@@ -261,17 +257,16 @@ export class DashboardController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      // 최신 재고 상태 기반 차트 데이터
       const inventoryData = await InventoryTransaction.aggregate([
         {
-          $sort: { sku: 1, createdAt: -1 }
+          $sort: { sku: 1, createdAt: -1 },
         },
         {
           $group: {
             _id: '$sku',
             latestQuantity: { $first: '$newQuantity' },
             platform: { $first: '$platform' },
-          }
+          },
         },
         {
           $facet: {
@@ -280,13 +275,13 @@ export class DashboardController {
                 $group: {
                   _id: {
                     $cond: [
-                      { $gt: ['$latestQuantity', 10] },
-                      'inStock',
+                      { $eq: ['$latestQuantity', 0] },
+                      'outOfStock',
                       {
                         $cond: [
-                          { $gt: ['$latestQuantity', 0] },
+                          { $lte: ['$latestQuantity', 10] },
                           'lowStock',
-                          'outOfStock',
+                          'inStock',
                         ],
                       },
                     ],
@@ -380,7 +375,6 @@ export class DashboardController {
       res.json({
         success: true,
         data: syncData,
-        period,
       });
     } catch (error) {
       logger.error('Error in getSyncChartData:', error);
@@ -392,36 +386,36 @@ export class DashboardController {
    * 알림 조회
    */
   getNotifications = async (
-    req: AuthenticatedRequest,
+    req: Request<{}, {}, {}, NotificationQuery>,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { unreadOnly = 'false', limit = '20' } = req.query as NotificationQuery;
+      const { unreadOnly = 'false', limit = '20' } = req.query;
       const redis = getRedisClient();
+      const userId = (req as AuthenticatedRequest).user?.id || 'system';
 
-      const userId = req.user?.id || 'system';
-      const key = `notifications:${userId}`;
-      
-      const notifications = await redis.lrange(key, 0, parseInt(limit) - 1);
+      // Redis에서 알림 조회
+      const notificationsKey = `notifications:${userId}`;
+      const notifications = await redis.lrange(notificationsKey, 0, parseInt(limit) - 1);
 
-      const parsedNotifications = notifications.map(n => {
+      const parsedNotifications = notifications.map((n: string) => {
         try {
           return JSON.parse(n);
-        } catch (e) {
-          logger.error('Failed to parse notification:', e);
+        } catch {
           return null;
         }
-      }).filter(Boolean);
+      }).filter((n: any) => n !== null);
 
-      const filtered = unreadOnly === 'true' 
-        ? parsedNotifications.filter(n => !n.read)
+      // unreadOnly 필터링
+      const filteredNotifications = unreadOnly === 'true' 
+        ? parsedNotifications.filter((n: any) => !n.read)
         : parsedNotifications;
 
       res.json({
         success: true,
-        data: filtered,
-        total: filtered.length,
+        data: filteredNotifications,
+        total: filteredNotifications.length,
       });
     } catch (error) {
       logger.error('Error in getNotifications:', error);
@@ -433,34 +427,33 @@ export class DashboardController {
    * 알림 읽음 처리
    */
   markNotificationAsRead = async (
-    req: AuthenticatedRequest,
+    req: Request<{ id: string }>,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
       const { id } = req.params;
       const redis = getRedisClient();
+      const userId = (req as AuthenticatedRequest).user?.id || 'system';
 
-      const userId = req.user?.id || 'system';
-      const key = `notifications:${userId}`;
-      
-      const notifications = await redis.lrange(key, 0, -1);
+      // Redis에서 알림 업데이트
+      const notificationsKey = `notifications:${userId}`;
+      const notifications = await redis.lrange(notificationsKey, 0, -1);
 
-      const updated = notifications.map(n => {
+      const updatedNotifications = notifications.map((n: string) => {
         const notification = JSON.parse(n);
         if (notification.id === id) {
           notification.read = true;
-          notification.readAt = new Date();
+          notification.readAt = new Date().toISOString();
         }
         return JSON.stringify(notification);
       });
 
-      await redis.del(key);
-      if (updated.length > 0) {
-        await redis.rpush(key, ...updated);
+      // Redis 업데이트
+      await redis.del(notificationsKey);
+      if (updatedNotifications.length > 0) {
+        await redis.rpush(notificationsKey, ...updatedNotifications);
       }
-
-      logger.info(`Notification marked as read: ${id}`);
 
       res.json({
         success: true,
@@ -482,7 +475,6 @@ export class DashboardController {
   ): Promise<void> => {
     try {
       const redis = getRedisClient();
-
       const checks = {
         database: false,
         redis: false,
@@ -490,88 +482,91 @@ export class DashboardController {
         shopify: false,
       };
 
-      // Database 체크
+      // MongoDB 상태 확인
       try {
-        await ProductMapping.findOne().limit(1);
+        await ProductMapping.findOne().limit(1).exec();
         checks.database = true;
-      } catch (error) {
-        logger.error('Database health check failed:', error);
-        checks.database = false;
+      } catch {
+        logger.error('MongoDB health check failed');
       }
 
-      // Redis 체크
+      // Redis 상태 확인
       try {
         await redis.ping();
         checks.redis = true;
-      } catch (error) {
-        logger.error('Redis health check failed:', error);
-        checks.redis = false;
+      } catch {
+        logger.error('Redis health check failed');
       }
 
-      // API 연결 상태 (캐시된 값 사용)
-      const [naverHealth, shopifyHealth] = await Promise.all([
-        redis.get('health:naver'),
-        redis.get('health:shopify'),
-      ]);
+      // 외부 API 상태는 Redis에 캐시된 값 사용
+      const naverHealth = await redis.get('health:naver');
+      const shopifyHealth = await redis.get('health:shopify');
+      
+      checks.naver = naverHealth === 'healthy';
+      checks.shopify = shopifyHealth === 'healthy';
 
-      checks.naver = naverHealth === 'ok';
-      checks.shopify = shopifyHealth === 'ok';
-
+      const allHealthy = Object.values(checks).every(v => v === true);
       const anyDown = Object.values(checks).some(v => v === false);
-      const status = anyDown ? 'degraded' : 'healthy';
 
       res.json({
-        success: true,
-        data: {
-          status,
-          services: {
-            api: true,
-            ...checks,
-          },
-          lastChecked: new Date().toISOString(),
+        status: anyDown ? (allHealthy ? 'healthy' : 'degraded') : 'down',
+        services: {
+          api: true,
+          ...checks,
         },
+        lastChecked: new Date().toISOString(),
       });
     } catch (error) {
       logger.error('Error in getSystemHealth:', error);
-      next(error);
+      res.status(500).json({
+        status: 'error',
+        services: {
+          api: true,
+          database: false,
+          redis: false,
+          naver: false,
+          shopify: false,
+        },
+        lastChecked: new Date().toISOString(),
+      });
     }
   };
 
   /**
    * 날짜 필터 생성 헬퍼
    */
-  private getDateFilter(period: string, startDate?: string, endDate?: string): any {
+  private getDateFilter(period?: string, startDate?: string, endDate?: string): any {
+    const filter: any = {};
+
     if (startDate && endDate) {
-      return {
-        createdAt: {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate),
-        },
+      filter.createdAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
       };
+    } else if (period) {
+      const now = new Date();
+      let start: Date;
+
+      switch (period) {
+        case 'day':
+          start = new Date(now.setDate(now.getDate() - 1));
+          break;
+        case 'week':
+          start = new Date(now.setDate(now.getDate() - 7));
+          break;
+        case 'month':
+          start = new Date(now.setMonth(now.getMonth() - 1));
+          break;
+        case 'year':
+          start = new Date(now.setFullYear(now.getFullYear() - 1));
+          break;
+        default:
+          start = new Date(now.setDate(now.getDate() - 7));
+      }
+
+      filter.createdAt = { $gte: start };
     }
 
-    const now = new Date();
-    let start: Date;
-
-    switch (period) {
-      case 'day':
-        start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        break;
-      case 'week':
-        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case 'month':
-        start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case 'year':
-        start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    }
-
-    return {
-      createdAt: { $gte: start },
-    };
+    return filter;
   }
 }

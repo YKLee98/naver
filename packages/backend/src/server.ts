@@ -4,42 +4,36 @@ import { App } from './app';
 import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase } from './config/database';
 import { setupCronJobs, setCronServices } from './utils/cronjobs';
-import { connectRedis } from './config/redis'; 
+import { initializeRedis, disconnectRedis } from './config/redis';  // 올바른 import
 import {
   NaverAuthService,
   NaverProductService,
   NaverOrderService
 } from './services/naver';
-import { 
-  ShopifyBulkService,
-  ShopifyGraphQLService 
-} from './services/shopify';
+import { ShopifyBulkService } from './services/shopify';
 import { SyncService } from './services/sync';
 import { ExchangeRateService } from './services/exchangeRate';  
 
-const PORT = parseInt(process.env['PORT'] || '3000', 10);
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 async function startServer() {
   try {
     // 데이터베이스 연결
     await connectDatabase();
     
-    // Redis 클라이언트 초기화
-    const redis = connectRedis();
+    // Redis 클라이언트 초기화 - initializeRedis 사용
+    const redis = initializeRedis();
     
     // 서비스 인스턴스 생성 (의존성 주입)
     const naverAuthService = new NaverAuthService(redis);
     const naverProductService = new NaverProductService(naverAuthService);
     const naverOrderService = new NaverOrderService(naverAuthService);
     const shopifyBulkService = new ShopifyBulkService();
-    const shopifyGraphQLService = new ShopifyGraphQLService();
     
-    // SyncService에 모든 필요한 의존성 전달
     const syncService = new SyncService(
       naverProductService,
       naverOrderService,
       shopifyBulkService,
-      shopifyGraphQLService,
       redis
     );
     
@@ -51,8 +45,8 @@ async function startServer() {
       exchangeRateService
     });
 
-    // 앱 인스턴스 생성 및 초기화 - Redis 전달
-    const app = new App(redis);
+    // 앱 인스턴스 생성 및 초기화
+    const app = new App();
     await app.initialize();
     
     // 크론 작업 시작
@@ -75,7 +69,7 @@ async function startServer() {
         await disconnectDatabase();
         
         // Redis 연결 해제
-        await redis.quit();
+        await disconnectRedis();
         
         logger.info('All connections closed successfully');
         process.exit(0);

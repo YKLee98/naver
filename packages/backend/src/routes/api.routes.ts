@@ -20,16 +20,15 @@ import {
 import { 
   SyncService,
   InventorySyncService,
-  MappingService,
-  PriceSyncService
+  MappingService
 } from '../services/sync';
 import { getRedisClient } from '../config/redis';
 
-const router = Router();
+// 라우터 설정 함수로 export
+export function setupApiRoutes(): Router {
+  const router = Router();
 
-// 라우트 설정을 함수로 래핑하여 초기화 시점 제어
-export const setupApiRoutes = () => {
-  // 서비스 인스턴스 생성
+  // 서비스 인스턴스 생성 - Redis가 초기화된 후에 실행됨
   const redis = getRedisClient();
   const naverAuthService = new NaverAuthService(redis);
   const naverProductService = new NaverProductService(naverAuthService);
@@ -74,7 +73,8 @@ export const setupApiRoutes = () => {
   router.get('/products/search/shopify', productController.searchShopifyProducts);
 
   // 재고 관련 라우트
-  router.get('/inventory/:sku/status', inventoryController.getInventoryStatus);
+  router.get('/inventory/status', inventoryController.getInventoryStatus);
+  router.get('/inventory/:sku/status', inventoryController.getInventoryStatusBySku);
   router.get('/inventory/:sku/history', inventoryController.getInventoryHistory);
   router.post('/inventory/:sku/adjust', inventoryController.adjustInventory);
   router.get('/inventory/low-stock', inventoryController.getLowStockProducts);
@@ -85,6 +85,7 @@ export const setupApiRoutes = () => {
   router.get('/sync/status', syncController.getSyncStatus);
   router.get('/sync/settings', syncController.getSyncSettings);
   router.put('/sync/settings', syncController.updateSyncSettings);
+  router.get('/sync/history', syncController.getSyncHistory);
 
   // 매핑 관련 라우트
   router.post('/mappings', mappingController.createMapping);
@@ -94,17 +95,13 @@ export const setupApiRoutes = () => {
   router.post('/mappings/:id/validate', mappingController.validateMapping);
   router.post('/mappings/bulk', mappingController.bulkUploadMappings);
 
-  // 대시보드 관련 라우트 - DashboardController의 실제 메서드명과 일치하도록 수정
+  // 대시보드 관련 라우트
   router.get('/dashboard/statistics', dashboardController.getStats);
   router.get('/dashboard/activities', dashboardController.getRecentActivity);
-  router.get('/dashboard/charts/sales', dashboardController.getSalesChartData);
+  router.get('/dashboard/charts/price', dashboardController.getSalesChartData);
   router.get('/dashboard/charts/inventory', dashboardController.getInventoryChartData);
-  router.get('/dashboard/charts/sync', dashboardController.getSyncChartData);
-  router.get('/dashboard/notifications', dashboardController.getNotifications);
-  router.put('/dashboard/notifications/:id/read', dashboardController.markNotificationAsRead);
-  router.get('/dashboard/health', dashboardController.getSystemHealth);
 
   return router;
-};
+}
 
-export default router;
+// 기본 export 제거 - 함수로만 export

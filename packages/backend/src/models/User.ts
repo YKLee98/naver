@@ -21,7 +21,7 @@ const userSchema = new Schema<IUser>(
       unique: true,
       lowercase: true,
       trim: true,
-      index: true,
+      index: true,  // 여기에 이미 인덱스가 정의됨
     },
     password: {
       type: String,
@@ -56,8 +56,8 @@ const userSchema = new Schema<IUser>(
   }
 );
 
-// 인덱스
-userSchema.index({ email: 1 });
+// 인덱스 - email은 이미 스키마에서 정의했으므로 제거
+// userSchema.index({ email: 1 }); // 중복 제거
 userSchema.index({ status: 1 });
 
 export const User = model<IUser>('User', userSchema);
