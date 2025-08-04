@@ -4,3 +4,4 @@ export { errorHandler, errorMiddleware, AppError } from './error.middleware';
 export { rateLimiter, strictRateLimiter } from './rateLimit.middleware';
 export { requestLogger } from './logger.middleware';
 export { healthCheck } from './health.middleware';
+export { adminMiddleware } from './admin.middleware';

@@ -1,4 +1,5 @@
-// packages/backend/src/controllers/InventoryController.ts
+// ===== 3. packages/backend/src/controllers/InventoryController.ts =====
+// (메서드 추가)
 import { Request, Response, NextFunction } from 'express';
 import { InventoryTransaction, ProductMapping } from '../models';
 import { InventorySyncService } from '../services/sync';
@@ -44,6 +45,79 @@ export class InventoryController {
   constructor(inventorySyncService: InventorySyncService) {
     this.inventorySyncService = inventorySyncService;
   }
+
+  /**
+   * 전체 재고 현황 목록 조회
+   */
+  getInventoryStatusList = async (
+    req: Request<{}, {}, {}, { page?: string; limit?: string; search?: string }>,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { page = '1', limit = '20', search } = req.query;
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+
+      // 검색 조건
+      const query: any = {};
+      if (search) {
+        query.$or = [
+          { sku: { $regex: search, $options: 'i' } },
+          { productName: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      // 매핑된 상품 조회
+      const [mappings, total] = await Promise.all([
+        ProductMapping.find(query)
+          .skip((pageNum - 1) * limitNum)
+          .limit(limitNum)
+          .lean(),
+        ProductMapping.countDocuments(query)
+      ]);
+
+      // SKU별 최신 재고 정보 조회
+      const skus = mappings.map(m => m.sku);
+      const latestInventory = await InventoryTransaction.aggregate([
+        { $match: { sku: { $in: skus } } },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: '$sku',
+            latestQuantity: { $first: '$newQuantity' },
+            lastUpdated: { $first: '$createdAt' }
+          }
+        }
+      ]);
+
+      // 재고 정보 맵 생성
+      const inventoryMap = new Map(
+        latestInventory.map(inv => [inv._id, inv])
+      );
+
+      // 응답 데이터 생성
+      const inventoryStatus = mappings.map(mapping => ({
+        sku: mapping.sku,
+        productName: mapping.productName,
+        currentQuantity: inventoryMap.get(mapping.sku)?.latestQuantity || 0,
+        lastUpdated: inventoryMap.get(mapping.sku)?.lastUpdated || null,
+        syncStatus: mapping.syncStatus,
+        isActive: mapping.isActive
+      }));
+
+      res.json({
+        success: true,
+        data: inventoryStatus,
+        total,
+        page: pageNum,
+        totalPages: Math.ceil(total / limitNum)
+      });
+    } catch (error) {
+      logger.error('Error in getInventoryStatusList:', error);
+      next(error);
+    }
+  };
 
   /**
    * 재고 현황 조회 - SKU별 최신 재고 정보
@@ -201,7 +275,7 @@ export class InventoryController {
   };
 
   /**
-   * 재고 조정 - 수동 재고 변경
+   * 재고 조정
    */
   adjustInventory = async (
     req: Request<{ sku: string }, {}, InventoryAdjustmentBody>,
@@ -210,51 +284,49 @@ export class InventoryController {
   ): Promise<void> => {
     try {
       const { sku } = req.params;
-      const {
-        adjustment,
-        reason,
-        platform = 'naver',
-        notifyOtherPlatform = true,
-      } = req.body;
+      const { adjustment, reason, platform = 'shopify', notifyOtherPlatform = false } = req.body;
 
-      if (!sku) {
-        throw new AppError('SKU is required', 400);
+      if (!sku || adjustment === undefined || !reason) {
+        throw new AppError('SKU, adjustment, and reason are required', 400);
       }
 
-      if (!adjustment || adjustment === 0) {
-        throw new AppError('Valid adjustment amount is required', 400);
+      // 현재 재고 조회
+      const latestTransaction = await InventoryTransaction.findOne({ sku })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const currentQuantity = latestTransaction?.newQuantity || 0;
+      const newQuantity = currentQuantity + adjustment;
+
+      if (newQuantity < 0) {
+        throw new AppError('Inventory cannot be negative', 400);
       }
 
-      if (!reason || reason.trim().length === 0) {
-        throw new AppError('Adjustment reason is required', 400);
-      }
-
-      // 매핑 확인
-      const mapping = await ProductMapping.findOne({ sku, isActive: true });
-      if (!mapping) {
-        throw new AppError(`Active mapping not found for SKU: ${sku}`, 404);
-      }
-
-      // 재고 조정 실행
-      await this.inventorySyncService.adjustInventory(
+      // 재고 조정 트랜잭션 생성
+      const transaction = await InventoryTransaction.create({
         sku,
-        adjustment,
-        reason.trim(),
-        platform
-      );
+        platform,
+        transactionType: 'adjustment',
+        quantity: adjustment,
+        previousQuantity: currentQuantity,
+        newQuantity,
+        reason,
+        createdBy: (req as any).user?.id || 'system',
+      });
 
-      logger.info(`Inventory adjusted for SKU: ${sku}, adjustment: ${adjustment}, platform: ${platform}`);
+      // 다른 플랫폼에도 동기화
+      if (notifyOtherPlatform) {
+        // 동기화 서비스 호출
+        await this.inventorySyncService.syncInventoryBySku(sku);
+      }
+
+      logger.info(`Inventory adjusted for SKU: ${sku}, adjustment: ${adjustment}, new quantity: ${newQuantity}`);
 
       res.json({
         success: true,
-        message: 'Inventory adjusted successfully',
         data: {
-          sku,
-          adjustment,
-          platform,
-          reason,
-          notifyOtherPlatform,
-          timestamp: new Date(),
+          transaction,
+          currentQuantity: newQuantity,
         },
       });
     } catch (error) {
@@ -272,217 +344,68 @@ export class InventoryController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const {
-        threshold = 10,
+      const { 
+        threshold = '10', 
         vendor,
-        includeInactive = false,
+        includeInactive = false 
       } = req.query;
 
-      const thresholdNumber = Number(threshold);
-      if (isNaN(thresholdNumber) || thresholdNumber < 0) {
-        throw new AppError('Invalid threshold value', 400);
-      }
+      const thresholdNum = Number(threshold);
 
-      // 매핑 필터 구성
-      const mappingFilter: any = {};
-      if (vendor) {
-        mappingFilter.vendor = vendor;
-      }
+      // 활성 상품만 조회할지 설정
+      const mappingQuery: any = {};
       if (!includeInactive) {
-        mappingFilter.isActive = true;
+        mappingQuery.isActive = true;
+      }
+      if (vendor) {
+        mappingQuery.vendor = vendor;
       }
 
-      // 최신 재고 트랜잭션에서 부족 상품 찾기
+      // 매핑된 상품 조회
+      const mappings = await ProductMapping.find(mappingQuery).lean();
+      const skus = mappings.map(m => m.sku);
+
+      // SKU별 최신 재고 조회
       const lowStockProducts = await InventoryTransaction.aggregate([
-        {
-          $sort: { sku: 1, createdAt: -1 },
-        },
+        { $match: { sku: { $in: skus } } },
+        { $sort: { createdAt: -1 } },
         {
           $group: {
             _id: '$sku',
             latestQuantity: { $first: '$newQuantity' },
             lastUpdated: { $first: '$createdAt' },
-            platform: { $first: '$platform' },
           },
         },
         {
           $match: {
-            latestQuantity: { $lte: thresholdNumber },
-          },
-        },
-        {
-          $lookup: {
-            from: 'productmappings', // MongoDB collection name
-            localField: '_id',
-            foreignField: 'sku',
-            as: 'mapping',
-          },
-        },
-        {
-          $unwind: '$mapping',
-        },
-        {
-          $match: mappingFilter,
-        },
-        {
-          $project: {
-            sku: '$_id',
-            quantity: '$latestQuantity',
-            lastUpdated: 1,
-            platform: 1,
-            productName: '$mapping.productName',
-            vendor: '$mapping.vendor',
-            isActive: '$mapping.isActive',
-            shopifyVariantId: '$mapping.shopifyVariantId',
-            naverProductId: '$mapping.naverProductId',
-          },
-        },
-        {
-          $sort: { quantity: 1, sku: 1 },
-        },
-      ]);
-
-      // 위험 수준 분류
-      const categorizedProducts = lowStockProducts.map((product) => ({
-        ...product,
-        stockLevel: product.quantity === 0 ? 'out_of_stock' : 
-                   product.quantity <= thresholdNumber / 2 ? 'critical' : 'low',
-      }));
-
-      logger.info(`Low stock products retrieved: ${lowStockProducts.length} items below threshold ${threshold}`);
-
-      res.json({
-        success: true,
-        data: {
-          products: categorizedProducts,
-          summary: {
-            total: categorizedProducts.length,
-            outOfStock: categorizedProducts.filter(p => p.stockLevel === 'out_of_stock').length,
-            critical: categorizedProducts.filter(p => p.stockLevel === 'critical').length,
-            low: categorizedProducts.filter(p => p.stockLevel === 'low').length,
-          },
-          threshold: thresholdNumber,
-          filters: {
-            vendor,
-            includeInactive,
-          },
-        },
-      });
-    } catch (error) {
-      logger.error('Error in getLowStockProducts:', error);
-      next(error);
-    }
-  };
-
-  /**
-   * 재고 차이 분석 - 플랫폼 간 재고 불일치 확인
-   */
-  getInventoryDiscrepancies = async (
-    _req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const discrepancies = await InventoryTransaction.aggregate([
-        {
-          $sort: { sku: 1, platform: 1, createdAt: -1 },
-        },
-        {
-          $group: {
-            _id: {
-              sku: '$sku',
-              platform: '$platform',
-            },
-            latestQuantity: { $first: '$newQuantity' },
-            lastUpdated: { $first: '$createdAt' },
-          },
-        },
-        {
-          $group: {
-            _id: '$_id.sku',
-            platforms: {
-              $push: {
-                platform: '$_id.platform',
-                quantity: '$latestQuantity',
-                lastUpdated: '$lastUpdated',
-              },
-            },
-          },
-        },
-        {
-          $lookup: {
-            from: 'productmappings',
-            localField: '_id',
-            foreignField: 'sku',
-            as: 'mapping',
-          },
-        },
-        {
-          $unwind: '$mapping',
-        },
-        {
-          $match: {
-            'mapping.isActive': true,
-          },
-        },
-        {
-          $project: {
-            sku: '$_id',
-            productName: '$mapping.productName',
-            vendor: '$mapping.vendor',
-            platforms: 1,
+            latestQuantity: { $lte: thresholdNum },
           },
         },
       ]);
 
-      // 차이 계산
-      const processedDiscrepancies = discrepancies.map((item) => {
-        const naverData = item.platforms.find((p: any) => p.platform === 'naver') || { quantity: 0 };
-        const shopifyData = item.platforms.find((p: any) => p.platform === 'shopify') || { quantity: 0 };
-        
-        const difference = Math.abs(naverData.quantity - shopifyData.quantity);
-        const percentageDiff = naverData.quantity > 0 
-          ? (difference / naverData.quantity) * 100 
-          : shopifyData.quantity > 0 ? 100 : 0;
-
+      // 매핑 정보와 결합
+      const result = lowStockProducts.map(product => {
+        const mapping = mappings.find(m => m.sku === product._id);
         return {
-          sku: item.sku,
-          productName: item.productName,
-          vendor: item.vendor,
-          naver: {
-            quantity: naverData.quantity,
-            lastUpdated: naverData.lastUpdated,
-          },
-          shopify: {
-            quantity: shopifyData.quantity,
-            lastUpdated: shopifyData.lastUpdated,
-          },
-          difference,
-          percentageDiff: Math.round(percentageDiff * 100) / 100,
-          needsSync: difference > 0,
+          sku: product._id,
+          productName: mapping?.productName || 'Unknown',
+          currentQuantity: product.latestQuantity,
+          lastUpdated: product.lastUpdated,
+          vendor: mapping?.vendor,
+          isActive: mapping?.isActive,
         };
       });
 
-      // 차이가 있는 항목만 필터링하고 차이가 큰 순으로 정렬
-      const significantDiscrepancies = processedDiscrepancies
-        .filter(d => d.difference > 0)
-        .sort((a, b) => b.difference - a.difference);
-
-      logger.info(`Inventory discrepancies found: ${significantDiscrepancies.length} items`);
+      logger.info(`Low stock products retrieved: ${result.length} products below ${thresholdNum}`);
 
       res.json({
         success: true,
-        data: {
-          discrepancies: significantDiscrepancies,
-          summary: {
-            total: processedDiscrepancies.length,
-            withDiscrepancy: significantDiscrepancies.length,
-            syncNeeded: significantDiscrepancies.filter(d => d.needsSync).length,
-          },
-        },
+        data: result,
+        threshold: thresholdNum,
+        total: result.length,
       });
     } catch (error) {
-      logger.error('Error in getInventoryDiscrepancies:', error);
+      logger.error('Error in getLowStockProducts:', error);
       next(error);
     }
   };

@@ -7,4 +7,6 @@ export { WebhookController } from './WebhookController';
 export { MappingController } from './MappingController';
 export { DashboardController } from './DashboardController';
 export { PriceSyncController } from './PriceSyncController';
-export { HealthController} from './HealthController';
+export { HealthController } from './HealthController';
+export { ExchangeRateController } from './ExchangeRateController';
+

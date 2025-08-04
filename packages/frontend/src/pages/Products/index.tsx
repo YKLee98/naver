@@ -1,337 +1,302 @@
-// packages/frontend/src/pages/Products/index.tsx
-import React, { useState, useEffect } from 'react';
+// ===== 1. packages/frontend/src/pages/Products/index.tsx =====
+// mappings undefined 문제 수정
+import React, { useEffect, useState } from 'react';
 import {
   Box,
+  Button,
   Paper,
   Typography,
-  Button,
   TextField,
-  InputAdornment,
-  IconButton,
-  Chip,
   Stack,
+  Alert,
+  Snackbar,
+  IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Grid,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
 } from '@mui/material';
-import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
-import {
-  Search as SearchIcon,
-  Add as AddIcon,
-  Refresh as RefreshIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Link as LinkIcon,
-} from '@mui/icons-material';
-import { useAppDispatch, useAppSelector } from '@/hooks/redux';
+import { DataGrid, GridColDef } from '@mui/x-data-grid';
+import { Add, Edit, Delete, Sync, Close } from '@mui/icons-material';
+import { useAppDispatch, useAppSelector } from '@/hooks';
+import { fetchMappings, createMapping, updateMapping, deleteMapping } from '@/store/slices/productSlice';
 
-const columns: GridColDef[] = [
-  { 
-    field: 'sku', 
-    headerName: 'SKU', 
-    width: 130,
-    renderCell: (params) => (
-      <Typography variant="body2" sx={{ fontWeight: 500 }}>
-        {params.value}
-      </Typography>
-    ),
-  },
-  { 
-    field: 'productName', 
-    headerName: '상품명', 
-    width: 250,
-    flex: 1,
-  },
-  { 
-    field: 'naverProductId', 
-    headerName: '네이버 상품 ID', 
-    width: 150,
-  },
-  { 
-    field: 'shopifyProductId', 
-    headerName: 'Shopify 상품 ID', 
-    width: 150,
-  },
-  {
-    field: 'status',
-    headerName: '상태',
-    width: 120,
-    renderCell: (params: GridRenderCellParams) => {
-      const status = params.value as string;
-      const color = status === 'ACTIVE' ? 'success' : status === 'INACTIVE' ? 'warning' : 'error';
-      return <Chip label={status} color={color} size="small" />;
-    },
-  },
-  {
-    field: 'syncStatus',
-    headerName: '동기화 상태',
-    width: 120,
-    renderCell: (params: GridRenderCellParams) => {
-      const status = params.value as string;
-      const color = status === 'synced' ? 'success' : status === 'pending' ? 'warning' : 'error';
-      const label = status === 'synced' ? '동기화됨' : status === 'pending' ? '대기중' : '오류';
-      return <Chip label={label} color={color} size="small" variant="outlined" />;
-    },
-  },
-  {
-    field: 'lastSyncedAt',
-    headerName: '마지막 동기화',
-    width: 150,
-    valueGetter: (params) => {
-      return params.value ? new Date(params.value).toLocaleString('ko-KR') : '-';
-    },
-  },
-  {
-    field: 'actions',
-    headerName: '작업',
-    width: 120,
-    sortable: false,
-    renderCell: (params: GridRenderCellParams) => (
-      <Stack direction="row" spacing={1}>
-        <IconButton size="small" color="primary">
-          <EditIcon fontSize="small" />
-        </IconButton>
-        <IconButton size="small" color="error">
-          <DeleteIcon fontSize="small" />
-        </IconButton>
-      </Stack>
-    ),
-  },
-];
+interface MappingFormData {
+  sku: string;
+  productName: string;
+  naverProductId: string;
+  shopifyProductId: string;
+  shopifyVariantId: string;
+  vendor?: string;
+  priceMargin?: number;
+  isActive?: boolean;
+}
 
 const Products: React.FC = () => {
   const dispatch = useAppDispatch();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState([]);
+  // products 상태가 정의되어 있는지 확인
+  const productsState = useAppSelector((state) => state.products);
+  const { mappings = [], loading = false, error = null } = productsState || {};
   
-  // 모달 관련 상태
-  const [openModal, setOpenModal] = useState(false);
-  const [mappingData, setMappingData] = useState({
+  const [openDialog, setOpenDialog] = useState(false);
+  const [formData, setFormData] = useState<MappingFormData>({
+    sku: '',
+    productName: '',
     naverProductId: '',
     shopifyProductId: '',
-    sku: '',
+    shopifyVariantId: '',
+    vendor: 'album',
+    priceMargin: 0.1,
+    isActive: true,
   });
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
 
   useEffect(() => {
-    loadProducts();
-  }, []);
-
-  const loadProducts = async () => {
-    setLoading(true);
-    try {
-      // 임시 데이터
-      setRows([
-        {
-          id: '1',
-          sku: 'TEST-001',
-          productName: '테스트 상품 1',
-          naverProductId: 'NAV123',
-          shopifyProductId: 'SHOP456',
-          status: 'ACTIVE',
-          syncStatus: 'synced',
-          lastSyncedAt: new Date().toISOString(),
-        },
-      ]);
-    } catch (error) {
-      console.error('Failed to load products:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.target.value);
-  };
+    dispatch(fetchMappings());
+  }, [dispatch]);
 
   const handleAddMapping = () => {
     console.log('Add mapping clicked');
-    setOpenModal(true);
+    setFormData({
+      sku: '',
+      productName: '',
+      naverProductId: '',
+      shopifyProductId: '',
+      shopifyVariantId: '',
+      vendor: 'album',
+      priceMargin: 0.1,
+      isActive: true,
+    });
+    setOpenDialog(true);
   };
 
-  const handleCloseModal = () => {
-    setOpenModal(false);
-    setMappingData({ naverProductId: '', shopifyProductId: '', sku: '' });
+  const handleSaveMapping = async () => {
+    console.log('Saving mapping:', formData);
+    
+    // Validation
+    if (!formData.sku || !formData.naverProductId || !formData.shopifyProductId) {
+      setSnackbar({
+        open: true,
+        message: 'SKU, 네이버 상품 ID, Shopify 상품 ID는 필수입니다.',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // shopifyVariantId가 없으면 shopifyProductId와 동일하게 설정 (임시)
+    const mappingData = {
+      ...formData,
+      shopifyVariantId: formData.shopifyVariantId || formData.shopifyProductId + '_variant',
+    };
+
+    try {
+      await dispatch(createMapping(mappingData)).unwrap();
+      setSnackbar({
+        open: true,
+        message: '매핑이 성공적으로 생성되었습니다.',
+        severity: 'success'
+      });
+      setOpenDialog(false);
+      // 매핑 목록 새로고침
+      dispatch(fetchMappings());
+    } catch (error: any) {
+      console.error('Failed to create mapping:', error);
+      setSnackbar({
+        open: true,
+        message: error.message || '매핑 생성에 실패했습니다.',
+        severity: 'error'
+      });
+    }
   };
 
-  const handleSaveMapping = () => {
-    console.log('Saving mapping:', mappingData);
-    // TODO: API 호출하여 매핑 저장
-    handleCloseModal();
-    loadProducts(); // 목록 새로고침
-  };
-
-  const handleRefresh = () => {
-    loadProducts();
-  };
+  const columns: GridColDef[] = [
+    { field: 'sku', headerName: 'SKU', width: 150 },
+    { field: 'productName', headerName: '상품명', width: 300 },
+    { field: 'naverProductId', headerName: '네이버 상품 ID', width: 150 },
+    { field: 'shopifyProductId', headerName: 'Shopify 상품 ID', width: 150 },
+    {
+      field: 'syncStatus',
+      headerName: '동기화 상태',
+      width: 120,
+      renderCell: (params) => (
+        <Typography
+          variant="body2"
+          color={
+            params.value === 'synced' ? 'success.main' :
+            params.value === 'pending' ? 'warning.main' : 'error.main'
+          }
+        >
+          {params.value === 'synced' ? '동기화됨' :
+           params.value === 'pending' ? '대기중' : '오류'}
+        </Typography>
+      ),
+    },
+    {
+      field: 'isActive',
+      headerName: '활성',
+      width: 100,
+      renderCell: (params) => (
+        <Typography variant="body2" color={params.value ? 'success.main' : 'text.disabled'}>
+          {params.value ? '활성' : '비활성'}
+        </Typography>
+      ),
+    },
+    {
+      field: 'actions',
+      headerName: '작업',
+      width: 150,
+      renderCell: (params) => (
+        <Stack direction="row" spacing={1}>
+          <IconButton size="small" color="primary">
+            <Edit />
+          </IconButton>
+          <IconButton size="small" color="error">
+            <Delete />
+          </IconButton>
+          <IconButton size="small" color="secondary">
+            <Sync />
+          </IconButton>
+        </Stack>
+      ),
+    },
+  ];
 
   return (
     <Box>
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" gutterBottom>
           상품 매핑 관리
         </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={handleRefresh}
-          >
-            새로고침
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleAddMapping}
-          >
-            매핑 추가
-          </Button>
-        </Stack>
+        <Typography variant="body1" color="text.secondary">
+          네이버와 Shopify 간의 상품 매핑을 관리합니다.
+        </Typography>
       </Box>
 
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ mb: 3 }}>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="SKU, 상품명, 상품 ID로 검색..."
-            value={searchTerm}
-            onChange={handleSearch}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-          />
-        </Box>
-
-        <Box sx={{ height: 600, width: '100%' }}>
-          <DataGrid
-            rows={rows}
-            columns={columns}
-            pageSize={10}
-            rowsPerPageOptions={[10, 25, 50]}
-            checkboxSelection
-            disableSelectionOnClick
-            loading={loading}
-            sx={{
-              '& .MuiDataGrid-root': {
-                border: 'none',
-              },
-              '& .MuiDataGrid-cell': {
-                borderBottom: '1px solid rgba(224, 224, 224, 0.5)',
-              },
-              '& .MuiDataGrid-columnHeaders': {
-                backgroundColor: '#f5f5f5',
-                borderBottom: '2px solid #e0e0e0',
-              },
-            }}
-          />
-        </Box>
-      </Paper>
-
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          매핑 통계
-        </Typography>
-        <Stack direction="row" spacing={3}>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              전체 매핑
-            </Typography>
-            <Typography variant="h4">
-              {rows.length}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              활성 매핑
-            </Typography>
-            <Typography variant="h4" color="success.main">
-              {rows.filter(r => r.status === 'ACTIVE').length}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              동기화 오류
-            </Typography>
-            <Typography variant="h4" color="error.main">
-              {rows.filter(r => r.syncStatus === 'error').length}
-            </Typography>
-          </Box>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">매핑 목록</Typography>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={handleAddMapping}
+          >
+            새 매핑 추가
+          </Button>
         </Stack>
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        <DataGrid
+          rows={mappings}
+          columns={columns}
+          getRowId={(row) => row._id || row.sku}
+          loading={loading}
+          autoHeight
+          pageSizeOptions={[10, 25, 50]}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 10 },
+            },
+          }}
+        />
       </Paper>
 
-      {/* 매핑 추가 모달 */}
-      <Dialog 
-        open={openModal} 
-        onClose={handleCloseModal}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>새 매핑 추가</DialogTitle>
+      {/* 매핑 추가/수정 다이얼로그 */}
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          새 매핑 추가
+          <IconButton
+            onClick={() => setOpenDialog(false)}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            <Close />
+          </IconButton>
+        </DialogTitle>
         <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="SKU"
-                value={mappingData.sku}
-                onChange={(e) => setMappingData({ ...mappingData, sku: e.target.value })}
-                placeholder="공통 SKU 입력"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>네이버 상품</InputLabel>
-                <Select
-                  value={mappingData.naverProductId}
-                  onChange={(e) => setMappingData({ ...mappingData, naverProductId: e.target.value })}
-                  label="네이버 상품"
-                >
-                  <MenuItem value="">선택하세요</MenuItem>
-                  <MenuItem value="naver1">네이버 상품 1</MenuItem>
-                  <MenuItem value="naver2">네이버 상품 2</MenuItem>
-                  <MenuItem value="naver3">네이버 상품 3</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Shopify 상품</InputLabel>
-                <Select
-                  value={mappingData.shopifyProductId}
-                  onChange={(e) => setMappingData({ ...mappingData, shopifyProductId: e.target.value })}
-                  label="Shopify 상품"
-                >
-                  <MenuItem value="">선택하세요</MenuItem>
-                  <MenuItem value="shopify1">Shopify 상품 1</MenuItem>
-                  <MenuItem value="shopify2">Shopify 상품 2</MenuItem>
-                  <MenuItem value="shopify3">Shopify 상품 3</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            <TextField
+              label="SKU"
+              value={formData.sku}
+              onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+              fullWidth
+              required
+            />
+            <TextField
+              label="상품명"
+              value={formData.productName}
+              onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              label="네이버 상품 ID"
+              value={formData.naverProductId}
+              onChange={(e) => setFormData({ ...formData, naverProductId: e.target.value })}
+              fullWidth
+              required
+            />
+            <TextField
+              label="Shopify 상품 ID"
+              value={formData.shopifyProductId}
+              onChange={(e) => setFormData({ ...formData, shopifyProductId: e.target.value })}
+              fullWidth
+              required
+            />
+            <TextField
+              label="Shopify Variant ID"
+              value={formData.shopifyVariantId}
+              onChange={(e) => setFormData({ ...formData, shopifyVariantId: e.target.value })}
+              fullWidth
+              helperText="비워두면 상품 ID + '_variant'로 자동 생성됩니다"
+            />
+            <FormControl fullWidth>
+              <InputLabel>벤더</InputLabel>
+              <Select
+                value={formData.vendor}
+                onChange={(e) => setFormData({ ...formData, vendor: e.target.value })}
+                label="벤더"
+              >
+                <MenuItem value="album">album</MenuItem>
+                <MenuItem value="other">기타</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              label="가격 마진 (%)"
+              type="number"
+              value={(formData.priceMargin || 0) * 100}
+              onChange={(e) => setFormData({ ...formData, priceMargin: Number(e.target.value) / 100 })}
+              fullWidth
+              helperText="예: 10% 마진은 10 입력"
+            />
+          </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseModal}>취소</Button>
-          <Button 
-            onClick={handleSaveMapping} 
-            variant="contained"
-            disabled={!mappingData.sku || !mappingData.naverProductId || !mappingData.shopifyProductId}
-          >
-            저장
-          </Button>
+          <Button onClick={() => setOpenDialog(false)}>취소</Button>
+          <Button onClick={handleSaveMapping} variant="contained">저장</Button>
         </DialogActions>
       </Dialog>
+
+      {/* 스낵바 */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

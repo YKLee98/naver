@@ -1,4 +1,5 @@
-// packages/backend/src/routes/api.routes.ts
+// ===== 1. packages/backend/src/routes/api.routes.ts =====
+// 매핑 목록 조회 라우트 추가
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares';
 import { 
@@ -72,12 +73,12 @@ export function setupApiRoutes(): Router {
   router.get('/products/search/naver', productController.searchNaverProducts);
   router.get('/products/search/shopify', productController.searchShopifyProducts);
 
-  // 재고 관련 라우트
-  router.get('/inventory/status', inventoryController.getInventoryStatus);
-  router.get('/inventory/:sku/status', inventoryController.getInventoryStatusBySku);
+  // 재고 관련 라우트 - 순서 중요! 구체적인 경로가 먼저 와야 함
+  router.get('/inventory/status', inventoryController.getInventoryStatusList);
+  router.get('/inventory/low-stock', inventoryController.getLowStockProducts);
+  router.get('/inventory/:sku/status', inventoryController.getInventoryStatus);
   router.get('/inventory/:sku/history', inventoryController.getInventoryHistory);
   router.post('/inventory/:sku/adjust', inventoryController.adjustInventory);
-  router.get('/inventory/low-stock', inventoryController.getLowStockProducts);
 
   // 동기화 관련 라우트
   router.post('/sync/full', syncController.performFullSync);
@@ -87,7 +88,8 @@ export function setupApiRoutes(): Router {
   router.put('/sync/settings', syncController.updateSyncSettings);
   router.get('/sync/history', syncController.getSyncHistory);
 
-  // 매핑 관련 라우트
+  // 매핑 관련 라우트 - 매핑 목록 조회 추가!
+  router.get('/mappings', mappingController.getMappings);  // 이 라우트가 누락되어 있었습니다!
   router.post('/mappings', mappingController.createMapping);
   router.put('/mappings/:id', mappingController.updateMapping);
   router.delete('/mappings/:id', mappingController.deleteMapping);
@@ -103,5 +105,3 @@ export function setupApiRoutes(): Router {
 
   return router;
 }
-
-// 기본 export 제거 - 함수로만 export

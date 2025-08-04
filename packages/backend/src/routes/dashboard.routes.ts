@@ -1,4 +1,4 @@
-// packages/backend/src/routes/dashboard.routes.ts
+// ===== 2. packages/backend/src/routes/dashboard.routes.ts =====
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares';
 import { DashboardController } from '../controllers';
@@ -11,14 +11,14 @@ const dashboardController = new DashboardController();
 // 인증 미들웨어 적용
 router.use(authMiddleware);
 
-// 대시보드 통계
-router.get('/statistics', dashboardController.getStatistics);
+// 대시보드 통계 - 메서드 이름 수정됨
+router.get('/statistics', dashboardController.getStats);
 
-// 최근 활동
-router.get('/activities', dashboardController.getRecentActivities);
+// 최근 활동 - 메서드 이름 수정됨
+router.get('/activities', dashboardController.getRecentActivity);
 
-// 차트 데이터
-router.get('/charts/price', dashboardController.getPriceChartData);
+// 차트 데이터 - 메서드 이름 수정됨
+router.get('/charts/price', dashboardController.getSalesChartData);
 router.get('/charts/inventory', dashboardController.getInventoryChartData);
 
 export default router;
