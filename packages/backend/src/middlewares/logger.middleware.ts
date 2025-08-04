@@ -1,29 +1,24 @@
-// packages/backend/src/middlewares/logging.middleware.ts
+// packages/backend/src/middlewares/logger.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 
-export const loggingMiddleware = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void => {
+export const requestLogger = (req: Request, res: Response, next: NextFunction): void => {
   const start = Date.now();
-
+  
   // Log request
-  logger.info('Incoming request', {
+  logger.info(`Incoming ${req.method} ${req.path}`, {
     method: req.method,
-    path: req.path,
-    query: req.query,
+    url: req.url,
     ip: req.ip,
-    userAgent: req.headers['user-agent'],
+    userAgent: req.get('user-agent'),
   });
 
   // Log response
   res.on('finish', () => {
     const duration = Date.now() - start;
-    logger.info('Request completed', {
+    logger.info(`Completed ${req.method} ${req.path}`, {
       method: req.method,
-      path: req.path,
+      url: req.url,
       statusCode: res.statusCode,
       duration: `${duration}ms`,
     });

@@ -84,7 +84,8 @@ export const fetchRecentActivity = createAsyncThunk(
   'dashboard/fetchActivity',
   async (limit: number = 10) => {
     try {
-      const response = await apiService.getRecentActivity(limit);
+      // API에서 limit 파라미터를 지원한다면
+      const response = await apiService.getRecentActivity();
       return response;
     } catch (error: any) {
       console.error('Recent activity error:', error);
@@ -97,23 +98,37 @@ export const fetchSalesChart = createAsyncThunk(
   'dashboard/fetchSalesChart',
   async (params: { startDate: string; endDate: string; interval?: string }) => {
     try {
-      // 임시 데이터 생성 (백엔드 구현 전까지)
-      const mockData: ChartData = {
-        labels: ['월', '화', '수', '목', '금', '토', '일'],
+      // 실제 API 호출로 변경
+      const response = await apiService.getSalesChartData(params);
+      
+      // API 응답을 ChartData 형식으로 변환
+      const chartData: ChartData = {
+        labels: response.map((item: any) => item._id || item.date),
         datasets: [
           {
             label: '매출',
-            data: [120000, 150000, 180000, 170000, 190000, 220000, 250000],
+            data: response.map((item: any) => item.totalQuantity || 0),
             borderColor: 'rgb(75, 192, 192)',
             backgroundColor: 'rgba(75, 192, 192, 0.2)',
             fill: true,
           }
         ]
       };
-      return mockData;
+      
+      return chartData;
     } catch (error: any) {
       console.error('Sales chart error:', error);
-      throw error;
+      // 에러 시 빈 데이터 반환
+      return {
+        labels: [],
+        datasets: [{
+          label: '매출',
+          data: [],
+          borderColor: 'rgb(75, 192, 192)',
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          fill: true,
+        }]
+      };
     }
   }
 );
@@ -122,26 +137,48 @@ export const fetchInventoryChart = createAsyncThunk(
   'dashboard/fetchInventoryChart',
   async () => {
     try {
-      // 임시 데이터 생성
-      const mockData: ChartData = {
-        labels: ['정상 재고', '부족', '품절', '초과'],
+      const response = await apiService.getInventoryChartData();
+      
+      // API 응답을 ChartData 형식으로 변환
+      const byStatus = response.byStatus || [];
+      const chartData: ChartData = {
+        labels: byStatus.map((item: any) => {
+          switch(item._id) {
+            case 'inStock': return '정상 재고';
+            case 'lowStock': return '부족';
+            case 'outOfStock': return '품절';
+            default: return item._id;
+          }
+        }),
         datasets: [
           {
             label: '재고 현황',
-            data: [150, 30, 10, 5],
+            data: byStatus.map((item: any) => item.count),
             backgroundColor: [
               'rgba(75, 192, 192, 0.8)',
               'rgba(255, 206, 86, 0.8)',
               'rgba(255, 99, 132, 0.8)',
-              'rgba(54, 162, 235, 0.8)',
             ],
           }
         ]
       };
-      return mockData;
+      
+      return chartData;
     } catch (error: any) {
       console.error('Inventory chart error:', error);
-      throw error;
+      // 에러 시 빈 데이터 반환
+      return {
+        labels: ['정상 재고', '부족', '품절'],
+        datasets: [{
+          label: '재고 현황',
+          data: [0, 0, 0],
+          backgroundColor: [
+            'rgba(75, 192, 192, 0.8)',
+            'rgba(255, 206, 86, 0.8)',
+            'rgba(255, 99, 132, 0.8)',
+          ],
+        }]
+      };
     }
   }
 );
@@ -150,25 +187,32 @@ export const fetchSyncChart = createAsyncThunk(
   'dashboard/fetchSyncChart',
   async (params: { startDate: string; endDate: string }) => {
     try {
-      // 임시 데이터 생성
-      const mockData: ChartData = {
-        labels: ['성공', '실패', '진행중'],
+      const response = await apiService.getSyncChartData(params);
+      
+      // API 응답을 ChartData 형식으로 변환
+      const chartData: ChartData = {
+        labels: response.map((item: any) => item._id),
         datasets: [
           {
-            label: '동기화 상태',
-            data: [85, 10, 5],
-            backgroundColor: [
-              'rgba(75, 192, 192, 0.8)',
-              'rgba(255, 99, 132, 0.8)',
-              'rgba(255, 206, 86, 0.8)',
-            ],
+            label: '동기화 건수',
+            data: response.map((item: any) => item.totalCount),
+            backgroundColor: 'rgba(75, 192, 192, 0.8)',
           }
         ]
       };
-      return mockData;
+      
+      return chartData;
     } catch (error: any) {
       console.error('Sync chart error:', error);
-      throw error;
+      // 에러 시 빈 데이터 반환
+      return {
+        labels: [],
+        datasets: [{
+          label: '동기화 건수',
+          data: [],
+          backgroundColor: 'rgba(75, 192, 192, 0.8)',
+        }]
+      };
     }
   }
 );

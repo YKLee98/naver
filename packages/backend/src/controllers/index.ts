@@ -6,3 +6,5 @@ export { SyncController } from './SyncController';
 export { WebhookController } from './WebhookController';
 export { MappingController } from './MappingController';
 export { DashboardController } from './DashboardController';
+export { PriceSyncController } from './PriceSyncController';
+export { HealthController} from './HealthController';

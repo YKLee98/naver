@@ -147,8 +147,118 @@ class ApiService {
   getAxiosInstance(): AxiosInstance {
     return this.instance;
   }
+
+  // 대시보드 통계 조회 - 백엔드 라우트와 일치하도록 수정
+  async getDashboardStats() {
+    try {
+      const response = await this.get('/dashboard/statistics');
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch dashboard statistics:', error);
+      throw error;
+    }
+  }
+
+  // 최근 활동 조회 - 백엔드 라우트와 일치하도록 수정
+  async getRecentActivity() {
+    try {
+      const response = await this.get('/dashboard/activities');
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch recent activities:', error);
+      throw error;
+    }
+  }
+
+  // 가격 차트 데이터 조회
+  async getPriceChartData() {
+    try {
+      const response = await this.get('/dashboard/charts/price');
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch price chart data:', error);
+      throw error;
+    }
+  }
+
+  // 재고 차트 데이터 조회
+  async getInventoryChartData() {
+    try {
+      const response = await this.get('/dashboard/charts/inventory');
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch inventory chart data:', error);
+      throw error;
+    }
+  }
+
+  // 판매 차트 데이터 조회
+  async getSalesChartData(params?: { startDate?: string; endDate?: string; period?: string }) {
+    try {
+      const response = await this.get('/dashboard/charts/sales', { params });
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch sales chart data:', error);
+      throw error;
+    }
+  }
+
+  // 동기화 차트 데이터 조회
+  async getSyncChartData(params?: { startDate?: string; endDate?: string; period?: string }) {
+    try {
+      const response = await this.get('/dashboard/charts/sync', { params });
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch sync chart data:', error);
+      throw error;
+    }
+  }
+
+  // 알림 조회
+  async getNotifications(params?: { unreadOnly?: boolean; limit?: number }) {
+    try {
+      const response = await this.get('/dashboard/notifications', { params });
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch notifications:', error);
+      throw error;
+    }
+  }
+
+  // 알림 읽음 처리
+  async markNotificationAsRead(id: string) {
+    try {
+      const response = await this.put(`/dashboard/notifications/${id}/read`);
+      return response;
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+      throw error;
+    }
+  }
+
+  // 시스템 상태 조회
+  async getSystemHealth() {
+    try {
+      const response = await this.get('/dashboard/health');
+      return response;
+    } catch (error) {
+      console.error('Failed to fetch system health:', error);
+      throw error;
+    }
+  }
 }
 
 // 싱글톤 인스턴스 생성 및 export
 const apiService = new ApiService();
+
+// default export
 export default apiService;
+
+// named exports for backward compatibility
+export { apiService };
+
+// 개별 메서드들도 export (필요한 경우)
+export const getDashboardStats = () => apiService.getDashboardStats();
+export const getRecentActivity = () => apiService.getRecentActivity();
+export const getPriceChartData = () => apiService.getPriceChartData();
+export const getInventoryChartData = () => apiService.getInventoryChartData();
