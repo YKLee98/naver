@@ -109,6 +109,95 @@ export class NaverProductService {
     }
   }
 
+  
+/**
+ * SKU로 상품 검색
+ */
+async searchProductsBySku(sku: string): Promise<any[]> {
+  try {
+    const headers = await this.authService.getAuthHeaders();
+    
+    // 네이버 상품 조회 API
+    const response = await axios.get(
+      `${this.apiBaseUrl}/external/v2/products`,
+      {
+        headers,
+        params: {
+          // 판매자 관리 코드(SKU)로 검색
+          sellerManagementCode: sku,
+        },
+      }
+    );
+
+    if (response.data.contents && response.data.contents.length > 0) {
+      return response.data.contents;
+    }
+
+    // 부분 일치 검색
+    const allProductsResponse = await axios.get(
+      `${this.apiBaseUrl}/external/v2/products`,
+      {
+        headers,
+        params: {
+          page: 1,
+          size: 100,
+        },
+      }
+    );
+
+    // SKU가 포함된 상품 필터링
+    const filteredProducts = allProductsResponse.data.contents.filter((product: any) => 
+      product.sellerManagementCode && 
+      product.sellerManagementCode.toLowerCase().includes(sku.toLowerCase())
+    );
+
+    return filteredProducts;
+  } catch (error) {
+    logger.error('Failed to search products by SKU:', error);
+    throw new Error('Failed to search Naver products');
+  }
+}
+
+/**
+ * 상품 재고 조회
+ */
+async getProductStock(productNo: string): Promise<number> {
+  try {
+    const headers = await this.authService.getAuthHeaders();
+    
+    const response = await axios.get(
+      `${this.apiBaseUrl}/external/v2/products/${productNo}`,
+      { headers }
+    );
+
+    return response.data.stockQuantity || 0;
+  } catch (error) {
+    logger.error('Failed to get product stock:', error);
+    throw new Error('Failed to get product stock');
+  }
+}
+
+/**
+ * 재고 업데이트
+ */
+async updateStock(productNo: string, quantity: number): Promise<void> {
+  try {
+    const headers = await this.authService.getAuthHeaders();
+    
+    await axios.put(
+      `${this.apiBaseUrl}/external/v2/products/${productNo}/stock`,
+      {
+        stockQuantity: quantity
+      },
+      { headers }
+    );
+
+    logger.info(`Updated stock for product ${productNo} to ${quantity}`);
+  } catch (error) {
+    logger.error('Failed to update stock:', error);
+    throw new Error('Failed to update stock');
+  }
+}
   /**
    * 상품 상세 조회
    */

@@ -9,11 +9,11 @@ import Layout from './components/common/Layout';
 
 // Pages
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Products from './pages/Products';
-import Inventory from './pages/Inventory';
-import Pricing from './pages/Pricing';
-import Reports from './pages/Reports';
+import Dashboard from './pages/Dashboard/index';
+import Products from './pages/Products/index';
+import Inventory from './pages/Inventory/index';
+import Pricing from './pages/Pricing/index';
+import Reports from './pages/Reports/index';
 import Settings from './pages/Settings';
 
 function App() {

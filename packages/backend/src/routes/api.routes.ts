@@ -6,6 +6,8 @@ import { authMiddleware } from '../middlewares/auth.middleware';
 // Route imports
 import authRoutes from './auth.routes';
 import healthRoutes from './health.routes';
+import productSearchRoutes from './productSearch.routes';
+import inventoryAdjustRoutes from './inventoryAdjust.routes';
 
 // Controller imports (lazy loaded for dependency injection)
 export function createApiRouter(redis: Redis): Router {
@@ -74,6 +76,11 @@ export function createApiRouter(redis: Redis): Router {
   router.get('/products/:sku', controllers.product.getProductBySku.bind(controllers.product));
   router.post('/products/search/naver', controllers.product.searchNaverProducts.bind(controllers.product));
   router.post('/products/search/shopify', controllers.product.searchShopifyProducts.bind(controllers.product));
+  // 상품 검색 라우트
+  router.use('/products', productSearchRoutes);
+  
+  // 재고 조정 라우트
+  router.use('/inventory', inventoryAdjustRoutes);
 
   // 재고 관련 라우트
   router.get('/inventory/:sku/status', controllers.inventory.getInventoryStatus.bind(controllers.inventory));

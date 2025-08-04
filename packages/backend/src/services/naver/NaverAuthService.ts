@@ -1,7 +1,7 @@
 // packages/backend/src/services/naver/NaverAuthService.ts
 import { Redis } from 'ioredis';
 import axios from 'axios';
-import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import { config } from '@/config';
 import { logger } from '@/utils/logger';
 
@@ -26,15 +26,21 @@ export class NaverAuthService {
   }
 
   /**
-   * 전자서명 생성 - bcrypt를 사용하여 client_secret을 salt로 활용
+   * 네이버 전자서명 생성
+   * 네이버 API는 HMAC-SHA256을 Base64로 인코딩한 서명을 사용합니다
    */
-  private async generateSignature(timestamp: string): Promise<string> {
+  private generateSignature(timestamp: string): string {
     try {
-      const password = `${this.clientId}_${timestamp}`;
-      // client_secret을 salt로 사용하여 bcrypt hash 생성
-      const hashed = await bcrypt.hash(password, this.clientSecret);
-      // Base64 인코딩
-      return Buffer.from(hashed).toString('base64');
+      const message = `${this.clientId}_${timestamp}`;
+      
+      // HMAC-SHA256으로 서명 생성
+      const signature = crypto
+        .createHmac('sha256', this.clientSecret)
+        .update(message)
+        .digest('base64');
+      
+      logger.debug('Generated signature for Naver API');
+      return signature;
     } catch (error) {
       logger.error('Failed to generate signature:', error);
       throw new Error('Signature generation failed');
@@ -62,7 +68,7 @@ export class NaverAuthService {
 
       // 새 토큰 발급
       const timestamp = Date.now().toString();
-      const signature = await this.generateSignature(timestamp);
+      const signature = this.generateSignature(timestamp);
 
       const params = new URLSearchParams({
         client_id: this.clientId,
@@ -71,6 +77,8 @@ export class NaverAuthService {
         grant_type: 'client_credentials',
         type: 'SELF'
       });
+
+      logger.debug('Requesting new Naver access token');
 
       const response = await axios.post(
         `${this.apiBaseUrl}/external/v1/oauth2/token`,
@@ -95,8 +103,15 @@ export class NaverAuthService {
 
       logger.info('Naver token refreshed successfully');
       return tokenData.access_token;
-    } catch (error) {
-      logger.error('Failed to get Naver access token:', error);
+    } catch (error: any) {
+      logger.error('Failed to get Naver access token:', error.response?.data || error.message);
+      
+      // 더 자세한 에러 메시지 제공
+      if (error.response) {
+        const errorMsg = `Naver API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`;
+        throw new Error(errorMsg);
+      }
+      
       throw new Error('Failed to authenticate with Naver API');
     }
   }

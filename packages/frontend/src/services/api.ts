@@ -17,13 +17,22 @@ class ApiService {
     // Request interceptor
     this.instance.interceptors.request.use(
       (config) => {
-        const token = localStorage.getItem('token');
+        // authToken을 먼저 확인하고, 없으면 token 확인
+        const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+        
+        // 디버깅용 로그
+        console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
+          hasToken: !!token,
+          tokenPreview: token ? token.substring(0, 20) + '...' : null
+        });
+        
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
       },
       (error) => {
+        console.error('[API Request Error]', error);
         return Promise.reject(error);
       }
     );
@@ -31,10 +40,20 @@ class ApiService {
     // Response interceptor
     this.instance.interceptors.response.use(
       (response) => {
+        // 디버깅용 로그
+        console.log(`[API Response] ${response.config.url}`, {
+          status: response.status,
+          data: response.data
+        });
         return response;
       },
       async (error) => {
         const originalRequest = error.config;
+
+        console.error(`[API Error] ${originalRequest?.url}`, {
+          status: error.response?.status,
+          message: error.response?.data?.message || error.message
+        });
 
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
@@ -43,17 +62,24 @@ class ApiService {
             const refreshToken = localStorage.getItem('refreshToken');
             if (refreshToken) {
               const response = await this.post('/auth/refresh', { refreshToken });
-              const { token } = response;
+              const { accessToken, token } = response;
               
-              localStorage.setItem('token', token);
-              originalRequest.headers.Authorization = `Bearer ${token}`;
+              // 두 가지 키로 저장 (호환성)
+              const newToken = accessToken || token;
+              localStorage.setItem('authToken', newToken);
+              localStorage.setItem('token', newToken);
+              
+              originalRequest.headers.Authorization = `Bearer ${newToken}`;
               
               return this.instance(originalRequest);
             }
           } catch (refreshError) {
             // Refresh failed, redirect to login
+            console.error('[Token Refresh Failed]', refreshError);
+            localStorage.removeItem('authToken');
             localStorage.removeItem('token');
             localStorage.removeItem('refreshToken');
+            localStorage.removeItem('user');
             window.location.href = '/login';
             return Promise.reject(refreshError);
           }
@@ -61,11 +87,11 @@ class ApiService {
 
         // Handle other errors
         if (error.response?.status === 403) {
-          // Handle forbidden
+          console.error('[403 Forbidden]', error.response.data);
         } else if (error.response?.status === 404) {
-          // Handle not found
+          console.error('[404 Not Found]', error.response.data);
         } else if (error.response?.status >= 500) {
-          // Handle server errors
+          console.error('[Server Error]', error.response.data);
         }
 
         return Promise.reject(error);
@@ -116,6 +142,13 @@ class ApiService {
     });
     return response.data;
   }
+
+  // Axios 인스턴스 직접 접근 (필요시)
+  getAxiosInstance(): AxiosInstance {
+    return this.instance;
+  }
 }
 
-export default new ApiService();
+// 싱글톤 인스턴스 생성 및 export
+const apiService = new ApiService();
+export default apiService;

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, CssBaseline, Toolbar } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import { Outlet } from 'react-router-dom'; // 이 줄 추가
 import Header from '../Header';
 import Sidebar from '../Sidebar';
 
@@ -23,11 +24,8 @@ const Main = styled('main', {
   }),
 }));
 
-interface LayoutProps {
-  children: React.ReactNode;
-}
-
-const Layout: React.FC<LayoutProps> = ({ children }) => {
+// interface 제거 또는 수정
+const Layout: React.FC = () => {  // children prop 제거
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleDrawerToggle = () => {
@@ -41,7 +39,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <Main open={sidebarOpen}>
         <Toolbar />
-        {children}
+        <Outlet />  {/* children 대신 Outlet 사용 */}
       </Main>
     </Box>
   );

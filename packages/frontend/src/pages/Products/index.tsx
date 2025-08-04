@@ -10,6 +10,15 @@ import {
   IconButton,
   Chip,
   Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Grid,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import {
@@ -101,19 +110,22 @@ const Products: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
+  
+  // 모달 관련 상태
+  const [openModal, setOpenModal] = useState(false);
+  const [mappingData, setMappingData] = useState({
+    naverProductId: '',
+    shopifyProductId: '',
+    sku: '',
+  });
 
   useEffect(() => {
-    // 데이터 로드
     loadProducts();
   }, []);
 
   const loadProducts = async () => {
     setLoading(true);
     try {
-      // API 호출하여 상품 매핑 데이터 로드
-      // const response = await productApi.getMappings();
-      // setRows(response.data);
-      
       // 임시 데이터
       setRows([
         {
@@ -139,8 +151,20 @@ const Products: React.FC = () => {
   };
 
   const handleAddMapping = () => {
-    // 매핑 추가 모달 열기
-    console.log('Add mapping');
+    console.log('Add mapping clicked');
+    setOpenModal(true);
+  };
+
+  const handleCloseModal = () => {
+    setOpenModal(false);
+    setMappingData({ naverProductId: '', shopifyProductId: '', sku: '' });
+  };
+
+  const handleSaveMapping = () => {
+    console.log('Saving mapping:', mappingData);
+    // TODO: API 호출하여 매핑 저장
+    handleCloseModal();
+    loadProducts(); // 목록 새로고침
   };
 
   const handleRefresh = () => {
@@ -245,6 +269,69 @@ const Products: React.FC = () => {
           </Box>
         </Stack>
       </Paper>
+
+      {/* 매핑 추가 모달 */}
+      <Dialog 
+        open={openModal} 
+        onClose={handleCloseModal}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>새 매핑 추가</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="SKU"
+                value={mappingData.sku}
+                onChange={(e) => setMappingData({ ...mappingData, sku: e.target.value })}
+                placeholder="공통 SKU 입력"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>네이버 상품</InputLabel>
+                <Select
+                  value={mappingData.naverProductId}
+                  onChange={(e) => setMappingData({ ...mappingData, naverProductId: e.target.value })}
+                  label="네이버 상품"
+                >
+                  <MenuItem value="">선택하세요</MenuItem>
+                  <MenuItem value="naver1">네이버 상품 1</MenuItem>
+                  <MenuItem value="naver2">네이버 상품 2</MenuItem>
+                  <MenuItem value="naver3">네이버 상품 3</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Shopify 상품</InputLabel>
+                <Select
+                  value={mappingData.shopifyProductId}
+                  onChange={(e) => setMappingData({ ...mappingData, shopifyProductId: e.target.value })}
+                  label="Shopify 상품"
+                >
+                  <MenuItem value="">선택하세요</MenuItem>
+                  <MenuItem value="shopify1">Shopify 상품 1</MenuItem>
+                  <MenuItem value="shopify2">Shopify 상품 2</MenuItem>
+                  <MenuItem value="shopify3">Shopify 상품 3</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseModal}>취소</Button>
+          <Button 
+            onClick={handleSaveMapping} 
+            variant="contained"
+            disabled={!mappingData.sku || !mappingData.naverProductId || !mappingData.shopifyProductId}
+          >
+            저장
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
