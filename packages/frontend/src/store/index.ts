@@ -1,5 +1,4 @@
-// ===== 2. packages/frontend/src/store/index.ts =====
-// products reducer가 포함되어 있는지 확인
+// packages/frontend/src/store/index.ts
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer from './slices/authSlice';
 import dashboardReducer from './slices/dashboardSlice';
@@ -16,8 +15,8 @@ export const store = configureStore({
     auth: authReducer,
     dashboard: dashboardReducer,
     inventory: inventoryReducer,
-    products: productReducer,  // 이 줄이 있는지 확인!
-    notifications: notificationReducer,
+    products: productReducer,
+    notification: notificationReducer,  // 'notifications'에서 'notification'으로 변경
     settings: settingsReducer,
     sync: syncReducer,
     pricing: pricingReducer,
@@ -31,3 +30,6 @@ export const store = configureStore({
       },
     }),
 });
+
+export type RootState = ReturnType<typeof store.getState>;
+export type AppDispatch = typeof store.dispatch;

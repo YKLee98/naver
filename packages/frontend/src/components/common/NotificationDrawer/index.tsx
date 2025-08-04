@@ -1,3 +1,4 @@
+// packages/frontend/src/components/common/NotificationDrawer/index.tsx
 import React from 'react';
 import {
   Drawer,
@@ -35,7 +36,7 @@ import { formatRelativeTime } from '@/utils/formatters';
 
 const NotificationDrawer: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
-  const { notifications, isDrawerOpen, unreadCount } = useSelector(
+  const { notifications, drawerOpen, unreadCount } = useSelector(
     (state: RootState) => state.notification
   );
 
@@ -79,34 +80,27 @@ const NotificationDrawer: React.FC = () => {
   return (
     <Drawer
       anchor="right"
-      open={isDrawerOpen}
+      open={drawerOpen}
       onClose={handleClose}
-      sx={{
-        '& .MuiDrawer-paper': {
-          width: 400,
-          maxWidth: '100%',
-        },
-      }}
+      sx={{ zIndex: (theme) => theme.zIndex.drawer + 2 }}
     >
-      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
+      <Box sx={{ width: 350, height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <Typography variant="h6">알림</Typography>
-              {unreadCount > 0 && (
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              알림 {unreadCount > 0 && (
                 <Chip
-                  label={`${unreadCount}개 읽지 않음`}
+                  label={unreadCount}
                   color="primary"
                   size="small"
+                  sx={{ ml: 1 }}
                 />
               )}
-            </Stack>
+            </Typography>
             <IconButton onClick={handleClose} size="small">
               <CloseIcon />
             </IconButton>
           </Stack>
-          
           {notifications.length > 0 && (
             <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
               <Button
@@ -129,7 +123,6 @@ const NotificationDrawer: React.FC = () => {
           )}
         </Box>
 
-        {/* Notification List */}
         <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
           {notifications.length === 0 ? (
             <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -177,7 +170,7 @@ const NotificationDrawer: React.FC = () => {
                             variant="caption"
                             color="text.secondary"
                           >
-                            {formatRelativeTime(notification.timestamp)}
+                            {formatRelativeTime(notification.createdAt)}
                           </Typography>
                         </>
                       }
@@ -195,4 +188,3 @@ const NotificationDrawer: React.FC = () => {
 };
 
 export default NotificationDrawer;
-
