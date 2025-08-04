@@ -1,383 +1,345 @@
-// packages/frontend/src/pages/Products/index.tsx
-import React, { useState, useEffect } from 'react';
+// packages/frontend/src/pages/Dashboard/index.tsx
+import React, { useEffect } from 'react';
 import {
   Box,
+  Grid,
   Paper,
   Typography,
-  Button,
-  TextField,
-  InputAdornment,
-  IconButton,
+  Card,
+  CardContent,
+  LinearProgress,
   Chip,
   Stack,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Grid,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
+  Alert,
+  CircularProgress,
 } from '@mui/material';
-import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import {
-  Search as SearchIcon,
-  Add as AddIcon,
-  Refresh as RefreshIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
+  TrendingUp,
+  TrendingDown,
+  Inventory2,
+  AttachMoney,
   Link as LinkIcon,
+  Warning,
+  CheckCircle,
+  Error,
 } from '@mui/icons-material';
 import { useAppDispatch, useAppSelector } from '@/hooks/redux';
+import { fetchDashboardStats, fetchRecentActivity } from '@/store/slices/dashboardSlice';
+import { formatNumber, formatCurrency, formatDateTime } from '@/utils/formatters';
 
-const columns: GridColDef[] = [
-  { 
-    field: 'sku', 
-    headerName: 'SKU', 
-    width: 130,
-    renderCell: (params) => (
-      <Typography variant="body2" sx={{ fontWeight: 500 }}>
-        {params.value}
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  subtitle?: string;
+  icon: React.ReactNode;
+  trend?: {
+    value: number;
+    isPositive: boolean;
+  };
+  color?: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'info';
+}
+
+const StatCard: React.FC<StatCardProps> = ({
+  title,
+  value,
+  subtitle,
+  icon,
+  trend,
+  color = 'primary',
+}) => (
+  <Card sx={{ height: '100%' }}>
+    <CardContent>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Box
+          sx={{
+            p: 1,
+            borderRadius: 2,
+            backgroundColor: `${color}.light`,
+            color: `${color}.main`,
+            mr: 2,
+          }}
+        >
+          {icon}
+        </Box>
+        <Typography variant="h6" color="text.secondary">
+          {title}
+        </Typography>
+      </Box>
+      
+      <Typography variant="h4" sx={{ mb: 1 }}>
+        {value}
       </Typography>
-    ),
-  },
-  { 
-    field: 'productName', 
-    headerName: '상품명', 
-    width: 250,
-    flex: 1,
-  },
-  { 
-    field: 'naverProductId', 
-    headerName: '네이버 상품 ID', 
-    width: 150,
-  },
-  { 
-    field: 'shopifyProductId', 
-    headerName: 'Shopify 상품 ID', 
-    width: 150,
-  },
-  {
-    field: 'status',
-    headerName: '상태',
-    width: 120,
-    renderCell: (params: GridRenderCellParams) => {
-      const status = params.value as string;
-      const color = status === 'ACTIVE' ? 'success' : status === 'INACTIVE' ? 'warning' : 'error';
-      return <Chip label={status} color={color} size="small" />;
-    },
-  },
-  {
-    field: 'syncStatus',
-    headerName: '동기화 상태',
-    width: 120,
-    renderCell: (params: GridRenderCellParams) => {
-      const status = params.value as string;
-      const color = status === 'synced' ? 'success' : status === 'pending' ? 'warning' : 'error';
-      const label = status === 'synced' ? '동기화됨' : status === 'pending' ? '대기중' : '오류';
-      return <Chip label={label} color={color} size="small" variant="outlined" />;
-    },
-  },
-  {
-    field: 'lastSyncedAt',
-    headerName: '마지막 동기화',
-    width: 150,
-    valueGetter: (params) => {
-      return params.value ? new Date(params.value).toLocaleString('ko-KR') : '-';
-    },
-  },
-  {
-    field: 'actions',
-    headerName: '작업',
-    width: 120,
-    sortable: false,
-    renderCell: (params: GridRenderCellParams) => (
-      <Stack direction="row" spacing={1}>
-        <IconButton size="small" color="primary">
-          <EditIcon fontSize="small" />
-        </IconButton>
-        <IconButton size="small" color="error">
-          <DeleteIcon fontSize="small" />
-        </IconButton>
-      </Stack>
-    ),
-  },
-];
+      
+      {subtitle && (
+        <Typography variant="body2" color="text.secondary">
+          {subtitle}
+        </Typography>
+      )}
+      
+      {trend && (
+        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+          {trend.isPositive ? (
+            <TrendingUp color="success" fontSize="small" />
+          ) : (
+            <TrendingDown color="error" fontSize="small" />
+          )}
+          <Typography
+            variant="caption"
+            color={trend.isPositive ? 'success.main' : 'error.main'}
+            sx={{ ml: 0.5 }}
+          >
+            {trend.isPositive ? '+' : ''}{trend.value}%
+          </Typography>
+        </Box>
+      )}
+    </CardContent>
+  </Card>
+);
 
-const Products: React.FC = () => {
+const Dashboard: React.FC = () => {
   const dispatch = useAppDispatch();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState([]);
-  
-  // 모달 관련 상태
-  const [openModal, setOpenModal] = useState(false);
-  const [mappingData, setMappingData] = useState({
-    naverProductId: '',
-    shopifyProductId: '',
-    sku: '',
-  });
-  const [naverProducts, setNaverProducts] = useState<any[]>([]);
-  const [shopifyProducts, setShopifyProducts] = useState<any[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(false);
+  const { stats, activities, loading, error } = useAppSelector((state) => state.dashboard);
 
   useEffect(() => {
-    loadProducts();
-  }, []);
+    dispatch(fetchDashboardStats());
+    dispatch(fetchRecentActivity());
+  }, [dispatch]);
 
-  const loadProducts = async () => {
-    setLoading(true);
-    try {
-      // 임시 데이터
-      setRows([
-        {
-          id: '1',
-          sku: 'TEST-001',
-          productName: '테스트 상품 1',
-          naverProductId: 'NAV123',
-          shopifyProductId: 'SHOP456',
-          status: 'ACTIVE',
-          syncStatus: 'synced',
-          lastSyncedAt: new Date().toISOString(),
-        },
-      ]);
-    } catch (error) {
-      console.error('Failed to load products:', error);
-    } finally {
-      setLoading(false);
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">데이터를 불러오는 중 오류가 발생했습니다: {error}</Alert>
+      </Box>
+    );
+  }
+
+  // 동기화 상태 색상 결정
+  const getSyncStatusColor = (status: string) => {
+    switch (status) {
+      case 'synced': return 'success';
+      case 'pending': return 'warning';
+      case 'error': return 'error';
+      default: return 'default';
     }
   };
 
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.target.value);
-  };
-
-  const handleAddMapping = () => {
-    console.log('Add mapping clicked');
-    setOpenModal(true);
-  };
-
-  const handleSkuChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const sku = e.target.value;
-    setMappingData({ ...mappingData, sku });
-    
-    if (sku.length >= 3) { // SKU가 3자 이상일 때 검색
-      setLoadingProducts(true);
-      try {
-        // API 호출 시뮬레이션 - 실제로는 백엔드 API 호출
-        // const naverResponse = await api.get(`/products/naver/search?sku=${sku}`);
-        // const shopifyResponse = await api.get(`/products/shopify/search?sku=${sku}`);
-        
-        // 임시 데이터
-        setTimeout(() => {
-          setNaverProducts([
-            { id: 'NAV001', name: `[네이버] ${sku} - 샘플 앨범 A`, sku: sku },
-            { id: 'NAV002', name: `[네이버] ${sku} - 샘플 앨범 B`, sku: sku },
-          ]);
-          setShopifyProducts([
-            { id: 'SHOP001', name: `[Shopify] ${sku} - Sample Album A`, sku: sku },
-            { id: 'SHOP002', name: `[Shopify] ${sku} - Sample Album B`, sku: sku },
-          ]);
-          setLoadingProducts(false);
-        }, 500);
-      } catch (error) {
-        console.error('Failed to search products:', error);
-        setLoadingProducts(false);
-      }
+  // 활동 아이콘 결정
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case 'sync': return <CheckCircle color="success" />;
+      case 'error': return <Error color="error" />;
+      case 'warning': return <Warning color="warning" />;
+      case 'price': return <AttachMoney color="info" />;
+      default: return <CheckCircle />;
     }
-  };
-
-  const handleCloseModal = () => {
-    setOpenModal(false);
-    setMappingData({ naverProductId: '', shopifyProductId: '', sku: '' });
-    setNaverProducts([]);
-    setShopifyProducts([]);
-  };
-
-  const handleSaveMapping = () => {
-    console.log('Saving mapping:', mappingData);
-    // TODO: API 호출하여 매핑 저장
-    handleCloseModal();
-    loadProducts(); // 목록 새로고침
-  };
-
-  const handleRefresh = () => {
-    loadProducts();
   };
 
   return (
-    <Box>
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
-          상품 매핑 관리
-        </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={handleRefresh}
-          >
-            새로고침
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleAddMapping}
-          >
-            매핑 추가
-          </Button>
-        </Stack>
-      </Box>
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h4" sx={{ mb: 3 }}>
+        대시보드
+      </Typography>
 
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ mb: 3 }}>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="SKU, 상품명, 상품 ID로 검색..."
-            value={searchTerm}
-            onChange={handleSearch}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
+      {/* 통계 카드 */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="전체 상품"
+            value={formatNumber(stats?.totalProducts || 0)}
+            subtitle={`활성: ${stats?.activeProducts || 0}`}
+            icon={<Inventory2 />}
+            trend={{ value: 5.2, isPositive: true }}
+            color="primary"
           />
-        </Box>
-
-        <Box sx={{ height: 600, width: '100%' }}>
-          <DataGrid
-            rows={rows}
-            columns={columns}
-            pageSize={10}
-            rowsPerPageOptions={[10, 25, 50]}
-            checkboxSelection
-            disableSelectionOnClick
-            loading={loading}
-            sx={{
-              '& .MuiDataGrid-root': {
-                border: 'none',
-              },
-              '& .MuiDataGrid-cell': {
-                borderBottom: '1px solid rgba(224, 224, 224, 0.5)',
-              },
-              '& .MuiDataGrid-columnHeaders': {
-                backgroundColor: '#f5f5f5',
-                borderBottom: '2px solid #e0e0e0',
-              },
-            }}
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="매핑된 상품"
+            value={formatNumber(stats?.mappings?.total || 0)}
+            subtitle={`활성: ${stats?.mappings?.active || 0}`}
+            icon={<LinkIcon />}
+            trend={{ value: 2.8, isPositive: true }}
+            color="success"
           />
-        </Box>
-      </Paper>
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="오늘 주문"
+            value={formatNumber(stats?.orders?.today || 0)}
+            subtitle={`이번 주: ${stats?.orders?.week || 0}`}
+            icon={<AttachMoney />}
+            trend={{ value: 12.5, isPositive: true }}
+            color="info"
+          />
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="동기화 오류"
+            value={formatNumber(stats?.syncStatus?.error || 0)}
+            subtitle={`대기중: ${stats?.syncStatus?.pending || 0}`}
+            icon={<Warning />}
+            color="warning"
+          />
+        </Grid>
+      </Grid>
 
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          매핑 통계
-        </Typography>
-        <Stack direction="row" spacing={3}>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              전체 매핑
+      <Grid container spacing={3}>
+        {/* 동기화 상태 */}
+        <Grid item xs={12} md={8}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" sx={{ mb: 3 }}>
+              동기화 상태
             </Typography>
-            <Typography variant="h4">
-              {rows.length}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              활성 매핑
-            </Typography>
-            <Typography variant="h4" color="success.main">
-              {rows.filter(r => r.status === 'ACTIVE').length}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              동기화 오류
-            </Typography>
-            <Typography variant="h4" color="error.main">
-              {rows.filter(r => r.syncStatus === 'error').length}
-            </Typography>
-          </Box>
-        </Stack>
-      </Paper>
-
-      {/* 매핑 추가 모달 */}
-      <Dialog 
-        open={openModal} 
-        onClose={handleCloseModal}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>새 매핑 추가</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="SKU"
-                value={mappingData.sku}
-                onChange={handleSkuChange}
-                placeholder="공통 SKU 입력 (3자 이상 입력 시 상품 검색)"
-                helperText="SKU를 입력하면 해당 SKU를 가진 상품을 자동으로 검색합니다"
+            
+            <Grid container spacing={2}>
+              <Grid item xs={4}>
+                <Box sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="success.main">
+                    {stats?.syncStatus?.synced || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    동기화 완료
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={4}>
+                <Box sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="warning.main">
+                    {stats?.syncStatus?.pending || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    대기중
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={4}>
+                <Box sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="error.main">
+                    {stats?.syncStatus?.error || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    오류
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+            
+            <Box sx={{ mt: 3 }}>
+              <LinearProgress
+                variant="determinate"
+                value={(stats?.syncStatus?.synced || 0) / ((stats?.totalProducts || 1)) * 100}
+                sx={{ height: 10, borderRadius: 5 }}
               />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth disabled={loadingProducts}>
-                <InputLabel>네이버 상품</InputLabel>
-                <Select
-                  value={mappingData.naverProductId}
-                  onChange={(e) => setMappingData({ ...mappingData, naverProductId: e.target.value })}
-                  label="네이버 상품"
-                >
-                  <MenuItem value="">
-                    {loadingProducts ? '검색 중...' : '선택하세요'}
-                  </MenuItem>
-                  {naverProducts.map((product) => (
-                    <MenuItem key={product.id} value={product.id}>
-                      {product.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth disabled={loadingProducts}>
-                <InputLabel>Shopify 상품</InputLabel>
-                <Select
-                  value={mappingData.shopifyProductId}
-                  onChange={(e) => setMappingData({ ...mappingData, shopifyProductId: e.target.value })}
-                  label="Shopify 상품"
-                >
-                  <MenuItem value="">
-                    {loadingProducts ? '검색 중...' : '선택하세요'}
-                  </MenuItem>
-                  {shopifyProducts.map((product) => (
-                    <MenuItem key={product.id} value={product.id}>
-                      {product.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseModal}>취소</Button>
-          <Button 
-            onClick={handleSaveMapping} 
-            variant="contained"
-            disabled={!mappingData.sku || !mappingData.naverProductId || !mappingData.shopifyProductId}
-          >
-            저장
-          </Button>
-        </DialogActions>
-      </Dialog>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                전체 동기화율: {((stats?.syncStatus?.synced || 0) / (stats?.totalProducts || 1) * 100).toFixed(1)}%
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
+
+        {/* 재고 현황 */}
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" sx={{ mb: 3 }}>
+              재고 현황
+            </Typography>
+            
+            <Stack spacing={2}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="body2">정상 재고</Typography>
+                <Chip 
+                  label={stats?.inventoryStatus?.inStock || 0} 
+                  color="success" 
+                  size="small" 
+                />
+              </Box>
+              
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="body2">재고 부족</Typography>
+                <Chip 
+                  label={stats?.inventoryStatus?.lowStock || 0} 
+                  color="warning" 
+                  size="small" 
+                />
+              </Box>
+              
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="body2">품절</Typography>
+                <Chip 
+                  label={stats?.inventoryStatus?.outOfStock || 0} 
+                  color="error" 
+                  size="small" 
+                />
+              </Box>
+            </Stack>
+          </Paper>
+        </Grid>
+
+        {/* 최근 활동 */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ mb: 3 }}>
+              최근 활동
+            </Typography>
+            
+            <Stack spacing={2}>
+              {activities.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  최근 활동이 없습니다.
+                </Typography>
+              ) : (
+                activities.slice(0, 5).map((activity, index) => (
+                  <Box
+                    key={activity.id || index}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      p: 2,
+                      borderRadius: 1,
+                      backgroundColor: 'background.default',
+                      '&:hover': {
+                        backgroundColor: 'action.hover',
+                      },
+                    }}
+                  >
+                    <Box sx={{ mr: 2 }}>
+                      {getActivityIcon(activity.type)}
+                    </Box>
+                    
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography variant="body2">
+                        {activity.action}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {activity.details}
+                      </Typography>
+                    </Box>
+                    
+                    <Typography variant="caption" color="text.secondary">
+                      {formatDateTime(activity.timestamp || activity.createdAt)}
+                    </Typography>
+                  </Box>
+                ))
+              )}
+            </Stack>
+          </Paper>
+        </Grid>
+      </Grid>
     </Box>
   );
 };
 
-export default Products;
+export default Dashboard;

@@ -51,7 +51,7 @@ async function startServer() {
       exchangeRateService
     });
 
-    // 앱 인스턴스 생성 및 초기화
+    // 앱 인스턴스 생성 및 초기화 - Redis 전달
     const app = new App(redis);
     await app.initialize();
     

@@ -3,15 +3,14 @@ import { Request, Response, NextFunction } from 'express';
 import { NaverProductService } from '../services/naver/NaverProductService';
 import { ShopifyGraphQLService } from '../services/shopify/ShopifyGraphQLService';
 import { NaverAuthService } from '../services/naver/NaverAuthService';
-import { getRedisClient } from '../config/redis';
+import { Redis } from 'ioredis';
 import { logger } from '../utils/logger';
 
 export class ProductSearchController {
   private naverProductService: NaverProductService;
   private shopifyService: ShopifyGraphQLService;
 
-  constructor() {
-    const redis = getRedisClient();
+  constructor(redis: Redis) {
     const naverAuthService = new NaverAuthService(redis);
     this.naverProductService = new NaverProductService(naverAuthService);
     this.shopifyService = new ShopifyGraphQLService();

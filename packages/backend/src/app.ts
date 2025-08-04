@@ -1,5 +1,5 @@
 // packages/backend/src/app.ts
-import express, { Application, Request, Response, NextFunction } from 'express';
+import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -8,7 +8,7 @@ import { createServer, Server } from 'http';
 import { Redis } from 'ioredis';
 import { config } from './config';
 import { logger, stream } from './utils/logger';
-import { errorMiddleware } from './middlewares/error.middleware';  // 수정된 부분
+import { errorMiddleware } from './middlewares/error.middleware';
 import { rateLimiter } from './middlewares/rateLimit.middleware';
 
 // Route creators
@@ -91,6 +91,16 @@ export class App {
    * 라우트 설정
    */
   private setupRoutes(): void {
+    // Root endpoint
+    this.app.get('/', (req: Request, res: Response) => {
+      res.json({
+        name: 'Hallyu Pomaholic ERP API',
+        version: '1.0.0',
+        environment: config.env,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
     // Health check (인증 불필요)
     this.app.use('/health', healthRoutes);
 
@@ -114,7 +124,7 @@ export class App {
    */
   private setupErrorHandlers(): void {
     // Global error handler
-    this.app.use(errorMiddleware);  // 수정된 부분
+    this.app.use(errorMiddleware);
   }
 
   /**

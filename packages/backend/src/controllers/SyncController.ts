@@ -1,7 +1,7 @@
 // packages/backend/src/controllers/SyncController.ts
 import { Request, Response, NextFunction } from 'express';
+import { Redis } from 'ioredis';
 import { SyncService } from '../services/sync';
-import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 
 interface SyncSettings {
@@ -49,9 +49,12 @@ interface SyncStatusResponse {
 
 export class SyncController {
   private syncService: SyncService;
+  private redis: Redis;
 
   constructor(syncService: SyncService) {
     this.syncService = syncService;
+    // Redis는 syncService에서 가져오거나 별도로 주입받아야 함
+    this.redis = (syncService as any).redis;
   }
 
   /**
@@ -79,8 +82,8 @@ export class SyncController {
         success: true,
         data: result,
         message: result.success 
-          ? 'Full sync completed successfully'
-          : 'Full sync completed with errors',
+          ? `Full sync completed successfully. Processed ${result.totalItems} items.`
+          : `Full sync completed with errors. Processed ${result.totalItems} items, ${result.failureCount} failed.`,
       });
     } catch (error) {
       logger.error('Error in performFullSync:', error);
@@ -89,7 +92,7 @@ export class SyncController {
   };
 
   /**
-   * 개별 SKU 동기화
+   * 단일 SKU 동기화
    */
   syncSingleSku = async (
     req: Request<{ sku: string }>,
@@ -98,31 +101,19 @@ export class SyncController {
   ): Promise<void> => {
     try {
       const { sku } = req.params;
+      logger.info(`Starting single SKU sync for: ${sku}`);
 
-      if (!sku) {
-        res.status(400).json({
-          success: false,
-          error: 'SKU is required',
-        });
-        return;
-      }
-
-      logger.info(`Starting single SKU sync: ${sku}`);
-
-      await this.syncService.syncSingleSku(sku);
-
-      logger.info(`Single SKU sync completed: ${sku}`);
+      const result = await this.syncService.syncSingleProduct(sku);
 
       res.json({
         success: true,
-        message: `SKU ${sku} synced successfully`,
-        data: {
-          sku,
-          syncedAt: new Date(),
-        },
+        data: result,
+        message: result.success
+          ? `SKU ${sku} synced successfully`
+          : `Failed to sync SKU ${sku}`,
       });
     } catch (error) {
-      logger.error(`Error in syncSingleSku for ${req.params.sku}:`, error);
+      logger.error('Error in syncSingleSku:', error);
       next(error);
     }
   };
@@ -136,55 +127,33 @@ export class SyncController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const redis = getRedisClient();
-      
-      // Redis에서 동기화 상태 정보 조회
-      const [
-        isRunning,
-        currentJobData,
-        lastSyncData,
-        queueStats,
-      ] = await Promise.all([
-        redis.get('sync:isRunning'),
-        redis.get('sync:currentJob'),
-        redis.get('sync:lastCompleted'),
-        this.getQueueStats(),
-      ]);
+      const syncStatus = await this.syncService.getSyncStatus();
 
-      const status: SyncStatusResponse = {
-        isRunning: isRunning === 'true',
-        queueStatus: queueStats,
+      const response: SyncStatusResponse = {
+        isRunning: syncStatus.isRunning,
+        queueStatus: {
+          pending: syncStatus.queueStatus?.pending || 0,
+          active: syncStatus.queueStatus?.active || 0,
+          completed: syncStatus.queueStatus?.completed || 0,
+          failed: syncStatus.queueStatus?.failed || 0,
+        },
       };
 
-      if (currentJobData) {
-        try {
-          status.currentJob = JSON.parse(currentJobData);
-        } catch (e) {
-          logger.error('Failed to parse current job data:', e);
-        }
+      if (syncStatus.currentJob) {
+        response.currentJob = syncStatus.currentJob;
       }
 
-      if (lastSyncData) {
-        try {
-          status.lastSync = JSON.parse(lastSyncData);
-        } catch (e) {
-          logger.error('Failed to parse last sync data:', e);
-        }
+      if (syncStatus.lastSync) {
+        response.lastSync = syncStatus.lastSync;
       }
 
-      // 다음 예정된 동기화 확인
-      const scheduledSync = await redis.get('sync:nextScheduled');
-      if (scheduledSync) {
-        try {
-          status.nextScheduledSync = JSON.parse(scheduledSync);
-        } catch (e) {
-          logger.error('Failed to parse scheduled sync data:', e);
-        }
+      if (syncStatus.nextScheduledSync) {
+        response.nextScheduledSync = syncStatus.nextScheduledSync;
       }
 
       res.json({
         success: true,
-        data: status,
+        data: response,
       });
     } catch (error) {
       logger.error('Error in getSyncStatus:', error);
@@ -201,8 +170,6 @@ export class SyncController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const redis = getRedisClient();
-      
       const settingsKeys = [
         'sync:interval',
         'sync:autoSync',
@@ -213,7 +180,7 @@ export class SyncController {
         'sync:retryDelay',
       ];
 
-      const values = await redis.mget(...settingsKeys);
+      const values = await this.redis.mget(...settingsKeys);
       
       const settings: SyncSettings = {
         syncInterval: parseInt(values[0] || '30'),
@@ -227,9 +194,9 @@ export class SyncController {
 
       // 추가 정보 조회
       const [lastSync, totalSyncs, failedSyncs] = await Promise.all([
-        redis.get('sync:lastFullSync'),
-        redis.get('sync:stats:total'),
-        redis.get('sync:stats:failed'),
+        this.redis.get('sync:lastFullSync'),
+        this.redis.get('sync:stats:total'),
+        this.redis.get('sync:stats:failed'),
       ]);
 
       res.json({
@@ -258,7 +225,6 @@ export class SyncController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const redis = getRedisClient();
       const updates: Array<[string, string]> = [];
 
       // 유효성 검사 및 업데이트 준비
@@ -340,7 +306,7 @@ export class SyncController {
 
       // Redis에 업데이트 적용
       if (updates.length > 0) {
-        const pipeline = redis.pipeline();
+        const pipeline = this.redis.pipeline();
         updates.forEach(([key, value]) => {
           pipeline.set(key, value);
         });
@@ -374,27 +340,25 @@ export class SyncController {
   ): Promise<void> => {
     try {
       const { limit = '100', type } = req.query;
-      const redis = getRedisClient();
 
       // Redis에서 동기화 이력 조회
       const historyKey = type ? `sync:history:${type}` : 'sync:history:all';
-      const history = await redis.lrange(historyKey, 0, parseInt(limit) - 1);
+      const history = await this.redis.lrange(historyKey, 0, parseInt(limit) - 1);
 
       const parsedHistory = history.map((item) => {
         try {
           return JSON.parse(item);
-        } catch (e) {
-          logger.error('Failed to parse history item:', e);
-          return null;
+        } catch {
+          return item;
         }
-      }).filter(Boolean);
+      });
 
       res.json({
         success: true,
         data: {
           history: parsedHistory,
           total: parsedHistory.length,
-          filters: { limit: parseInt(limit), type },
+          type: type || 'all',
         },
       });
     } catch (error) {
@@ -402,25 +366,4 @@ export class SyncController {
       next(error);
     }
   };
-
-  /**
-   * 동기화 큐 상태 조회 (헬퍼 메서드)
-   */
-  private async getQueueStats(): Promise<SyncStatusResponse['queueStatus']> {
-    const redis = getRedisClient();
-    
-    const [pending, active, completed, failed] = await Promise.all([
-      redis.get('sync:queue:pending'),
-      redis.get('sync:queue:active'),
-      redis.get('sync:queue:completed'),
-      redis.get('sync:queue:failed'),
-    ]);
-
-    return {
-      pending: parseInt(pending || '0'),
-      active: parseInt(active || '0'),
-      completed: parseInt(completed || '0'),
-      failed: parseInt(failed || '0'),
-    };
-  }
 }

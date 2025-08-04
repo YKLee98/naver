@@ -5,7 +5,7 @@ import { ShopifyInventoryService } from '../services/shopify/ShopifyInventorySer
 import { NaverAuthService } from '../services/naver/NaverAuthService';
 import { InventoryTransaction } from '../models/InventoryTransaction';
 import { ProductMapping } from '../models/ProductMapping';
-import { getRedisClient } from '../config/redis';
+import { Redis } from 'ioredis';
 import { logger } from '../utils/logger';
 
 interface AdjustInventoryRequest {
@@ -21,8 +21,7 @@ export class InventoryAdjustController {
   private naverProductService: NaverProductService;
   private shopifyInventoryService: ShopifyInventoryService;
 
-  constructor() {
-    const redis = getRedisClient();
+  constructor(redis: Redis) {
     const naverAuthService = new NaverAuthService(redis);
     this.naverProductService = new NaverProductService(naverAuthService);
     this.shopifyInventoryService = new ShopifyInventoryService();
@@ -48,100 +47,104 @@ export class InventoryAdjustController {
         return;
       }
 
-      const results = {
-        naver: null as any,
-        shopify: null as any
+      const results: any = {
+        naver: null,
+        shopify: null
       };
 
       // 네이버 재고 조정
-      if (adjustData.platform === 'naver' || adjustData.platform === 'both') {
+      if ((adjustData.platform === 'naver' || adjustData.platform === 'both') && adjustData.naverQuantity !== undefined) {
         try {
           const currentStock = await this.naverProductService.getProductStock(mapping.naverProductId);
-          const newQuantity = this.calculateNewQuantity(
-            currentStock,
-            adjustData.naverQuantity!,
-            adjustData.adjustType
-          );
+          const newQuantity = this.calculateNewQuantity(currentStock, adjustData.naverQuantity, adjustData.adjustType);
 
-          await this.naverProductService.updateStock(mapping.naverProductId, newQuantity);
-          
-          results.naver = {
-            success: true,
-            previousQuantity: currentStock,
-            newQuantity,
-            productId: mapping.naverProductId
-          };
+          await this.naverProductService.updateProductStock(mapping.naverProductId, newQuantity);
 
           // 트랜잭션 기록
           await InventoryTransaction.create({
             sku: adjustData.sku,
             platform: 'naver',
             type: adjustData.adjustType,
-            quantity: adjustData.naverQuantity,
             previousQuantity: currentStock,
             newQuantity,
+            adjustmentQuantity: adjustData.naverQuantity,
             reason: adjustData.reason,
             userId,
             productId: mapping.naverProductId
           });
 
+          results.naver = {
+            success: true,
+            previousQuantity: currentStock,
+            newQuantity,
+            adjustmentQuantity: adjustData.naverQuantity
+          };
+
+          logger.info(`Naver inventory adjusted for SKU ${adjustData.sku}: ${currentStock} -> ${newQuantity}`);
         } catch (error) {
-          logger.error('Failed to adjust Naver inventory:', error);
+          logger.error(`Failed to adjust Naver inventory for SKU ${adjustData.sku}:`, error);
           results.naver = {
             success: false,
-            error: error.message
+            error: error instanceof Error ? error.message : 'Unknown error'
           };
         }
       }
 
       // Shopify 재고 조정
-      if (adjustData.platform === 'shopify' || adjustData.platform === 'both') {
+      if ((adjustData.platform === 'shopify' || adjustData.platform === 'both') && adjustData.shopifyQuantity !== undefined) {
         try {
-          // Shopify variant ID 조회
-          const variantId = mapping.shopifyVariantId;
-          const currentStock = await this.shopifyInventoryService.getInventoryLevel(variantId);
+          // 현재 재고 조회
+          const currentInventory = await this.shopifyInventoryService.getInventoryLevel(
+            mapping.shopifyInventoryItemId,
+            mapping.shopifyLocationId
+          );
+
           const newQuantity = this.calculateNewQuantity(
-            currentStock,
-            adjustData.shopifyQuantity!,
+            currentInventory.available, 
+            adjustData.shopifyQuantity, 
             adjustData.adjustType
           );
 
-          await this.shopifyInventoryService.adjustInventory(variantId, newQuantity);
-          
-          results.shopify = {
-            success: true,
-            previousQuantity: currentStock,
-            newQuantity,
-            variantId
-          };
+          // 재고 조정
+          await this.shopifyInventoryService.adjustInventoryLevel(
+            mapping.shopifyInventoryItemId,
+            mapping.shopifyLocationId,
+            newQuantity - currentInventory.available
+          );
 
           // 트랜잭션 기록
           await InventoryTransaction.create({
             sku: adjustData.sku,
             platform: 'shopify',
             type: adjustData.adjustType,
-            quantity: adjustData.shopifyQuantity,
-            previousQuantity: currentStock,
+            previousQuantity: currentInventory.available,
             newQuantity,
+            adjustmentQuantity: adjustData.shopifyQuantity,
             reason: adjustData.reason,
             userId,
-            productId: mapping.shopifyProductId,
-            variantId
+            productId: mapping.shopifyProductId
           });
 
+          results.shopify = {
+            success: true,
+            previousQuantity: currentInventory.available,
+            newQuantity,
+            adjustmentQuantity: adjustData.shopifyQuantity
+          };
+
+          logger.info(`Shopify inventory adjusted for SKU ${adjustData.sku}: ${currentInventory.available} -> ${newQuantity}`);
         } catch (error) {
-          logger.error('Failed to adjust Shopify inventory:', error);
+          logger.error(`Failed to adjust Shopify inventory for SKU ${adjustData.sku}:`, error);
           results.shopify = {
             success: false,
-            error: error.message
+            error: error instanceof Error ? error.message : 'Unknown error'
           };
         }
       }
 
-      // 응답
-      const allSuccess = 
-        (!results.naver || results.naver.success) && 
-        (!results.shopify || results.shopify.success);
+      // 응답 처리
+      const allSuccess = (!results.naver || results.naver.success) && 
+                        (!results.shopify || results.shopify.success);
 
       res.status(allSuccess ? 200 : 207).json({
         success: allSuccess,
