@@ -15,7 +15,7 @@ export class AppError extends Error {
   }
 }
 
-export const errorHandler = async (
+export const errorMiddleware = async (
   err: Error | AppError,
   req: Request,
   res: Response,
@@ -25,17 +25,32 @@ export const errorHandler = async (
   const statusCode = error.statusCode || 500;
   const message = error.message || 'Internal server error';
 
-  // Log error
-  logger.error('Error handler:', {
+  // 상세한 에러 로깅
+  const errorDetails = {
     error: message,
     statusCode,
     stack: error.stack,
     path: req.path,
     method: req.method,
+    query: req.query,
+    body: req.body,
+    headers: req.headers,
     ip: req.ip,
-  });
+    timestamp: new Date().toISOString(),
+  };
 
-  // Save to database
+  logger.error('Error middleware:', errorDetails);
+
+  // Shopify API 관련 에러 특별 처리
+  if (error.message?.includes('Shopify') || error.message?.includes('GraphQL')) {
+    logger.error('Shopify API Error Details:', {
+      response: (error as any).response?.data,
+      extensions: (error as any).extensions,
+      query: req.query,
+    });
+  }
+
+  // 데이터베이스에 에러 로그 저장 (500 에러만)
   if (statusCode >= 500) {
     try {
       await SystemLog.create({
@@ -46,6 +61,7 @@ export const errorHandler = async (
           service: 'express',
           method: req.method,
           path: req.path,
+          query: req.query,
         },
         error: {
           name: error.name,
@@ -63,11 +79,18 @@ export const errorHandler = async (
     }
   }
 
+  // 개발 환경과 프로덕션 환경 구분
+  const isDevelopment = process.env.NODE_ENV === 'development';
+
   res.status(statusCode).json({
     success: false,
     message,
-    ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
+    ...(isDevelopment && {
+      error: {
+        name: error.name,
+        stack: error.stack,
+        details: errorDetails,
+      }
+    }),
   });
 };
-
-export const errorMiddleware = errorHandler;

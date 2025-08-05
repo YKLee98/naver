@@ -1,40 +1,41 @@
 // packages/backend/src/routes/index.ts
 import { Router } from 'express';
-import { setupApiRoutes } from './api.routes';
-import webhookRoutes from './webhook.routes';
-import healthRoutes from './health.routes';
-import setupPriceSyncRoutes from './priceSync.routes';
-import setupExchangeRateRoutes from './exchangeRate.routes';
-import { setupSettingsRoutes } from './settings.routes';
-import { setupDashboardRoutes } from './dashboard.routes';
+import { authMiddleware } from '../middlewares';
 
-// 라우터 설정을 함수로만 export - 기본 export 제거
+// 라우터 설정을 함수로만 export
 export function setupRoutes(): Router {
   const router = Router();
 
   // Health check routes (no auth required)
+  const healthRoutes = require('./health.routes').default;
   router.use('/health', healthRoutes);
 
   // Webhook routes (special auth)
+  const webhookRoutes = require('./webhook.routes').default;
   router.use('/webhooks', webhookRoutes);
 
-  // API v1 routes - 중복 경로 수정
+  // API routes - 함수 호출로 변경
+  const { setupApiRoutes } = require('./api.routes');
   const apiRouter = setupApiRoutes();
 
-  // Dashboard routes - API router에 직접 추가
+  // Dashboard routes
+  const { setupDashboardRoutes } = require('./dashboard.routes');
   router.use('/dashboard', setupDashboardRoutes());
+
+  // Settings routes
+  const { setupSettingsRoutes } = require('./settings.routes');
+  router.use('/settings', setupSettingsRoutes());
+
+  // Price sync routes
+  const setupPriceSyncRoutes = require('./priceSync.routes').default;
+  router.use('/price-sync', setupPriceSyncRoutes());
+
+  // Exchange rate routes
+  const setupExchangeRateRoutes = require('./exchangeRate.routes').default;
+  router.use('/exchange-rate', setupExchangeRateRoutes());
 
   // Main API routes
   router.use('/', apiRouter);
-
-  // Price sync routes - API router에 추가
-  router.use('/price-sync', setupPriceSyncRoutes());
-
-  // Exchange rate routes - API router에 추가
-  router.use('/exchange-rate', setupExchangeRateRoutes());
-
-  // Settings routes
-  router.use('/settings', setupSettingsRoutes());
 
   return router;
 }

@@ -19,6 +19,12 @@ export interface SearchProductsParams {
   page?: number;
 }
 
+export interface ShopifySearchParams {
+  vendor?: string;
+  limit?: number;
+  includeInactive?: boolean;
+}
+
 export interface ProductListResponse {
   success: boolean;
   data: {
@@ -37,14 +43,69 @@ class ProductService {
    * 네이버 상품 검색
    */
   async searchNaverProducts(params: SearchProductsParams): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/products/search/naver', { params });
+    return apiClient.get('/products/search/naver', { 
+      params: {
+        keyword: params.query,
+        page: params.page || 1,
+        size: params.limit || 20
+      }
+    });
   }
 
   /**
-   * Shopify 상품 검색
+   * Shopify 상품 검색 - vendor 기반
    */
-  async searchShopifyProducts(params: SearchProductsParams): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/products/search/shopify', { params });
+  async searchShopifyProducts(params: ShopifySearchParams): Promise<AxiosResponse<ProductListResponse>> {
+    return apiClient.get('/products/search/shopify', { 
+      params: {
+        vendor: params.vendor || 'album',
+        limit: params.limit || 100,
+        includeInactive: params.includeInactive || false
+      }
+    });
+  }
+
+  /**
+   * Shopify 상품 검색 - SKU 기반 (필터링)
+   */
+  async searchShopifyProductsBySku(sku: string): Promise<AxiosResponse<ProductListResponse>> {
+    // vendor 기반으로 전체 상품을 가져온 후 프론트엔드에서 필터링
+    const response = await this.searchShopifyProducts({ 
+      vendor: 'album', 
+      limit: 1000,
+      includeInactive: false 
+    });
+    
+    if (response.data.success && response.data.data) {
+      const filteredProducts = response.data.data.filter((product: any) => {
+        // 상품 제목에 SKU가 포함되어 있는지 확인
+        if (product.title?.toLowerCase().includes(sku.toLowerCase())) {
+          return true;
+        }
+        
+        // variants가 있는 경우 SKU 확인
+        if (product.variants && Array.isArray(product.variants)) {
+          return product.variants.some((variant: any) => 
+            variant.sku?.toLowerCase().includes(sku.toLowerCase())
+          );
+        }
+        
+        return false;
+      });
+
+      return {
+        ...response,
+        data: {
+          ...response.data,
+          data: {
+            products: filteredProducts,
+            total: filteredProducts.length
+          }
+        }
+      };
+    }
+    
+    return response;
   }
 
   /**

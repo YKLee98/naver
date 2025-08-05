@@ -77,7 +77,6 @@ export class ProductController {
         },
       });
     } catch (error) {
-      logger.error('Error in getMappedProducts:', error);
       next(error);
     }
   };
@@ -99,13 +98,10 @@ export class ProductController {
         throw new AppError('Product mapping not found', 404);
       }
 
-      // SKU가 undefined가 아님을 보장
-      const skuValue = mapping.sku;
-      
       // 실시간 정보 조회
       const [naverProduct, shopifyVariant] = await Promise.all([
         this.naverProductService.getProduct(mapping.naverProductId),
-        this.shopifyGraphQLService.findVariantBySku(skuValue),
+        this.shopifyGraphQLService.findVariantBySku(sku),
       ]);
 
       res.json({
@@ -117,14 +113,12 @@ export class ProductController {
         },
       });
     } catch (error) {
-      logger.error('Error in getProductBySku:', error);
       next(error);
     }
   };
 
   /**
    * 네이버 상품 검색
-   * 키워드 기반 검색이 필요한 경우 getProducts의 검색 파라미터를 활용
    */
   searchNaverProducts = async (
     req: Request,
@@ -132,19 +126,28 @@ export class ProductController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { keyword, page = 1, size = 20, productStatusType = 'SALE' } = req.query;
+      const { keyword, page = 1, size = 20 } = req.query;
 
-      // 네이버 API는 기본적으로 전체 상품 목록을 반환하므로
-      // 클라이언트 측에서 필터링하거나, 특정 상품 ID 목록으로 조회
-      const result = await this.naverProductService.getProducts({
-        page: Number(page),
-        size: Number(size),
-        productStatusType: productStatusType as string,
+      logger.info('Searching Naver products', {
+        keyword,
+        page,
+        size,
       });
 
-      // 키워드가 있는 경우 클라이언트 측 필터링
-      let filteredProducts = result.contents;
-      if (keyword && typeof keyword === 'string') {
+      // 키워드 검증
+      if (!keyword || typeof keyword !== 'string') {
+        throw new AppError('Keyword is required', 400);
+      }
+
+      const result = await this.naverProductService.getProducts({
+        searchKeyword: keyword as string,
+        page: Number(page),
+        size: Number(size),
+      });
+
+      // 키워드로 필터링 (선택적)
+      let filteredProducts = result.contents || [];
+      if (keyword) {
         const searchKeyword = keyword.toLowerCase();
         filteredProducts = result.contents.filter((product) => 
           product.name.toLowerCase().includes(searchKeyword) ||
@@ -179,21 +182,54 @@ export class ProductController {
     try {
       const { vendor = 'album', limit = 100, includeInactive = false } = req.query;
 
+      logger.info('Searching Shopify products', {
+        vendor,
+        limit,
+        includeInactive,
+      });
+
+      // 입력 값 검증
+      if (typeof vendor !== 'string') {
+        throw new AppError('Invalid vendor parameter', 400);
+      }
+
+      const numLimit = Number(limit);
+      if (isNaN(numLimit) || numLimit < 1 || numLimit > 1000) {
+        throw new AppError('Invalid limit parameter. Must be between 1 and 1000', 400);
+      }
+
       // Shopify GraphQL API를 사용하여 vendor별 상품 조회
       const products = await this.shopifyGraphQLService.getProductsByVendor(
         vendor as string,
         {
-          limit: Number(limit),
+          limit: numLimit,
           includeInactive: includeInactive === 'true',
         }
       );
 
+      // 응답 형식 통일
+      const formattedProducts = products.map(product => ({
+        id: product.id,
+        title: product.title,
+        vendor: product.vendor,
+        status: product.status,
+        sku: product.variants?.edges?.[0]?.node?.sku || '',
+        price: product.variants?.edges?.[0]?.node?.price || '0',
+        variants: product.variants?.edges?.map(edge => edge.node) || [],
+      }));
+
       res.json({
         success: true,
-        data: products,
+        data: formattedProducts,
       });
+
+      logger.info(`Found ${formattedProducts.length} Shopify products for vendor: ${vendor}`);
     } catch (error) {
-      logger.error('Error in searchShopifyProducts:', error);
+      logger.error('Error in searchShopifyProducts:', {
+        error: error.message,
+        stack: error.stack,
+        query: req.query,
+      });
       next(error);
     }
   };
@@ -209,6 +245,10 @@ export class ProductController {
     try {
       const { sku } = req.params;
       const { isActive } = req.body;
+
+      if (typeof isActive !== 'boolean') {
+        throw new AppError('isActive must be a boolean value', 400);
+      }
 
       const mapping = await ProductMapping.findOne({ sku });
       
@@ -243,6 +283,11 @@ export class ProductController {
     try {
       const { sku } = req.params;
       const { syncStatus, lastSyncError } = req.body;
+
+      const validStatuses = ['pending', 'syncing', 'synced', 'error'];
+      if (!validStatuses.includes(syncStatus)) {
+        throw new AppError(`Invalid sync status. Must be one of: ${validStatuses.join(', ')}`, 400);
+      }
 
       const mapping = await ProductMapping.findOne({ sku });
       
@@ -285,16 +330,33 @@ export class ProductController {
         throw new AppError('Invalid products array', 400);
       }
 
+      if (products.length > 100) {
+        throw new AppError('Cannot update more than 100 products at once', 400);
+      }
+
       const results = await Promise.allSettled(
         products.map(async (product) => {
+          if (!product.sku) {
+            throw new Error('SKU is required for batch update');
+          }
+
           const mapping = await ProductMapping.findOne({ sku: product.sku });
           if (!mapping) {
             throw new Error(`Mapping not found for SKU: ${product.sku}`);
           }
 
           // 업데이트할 필드만 선택적으로 적용
+          const allowedFields = ['productName', 'priceMargin', 'isActive', 'syncStatus'];
+          const updates: any = {};
+          
+          allowedFields.forEach(field => {
+            if (product[field] !== undefined) {
+              updates[field] = product[field];
+            }
+          });
+
           Object.assign(mapping, {
-            ...product,
+            ...updates,
             updatedAt: new Date(),
           });
 
@@ -320,6 +382,137 @@ export class ProductController {
       });
     } catch (error) {
       logger.error('Error in batchUpdateProducts:', error);
+      next(error);
+    }
+  };
+
+  /**
+   * 상품 매핑 통계 조회
+   */
+  getMappingStatistics = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { vendor = 'album' } = req.query;
+
+      const [
+        totalMappings,
+        activeMappings,
+        syncedMappings,
+        errorMappings,
+        lastSyncInfo
+      ] = await Promise.all([
+        ProductMapping.countDocuments({ vendor }),
+        ProductMapping.countDocuments({ vendor, isActive: true }),
+        ProductMapping.countDocuments({ vendor, syncStatus: 'synced' }),
+        ProductMapping.countDocuments({ vendor, syncStatus: 'error' }),
+        ProductMapping.findOne({ vendor })
+          .sort({ lastSyncedAt: -1 })
+          .select('lastSyncedAt')
+          .lean()
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          total: totalMappings,
+          active: activeMappings,
+          synced: syncedMappings,
+          error: errorMappings,
+          inactive: totalMappings - activeMappings,
+          lastSyncedAt: lastSyncInfo?.lastSyncedAt || null,
+        },
+      });
+    } catch (error) {
+      logger.error('Error in getMappingStatistics:', error);
+      next(error);
+    }
+  };
+
+  /**
+   * 상품 동기화 (단일 SKU)
+   */
+  syncProduct = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const { syncInventory = true, syncPrice = true } = req.body;
+
+      const mapping = await ProductMapping.findOne({ sku });
+      
+      if (!mapping) {
+        throw new AppError('Product mapping not found', 404);
+      }
+
+      if (!mapping.isActive) {
+        throw new AppError('Cannot sync inactive product mapping', 400);
+      }
+
+      // 동기화 상태를 'syncing'으로 업데이트
+      mapping.syncStatus = 'syncing';
+      mapping.syncError = null;
+      await mapping.save();
+
+      // TODO: 실제 동기화 로직 구현 (SyncService 호출)
+      // 여기서는 예시로 성공 응답만 반환
+      logger.info(`Product sync initiated for SKU: ${sku}`);
+
+      res.json({
+        success: true,
+        data: {
+          sku,
+          syncInventory,
+          syncPrice,
+          status: 'sync_initiated',
+          message: 'Product sync has been initiated',
+        },
+      });
+    } catch (error) {
+      logger.error('Error in syncProduct:', error);
+      next(error);
+    }
+  };
+
+  /**
+   * 상품 상태 업데이트
+   */
+  updateProductStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const { status } = req.body;
+
+      const validStatuses = ['ACTIVE', 'INACTIVE', 'PENDING', 'ERROR'];
+      if (!validStatuses.includes(status)) {
+        throw new AppError(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400);
+      }
+
+      const mapping = await ProductMapping.findOne({ sku });
+      
+      if (!mapping) {
+        throw new AppError('Product mapping not found', 404);
+      }
+
+      mapping.status = status;
+      mapping.updatedAt = new Date();
+      await mapping.save();
+
+      logger.info(`Product status updated for ${sku}: ${status}`);
+
+      res.json({
+        success: true,
+        data: mapping,
+      });
+    } catch (error) {
+      logger.error('Error in updateProductStatus:', error);
       next(error);
     }
   };

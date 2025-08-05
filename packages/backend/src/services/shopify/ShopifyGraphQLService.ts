@@ -2,36 +2,35 @@
 import { ShopifyService } from './ShopifyService';
 import { logger } from '../../utils/logger';
 import { retry } from '../../utils/retry';
-import { AppError } from '../../utils/errors';
+import { AppError } from '../../middlewares/error.middleware';
 
-// GraphQL Response Type
-interface GraphQLResponse<T = any> {
-  data: T;
-  errors?: Array<{
-    message: string;
-    extensions?: any;
-  }>;
+// Type definitions
+interface InventoryQuantity {
+  quantity: number;
 }
 
-// Product Related Types
+interface InventoryLevel {
+  id: string;
+  quantities: InventoryQuantity[];
+  location: {
+    id: string;
+    name: string;
+  };
+}
+
 interface ProductVariant {
   id: string;
   sku: string;
   price: string;
-  inventoryItem: {
+  inventoryQuantity?: number;
+  inventoryItem?: {
     id: string;
-    inventoryLevels: {
+    inventoryLevels?: {
       edges: Array<{
-        node: {
-          id: string;
-          location: {
-            id: string;
-            name?: string;
-          };
-          available: number;
-        };
+        node: InventoryLevel;
       }>;
     };
+    inventoryLevel?: InventoryLevel;
   };
 }
 
@@ -47,9 +46,40 @@ interface ShopifyProduct {
       node: ProductVariant;
     }>;
   };
+  images?: {
+    edges: Array<{
+      node: {
+        url: string;
+        altText?: string;
+      };
+    }>;
+  };
 }
 
-// Mutation Result Types
+interface ProductsQueryResponse {
+  products: {
+    edges: Array<{
+      node: ShopifyProduct;
+      cursor: string;
+    }>;
+    pageInfo: {
+      hasNextPage: boolean;
+    };
+  };
+}
+
+interface LocationsQueryResponse {
+  locations: {
+    edges: Array<{
+      node: {
+        id: string;
+        name: string;
+        isActive: boolean;
+      };
+    }>;
+  };
+}
+
 interface BulkUpdateResult {
   product?: {
     id: string;
@@ -79,74 +109,123 @@ interface InventoryAdjustmentResult {
   }>;
 }
 
-interface BulkInventoryResult {
-  inventoryLevels?: Array<{
-    id: string;
-    available: number;
-  }>;
-  userErrors?: Array<{
-    field: string[];
-    message: string;
-  }>;
-}
-
-// Query Response Types
-interface ProductsQueryResponse {
-  products: {
-    edges: Array<{
-      node: ShopifyProduct;
-      cursor: string;
-    }>;
-    pageInfo: {
-      hasNextPage: boolean;
-    };
-  };
-}
-
-interface ProductVariantsQueryResponse {
-  productVariants: {
-    edges: Array<{
-      node: ProductVariant;
-    }>;
-  };
-}
-
-interface ProductVariantQueryResponse {
-  productVariant: {
-    product: {
-      id: string;
-    };
-  };
-}
-
-// Service Options
-interface BulkOperationOptions {
-  batchSize?: number;
-  delayBetweenBatches?: number;
-  maxRetries?: number;
-}
-
 export class ShopifyGraphQLService extends ShopifyService {
   private readonly DEFAULT_BATCH_SIZE = 100;
   private readonly DEFAULT_DELAY_MS = 100;
   private readonly DEFAULT_PAGE_SIZE = 250;
+  private defaultLocationId: string | null = null;
 
   /**
-   * Vendor로 필터링된 상품 목록 조회
+   * GraphQL 쿼리 실행 헬퍼 메서드
+   */
+  private async executeQuery<T = any>(query: string, variables: any = {}): Promise<T> {
+    const client = await this.getGraphQLClient();
+    
+    try {
+      // Shopify API client는 query 메서드를 사용합니다
+      const response = await client.query({
+        data: {
+          query,
+          variables
+        }
+      });
+
+      if (response.body.errors && response.body.errors.length > 0) {
+        const error = response.body.errors[0];
+        throw new AppError(`GraphQL Error: ${error.message}`, 400);
+      }
+
+      return response.body.data;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      
+      logger.error('GraphQL query execution failed', {
+        error: error.message,
+        query: query.substring(0, 100) + '...',
+        variables
+      });
+      
+      throw new AppError('Failed to execute GraphQL query', 500);
+    }
+  }
+
+  /**
+   * 기본 위치 ID 가져오기
+   */
+  private async getDefaultLocationId(): Promise<string> {
+    if (this.defaultLocationId) {
+      return this.defaultLocationId;
+    }
+
+    const query = `
+      query getLocations {
+        locations(first: 10) {
+          edges {
+            node {
+              id
+              name
+              isActive
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const response = await this.executeQuery<LocationsQueryResponse>(query);
+      const locations = response.locations.edges;
+      
+      // 활성화된 첫 번째 위치를 기본값으로 사용
+      const activeLocation = locations.find(edge => edge.node.isActive);
+      if (activeLocation) {
+        this.defaultLocationId = activeLocation.node.id;
+        logger.info(`Default location set to: ${activeLocation.node.name} (${activeLocation.node.id})`);
+        return this.defaultLocationId;
+      }
+
+      // 활성화된 위치가 없으면 첫 번째 위치 사용
+      if (locations.length > 0) {
+        this.defaultLocationId = locations[0].node.id;
+        return this.defaultLocationId;
+      }
+
+      throw new AppError('No locations found in Shopify', 500);
+    } catch (error) {
+      logger.error('Failed to get default location', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Vendor로 필터링된 상품 목록 조회 (재고 포함)
    */
   async getProductsByVendor(
     vendor: string, 
     options: {
       limit?: number;
       includeInactive?: boolean;
+      includeInventory?: boolean;
     } = {}
   ): Promise<ShopifyProduct[]> {
-    const { limit = 1000, includeInactive = false } = options;
-    const client = await this.getGraphQLClient();
+    const { limit = 1000, includeInactive = false, includeInventory = true } = options;
     const products: ShopifyProduct[] = [];
     let hasNextPage = true;
     let cursor: string | null = null;
 
+    // 재고 정보가 필요한 경우 먼저 location ID를 가져옴
+    let locationId: string | null = null;
+    if (includeInventory) {
+      try {
+        locationId = await this.getDefaultLocationId();
+      } catch (error) {
+        logger.warn('Failed to get location ID, proceeding without inventory data', error);
+        // 재고 정보 없이 계속 진행
+      }
+    }
+
+    // GraphQL 쿼리 구성
     const query = `
       query GetProductsByVendor($query: String!, $first: Int!, $after: String) {
         products(first: $first, after: $after, query: $query) {
@@ -158,27 +237,40 @@ export class ShopifyGraphQLService extends ShopifyService {
               status
               createdAt
               updatedAt
+              images(first: 1) {
+                edges {
+                  node {
+                    url
+                    altText
+                  }
+                }
+              }
               variants(first: 100) {
                 edges {
                   node {
                     id
                     sku
                     price
+                    ${includeInventory && locationId ? `
+                    inventoryQuantity
                     inventoryItem {
                       id
                       inventoryLevels(first: 10) {
                         edges {
                           node {
                             id
+                            quantities(names: ["available"]) {
+                              quantity
+                            }
                             location {
                               id
                               name
                             }
-                            available
                           }
                         }
                       }
                     }
+                    ` : ''}
                   }
                 }
               }
@@ -201,35 +293,71 @@ export class ShopifyGraphQLService extends ShopifyService {
       const searchQuery = queryParts.join(' AND ');
 
       while (hasNextPage && products.length < limit) {
-        const response = await retry<GraphQLResponse<ProductsQueryResponse>>(
-          () => client.request(query, {
-            query: searchQuery,
-            first: Math.min(limit - products.length, this.DEFAULT_PAGE_SIZE),
-            after: cursor,
-          }),
+        const response = await retry<ProductsQueryResponse>(
+          async () => {
+            const data = await this.executeQuery<ProductsQueryResponse>(query, {
+              query: searchQuery,
+              first: Math.min(limit - products.length, this.DEFAULT_PAGE_SIZE),
+              after: cursor,
+            });
+            return data;
+          },
           {
             retries: 3,
             minTimeout: 1000,
             maxTimeout: 5000,
             onRetry: (err, attempt) => {
-              logger.warn(`Retrying getProductsByVendor (attempt ${attempt})`, err);
+              logger.warn(`Retrying getProductsByVendor (attempt ${attempt})`, {
+                error: err.message,
+                vendor
+              });
             },
           }
         );
 
-        const data = response.data;
-        if (!data || !data.products) {
+        if (!response || !response.products) {
           throw new AppError('Invalid response from Shopify API', 502);
         }
 
-        const edges = data.products.edges || [];
-        products.push(...edges.map(edge => edge.node));
+        const edges = response.products.edges || [];
+        
+        // 상품 데이터 처리 및 재고 정보 매핑
+        const processedProducts = edges.map(edge => {
+          const product = edge.node;
+          
+          // variants 처리
+          if (product.variants && product.variants.edges) {
+            product.variants.edges = product.variants.edges.map(variantEdge => {
+              const variant = variantEdge.node;
+              
+              // 재고 정보 처리
+              if (variant.inventoryItem && variant.inventoryItem.inventoryLevels) {
+                const inventoryLevels = variant.inventoryItem.inventoryLevels.edges;
+                
+                // 기본 위치의 재고 찾기
+                const defaultLocationInventory = inventoryLevels.find(
+                  level => level.node.location.id === locationId
+                );
+                
+                if (defaultLocationInventory && defaultLocationInventory.node.quantities.length > 0) {
+                  // quantities 배열에서 available 재고 추출
+                  variant.inventoryQuantity = defaultLocationInventory.node.quantities[0].quantity;
+                }
+              }
+              
+              return variantEdge;
+            });
+          }
+          
+          return product;
+        });
 
-        hasNextPage = data.products.pageInfo.hasNextPage && products.length < limit;
-        const lastEdge = edges.length > 0 ? edges[edges.length - 1] : null;
-        cursor = lastEdge ? lastEdge.cursor : null;
+        products.push(...processedProducts);
 
-        // Rate limiting
+        hasNextPage = response.products.pageInfo.hasNextPage && products.length < limit;
+        cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
+
+        // Rate limiting between requests
         if (hasNextPage) {
           await this.delay(250);
         }
@@ -246,18 +374,7 @@ export class ShopifyGraphQLService extends ShopifyService {
   /**
    * 상품 변형(variant) 가격 일괄 업데이트
    */
-  async bulkUpdateVariantPrices(
-    updates: Array<{ variantId: string; price: string }>,
-    options: BulkOperationOptions = {}
-  ): Promise<BulkUpdateResult[]> {
-    const {
-      batchSize = this.DEFAULT_BATCH_SIZE,
-      delayBetweenBatches = this.DEFAULT_DELAY_MS,
-      maxRetries = 3
-    } = options;
-
-    const client = await this.getGraphQLClient();
-
+  async bulkUpdateVariantPrices(updates: Array<{ variantId: string; price: string }>): Promise<BulkUpdateResult[]> {
     const mutation = `
       mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
         productVariantsBulkUpdate(productId: $productId, variants: $variants) {
@@ -276,27 +393,13 @@ export class ShopifyGraphQLService extends ShopifyService {
       }
     `;
 
-    // Validate inputs
-    if (!updates || updates.length === 0) {
-      logger.warn('No variant price updates provided');
-      return [];
-    }
-
-    // Product ID를 먼저 조회
+    // Product ID를 먼저 조회해야 함
     const productIdMap = new Map<string, string>();
-    const variantBatches = this.chunk(updates, batchSize);
-
-    for (const batch of variantBatches) {
-      await Promise.all(
-        batch.map(async update => {
-          const productId = await this.getProductIdFromVariantId(update.variantId);
-          if (productId) {
-            productIdMap.set(update.variantId, productId);
-          } else {
-            logger.warn(`Product ID not found for variant: ${update.variantId}`);
-          }
-        })
-      );
+    for (const update of updates) {
+      const productId = await this.getProductIdFromVariantId(update.variantId);
+      if (productId) {
+        productIdMap.set(update.variantId, productId);
+      }
     }
 
     // 상품 ID별로 그룹화
@@ -312,7 +415,6 @@ export class ShopifyGraphQLService extends ShopifyService {
     }, {} as Record<string, typeof updates>);
 
     const results: BulkUpdateResult[] = [];
-    const errors: Array<{ productId: string; error: any }> = [];
 
     try {
       for (const [productId, productUpdates] of Object.entries(updatesByProduct)) {
@@ -321,60 +423,41 @@ export class ShopifyGraphQLService extends ShopifyService {
           price: update.price,
         }));
 
-        try {
-          const response = await retry<GraphQLResponse<{ productVariantsBulkUpdate: BulkUpdateResult }>>(
-            () => client.request(mutation, {
+        const response = await retry<any>(
+          async () => {
+            const data = await this.executeQuery(mutation, {
               productId,
               variants,
-            }),
-            {
-              retries: maxRetries,
-              minTimeout: 1000,
-              maxTimeout: 5000,
-            }
-          );
-
-          const result = response.data?.productVariantsBulkUpdate;
-          
-          if (!result) {
-            throw new AppError('Invalid response from Shopify API', 502);
-          }
-
-          if (result.userErrors && result.userErrors.length > 0) {
-            logger.error('Shopify bulk update errors', {
-              productId,
-              errors: result.userErrors
             });
+            return data;
+          },
+          {
+            retries: 3,
+            minTimeout: 1000,
+            maxTimeout: 5000,
           }
+        );
 
-          results.push(result);
-        } catch (error) {
-          errors.push({ productId, error });
-          logger.error(`Failed to update prices for product ${productId}`, error);
+        const result = response?.productVariantsBulkUpdate;
+        
+        if (!result) {
+          throw new AppError('Invalid response from Shopify API', 502);
         }
 
-        // Rate limiting between batches
-        await this.delay(delayBetweenBatches);
+        if (result.userErrors && result.userErrors.length > 0) {
+          logger.error('Shopify bulk update errors', result.userErrors);
+        }
+
+        results.push(result);
+
+        // Rate limiting
+        await this.delay(100);
       }
 
-      logger.info(`Bulk updated prices for ${updates.length} variants`, {
-        successful: results.length,
-        failed: errors.length
-      });
-
-      if (errors.length > 0) {
-        throw new AppError(
-          `Failed to update ${errors.length} products`, 
-          207
-        );
-      }
-
+      logger.info(`Bulk updated prices for ${updates.length} variants`);
       return results;
     } catch (error) {
-      await this.logError('bulkUpdateVariantPrices', error, {
-        totalUpdates: updates.length,
-        processed: results.length
-      });
+      await this.logError('bulkUpdateVariantPrices', error);
       throw error;
     }
   }
@@ -385,11 +468,9 @@ export class ShopifyGraphQLService extends ShopifyService {
   async adjustInventoryQuantity(
     inventoryItemId: string,
     locationId: string,
-    availableDelta: number,
+    delta: number,
     reason: string = 'sync'
   ): Promise<InventoryAdjustmentResult> {
-    const client = await this.getGraphQLClient();
-
     const mutation = `
       mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
         inventoryAdjustQuantities(input: $input) {
@@ -410,207 +491,70 @@ export class ShopifyGraphQLService extends ShopifyService {
     `;
 
     try {
-      const response = await retry<GraphQLResponse<{ inventoryAdjustQuantities: InventoryAdjustmentResult }>>(
-        () => client.request(mutation, {
-          input: {
-            reason,
-            name: 'available',
-            changes: [
-              {
-                inventoryItemId,
-                locationId,
-                delta: availableDelta,
-              },
-            ],
-          },
-        }),
+      const response = await retry<any>(
+        async () => {
+          const data = await this.executeQuery(mutation, {
+            input: {
+              reason,
+              name: 'available',
+              changes: [
+                {
+                  inventoryItemId,
+                  locationId,
+                  delta,
+                },
+              ],
+            },
+          });
+          return data;
+        },
         {
           retries: 3,
           minTimeout: 1000,
           maxTimeout: 5000,
-          onRetry: (err, attempt) => {
-            logger.warn(`Retrying inventory adjustment (attempt ${attempt})`, {
-              inventoryItemId,
-              error: err.message
-            });
-          },
         }
       );
 
-      const result = response.data?.inventoryAdjustQuantities;
+      const result = response?.inventoryAdjustQuantities;
       
       if (!result) {
         throw new AppError('Invalid response from Shopify API', 502);
       }
 
       if (result.userErrors && result.userErrors.length > 0) {
-        const errorMessage = result.userErrors.map(e => e.message).join(', ');
-        logger.error('Shopify inventory adjustment errors', {
-          inventoryItemId,
-          locationId,
-          errors: result.userErrors
-        });
-        throw new AppError(errorMessage, 400);
+        logger.error('Shopify inventory adjustment errors', result.userErrors);
+        throw new AppError(result.userErrors[0].message, 400);
       }
 
-      logger.info('Adjusted inventory successfully', {
-        inventoryItemId,
-        locationId,
-        delta: availableDelta,
-        adjustmentId: result.inventoryAdjustmentGroup?.id
-      });
-
+      logger.info(`Adjusted inventory for ${inventoryItemId}: ${delta}`);
       return result;
     } catch (error) {
       await this.logError('adjustInventoryQuantity', error, {
         inventoryItemId,
         locationId,
-        availableDelta,
-        reason
+        delta,
       });
       throw error;
     }
   }
 
   /**
-   * 재고 수량 일괄 조정
+   * SKU로 variant 찾기 (재고 포함)
    */
-  async bulkAdjustInventory(
-    adjustments: Array<{
-      inventoryItemId: string;
-      locationId: string;
-      availableDelta: number;
-    }>,
-    reason: string = 'sync',
-    options: BulkOperationOptions = {}
-  ): Promise<BulkInventoryResult[]> {
-    const {
-      batchSize = this.DEFAULT_BATCH_SIZE,
-      delayBetweenBatches = this.DEFAULT_DELAY_MS,
-      maxRetries = 3
-    } = options;
-
-    const client = await this.getGraphQLClient();
-
-    const mutation = `
-      mutation inventoryBulkAdjustQuantityAtLocation(
-        $inventoryItemAdjustments: [InventoryAdjustItemInput!]!, 
-        $locationId: ID!
-      ) {
-        inventoryBulkAdjustQuantityAtLocation(
-          inventoryItemAdjustments: $inventoryItemAdjustments, 
-          locationId: $locationId
-        ) {
-          inventoryLevels {
-            id
-            available
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-    `;
-
-    // Validate inputs
-    if (!adjustments || adjustments.length === 0) {
-      logger.warn('No inventory adjustments provided');
-      return [];
-    }
-
-    // 위치별로 그룹화
-    const adjustmentsByLocation = adjustments.reduce((acc, adj) => {
-      if (!acc[adj.locationId]) {
-        acc[adj.locationId] = [];
-      }
-      acc[adj.locationId]!.push({
-        inventoryItemId: adj.inventoryItemId,
-        availableDelta: adj.availableDelta,
-      });
-      return acc;
-    }, {} as Record<string, Array<{ inventoryItemId: string; availableDelta: number }>>);
-
-    const results: BulkInventoryResult[] = [];
-    const errors: Array<{ locationId: string; error: any }> = [];
-
-    try {
-      for (const [locationId, locationAdjustments] of Object.entries(adjustmentsByLocation)) {
-        // Process in batches
-        const batches = this.chunk(locationAdjustments, batchSize);
-
-        for (const batch of batches) {
-          try {
-            const response = await retry<GraphQLResponse<{ inventoryBulkAdjustQuantityAtLocation: BulkInventoryResult }>>(
-              () => client.request(mutation, {
-                locationId,
-                inventoryItemAdjustments: batch,
-              }),
-              {
-                retries: maxRetries,
-                minTimeout: 1000,
-                maxTimeout: 5000,
-              }
-            );
-
-            const result = response.data?.inventoryBulkAdjustQuantityAtLocation;
-            
-            if (!result) {
-              throw new AppError('Invalid response from Shopify API', 502);
-            }
-
-            if (result.userErrors && result.userErrors.length > 0) {
-              logger.error('Shopify bulk inventory adjustment errors', {
-                locationId,
-                errors: result.userErrors
-              });
-            }
-
-            results.push(result);
-          } catch (error) {
-            errors.push({ locationId, error });
-            logger.error(`Failed to adjust inventory for location ${locationId}`, error);
-          }
-
-          // Rate limiting between batches
-          await this.delay(delayBetweenBatches);
-        }
-      }
-
-      logger.info('Bulk inventory adjustment completed', {
-        totalAdjustments: adjustments.length,
-        successful: results.length,
-        failed: errors.length,
-        reason
-      });
-
-      if (errors.length > 0) {
-        throw new AppError(
-          `Failed to adjust inventory for ${errors.length} locations`,
-          207
-        );
-      }
-
-      return results;
-    } catch (error) {
-      await this.logError('bulkAdjustInventory', error, {
-        totalAdjustments: adjustments.length,
-        processed: results.length
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * SKU로 variant 찾기
-   */
-  async findVariantBySku(sku: string): Promise<ProductVariant | null> {
+  async findVariantBySku(sku: string, includeInventory: boolean = true): Promise<ProductVariant | null> {
     if (!sku) {
       logger.warn('SKU not provided for variant search');
       return null;
     }
 
-    const client = await this.getGraphQLClient();
+    let locationId: string | null = null;
+    if (includeInventory) {
+      try {
+        locationId = await this.getDefaultLocationId();
+      } catch (error) {
+        logger.warn('Failed to get location ID, proceeding without inventory data', error);
+      }
+    }
 
     const query = `
       query FindVariantBySku($query: String!) {
@@ -620,21 +564,26 @@ export class ShopifyGraphQLService extends ShopifyService {
               id
               sku
               price
+              ${includeInventory && locationId ? `
+              inventoryQuantity
               inventoryItem {
                 id
                 inventoryLevels(first: 10) {
                   edges {
                     node {
                       id
+                      quantities(names: ["available"]) {
+                        quantity
+                      }
                       location {
                         id
                         name
                       }
-                      available
                     }
                   }
                 }
               }
+              ` : ''}
             }
           }
         }
@@ -642,30 +591,32 @@ export class ShopifyGraphQLService extends ShopifyService {
     `;
 
     try {
-      const response = await retry<GraphQLResponse<ProductVariantsQueryResponse>>(
-        () => client.request(query, {
-          query: `sku:"${sku}"`,
-        }),
-        {
-          retries: 2,
-          minTimeout: 500,
-          maxTimeout: 2000,
-        }
-      );
+      const response = await this.executeQuery<any>(query, {
+        query: `sku:"${sku}"`,
+      });
 
-      const data = response.data;
-      if (!data || !data.productVariants) {
-        logger.warn(`No variant found for SKU: ${sku}`);
-        return null;
-      }
-
-      const edges = data.productVariants.edges || [];
-      const variant = edges.length > 0 && edges[0] ? edges[0].node : null;
+      const edges = response?.productVariants?.edges || [];
+      const variant = edges.length > 0 ? edges[0].node : null;
 
       if (variant) {
+        // 재고 정보 처리
+        if (variant.inventoryItem && variant.inventoryItem.inventoryLevels) {
+          const inventoryLevels = variant.inventoryItem.inventoryLevels.edges;
+          
+          // 기본 위치의 재고 찾기
+          const defaultLocationInventory = inventoryLevels.find(
+            level => level.node.location.id === locationId
+          );
+          
+          if (defaultLocationInventory && defaultLocationInventory.node.quantities.length > 0) {
+            variant.inventoryQuantity = defaultLocationInventory.node.quantities[0].quantity;
+          }
+        }
+
         logger.debug(`Found variant for SKU ${sku}`, {
           variantId: variant.id,
-          price: variant.price
+          price: variant.price,
+          inventoryQuantity: variant.inventoryQuantity
         });
       }
 
@@ -685,8 +636,6 @@ export class ShopifyGraphQLService extends ShopifyService {
       return null;
     }
 
-    const client = await this.getGraphQLClient();
-
     const query = `
       query GetProductIdFromVariant($id: ID!) {
         productVariant(id: $id) {
@@ -698,19 +647,11 @@ export class ShopifyGraphQLService extends ShopifyService {
     `;
 
     try {
-      const response = await retry<GraphQLResponse<ProductVariantQueryResponse>>(
-        () => client.request(query, {
-          id: variantId,
-        }),
-        {
-          retries: 2,
-          minTimeout: 500,
-          maxTimeout: 2000,
-        }
-      );
+      const response = await this.executeQuery<any>(query, {
+        id: variantId,
+      });
 
-      const data = response.data;
-      const productId = data?.productVariant?.product?.id || null;
+      const productId = response?.productVariant?.product?.id || null;
 
       if (!productId) {
         logger.warn(`Product ID not found for variant: ${variantId}`);
@@ -724,14 +665,74 @@ export class ShopifyGraphQLService extends ShopifyService {
   }
 
   /**
-   * Helper: 배열을 청크로 분할
+   * 재고 레벨 일괄 조회
    */
-  private chunk<T>(array: T[], size: number): T[][] {
-    const chunks: T[][] = [];
-    for (let i = 0; i < array.length; i += size) {
-      chunks.push(array.slice(i, i + size));
+  async getBulkInventoryLevels(
+    inventoryItemIds: string[],
+    locationIds?: string[]
+  ): Promise<Array<{
+    inventoryItemId: string;
+    locationId: string;
+    available: number;
+  }>> {
+    const query = `
+      query getInventoryLevels($inventoryItemIds: [ID!]!, $locationIds: [ID!]) {
+        nodes(ids: $inventoryItemIds) {
+          ... on InventoryItem {
+            id
+            inventoryLevels(first: 50, locationIds: $locationIds) {
+              edges {
+                node {
+                  id
+                  quantities(names: ["available"]) {
+                    quantity
+                  }
+                  location {
+                    id
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const response = await this.executeQuery<any>(query, {
+        inventoryItemIds,
+        locationIds: locationIds || [await this.getDefaultLocationId()]
+      });
+
+      const inventoryLevels: Array<{
+        inventoryItemId: string;
+        locationId: string;
+        available: number;
+      }> = [];
+
+      if (response.nodes) {
+        response.nodes.forEach((node: any) => {
+          if (node && node.inventoryLevels) {
+            node.inventoryLevels.edges.forEach((edge: any) => {
+              const level = edge.node;
+              if (level.quantities && level.quantities.length > 0) {
+                inventoryLevels.push({
+                  inventoryItemId: node.id,
+                  locationId: level.location.id,
+                  available: level.quantities[0].quantity
+                });
+              }
+            });
+          }
+        });
+      }
+
+      return inventoryLevels;
+    } catch (error) {
+      await this.logError('getBulkInventoryLevels', error);
+      throw error;
     }
-    return chunks;
   }
 
   /**
@@ -744,7 +745,7 @@ export class ShopifyGraphQLService extends ShopifyService {
   /**
    * Helper: 에러 로깅 확장
    */
-  protected override async logError(
+  protected async logError(
     operation: string,
     error: any,
     additionalContext?: Record<string, any>

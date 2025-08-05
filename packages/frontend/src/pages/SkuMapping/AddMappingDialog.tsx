@@ -71,6 +71,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
   const [searchingShopify, setSearchingShopify] = useState(false);
   const [naverProducts, setNaverProducts] = useState<any[]>([]);
   const [shopifyProducts, setShopifyProducts] = useState<any[]>([]);
+  const [allShopifyProducts, setAllShopifyProducts] = useState<any[]>([]);
   const [validationResult, setValidationResult] = useState<any>(null);
 
   const formik = useFormik({
@@ -88,34 +89,85 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
     },
   });
 
+  // 초기 Shopify 상품 로드
+  useEffect(() => {
+    if (open) {
+      loadAllShopifyProducts();
+    }
+  }, [open]);
+
+  // 전체 Shopify 상품 로드
+  const loadAllShopifyProducts = async () => {
+    try {
+      const response = await productService.searchShopifyProducts({ 
+        vendor: 'album', 
+        limit: 1000,
+        includeInactive: false 
+      });
+      
+      if (response.data.success && response.data.data) {
+        const products = response.data.data;
+        setAllShopifyProducts(products);
+        setShopifyProducts(products);
+      }
+    } catch (error) {
+      console.error('Failed to load Shopify products:', error);
+    }
+  };
+
   // 네이버 상품 검색
   const searchNaverProducts = async (searchTerm: string) => {
     if (!searchTerm || searchTerm.length < 2) return;
 
     setSearchingNaver(true);
     try {
-      const response = await productService.searchNaverProducts({ query: searchTerm });
-      setNaverProducts(response.data.products || []);
+      const response = await productService.searchNaverProducts({ 
+        query: searchTerm,
+        limit: 20 
+      });
+      
+      if (response.data.success && response.data.data) {
+        // 응답 구조에 따라 조정
+        const products = response.data.data.contents || response.data.data.products || response.data.data;
+        setNaverProducts(Array.isArray(products) ? products : []);
+      }
     } catch (error) {
       showNotification('네이버 상품 검색에 실패했습니다.', 'error');
+      console.error('Naver search error:', error);
     } finally {
       setSearchingNaver(false);
     }
   };
 
-  // Shopify 상품 검색
-  const searchShopifyProducts = async (searchTerm: string) => {
-    if (!searchTerm || searchTerm.length < 2) return;
-
-    setSearchingShopify(true);
-    try {
-      const response = await productService.searchShopifyProducts({ query: searchTerm });
-      setShopifyProducts(response.data.products || []);
-    } catch (error) {
-      showNotification('Shopify 상품 검색에 실패했습니다.', 'error');
-    } finally {
-      setSearchingShopify(false);
+  // Shopify 상품 필터링 (SKU 기반)
+  const filterShopifyProducts = (searchTerm: string) => {
+    if (!searchTerm) {
+      setShopifyProducts(allShopifyProducts);
+      return;
     }
+
+    const filtered = allShopifyProducts.filter((product) => {
+      // 상품 제목에 검색어가 포함되어 있는지
+      if (product.title?.toLowerCase().includes(searchTerm.toLowerCase())) {
+        return true;
+      }
+      
+      // SKU에 검색어가 포함되어 있는지
+      if (product.sku?.toLowerCase().includes(searchTerm.toLowerCase())) {
+        return true;
+      }
+      
+      // variants의 SKU 확인
+      if (product.variants && Array.isArray(product.variants)) {
+        return product.variants.some((variant: any) => 
+          variant.sku?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+      }
+      
+      return false;
+    });
+    
+    setShopifyProducts(filtered);
   };
 
   // 검증 실행
@@ -151,7 +203,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
       formik.resetForm();
       setValidationResult(null);
       setNaverProducts([]);
-      setShopifyProducts([]);
+      setShopifyProducts(allShopifyProducts);
     }
   }, [open]);
 
@@ -187,7 +239,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                 options={naverProducts}
                 getOptionLabel={(option) => {
                   if (typeof option === 'string') return option;
-                  return `${option.name} (${option.id})`;
+                  return `${option.name || option.productName} (${option.productNo || option.id})`;
                 }}
                 value={formik.values.naverProductId}
                 onInputChange={(event, value) => {
@@ -196,7 +248,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                 }}
                 onChange={(event, value) => {
                   if (value && typeof value !== 'string') {
-                    formik.setFieldValue('naverProductId', value.id);
+                    formik.setFieldValue('naverProductId', value.productNo || value.id);
                   }
                 }}
                 loading={searchingNaver}
@@ -228,19 +280,21 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                 options={shopifyProducts}
                 getOptionLabel={(option) => {
                   if (typeof option === 'string') return option;
-                  return `${option.title} (${option.id})`;
+                  return `${option.title} ${option.variants?.[0]?.sku ? `(${option.variants[0].sku})` : ''}`;
                 }}
                 value={formik.values.shopifyProductId}
                 onInputChange={(event, value) => {
-                  formik.setFieldValue('shopifyProductId', value);
-                  searchShopifyProducts(value);
+                  filterShopifyProducts(value);
                 }}
                 onChange={(event, value) => {
                   if (value && typeof value !== 'string') {
                     formik.setFieldValue('shopifyProductId', value.id);
                     // 첫 번째 variant ID 자동 설정
-                    if (value.variants && value.variants.length > 0) {
-                      formik.setFieldValue('shopifyVariantId', value.variants[0].id);
+                    if (value.variants && value.variants.edges) {
+                      const firstVariant = value.variants.edges[0]?.node;
+                      if (firstVariant) {
+                        formik.setFieldValue('shopifyVariantId', firstVariant.id);
+                      }
                     }
                   }
                 }}
@@ -251,7 +305,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                     label="Shopify 상품"
                     error={formik.touched.shopifyProductId && Boolean(formik.errors.shopifyProductId)}
                     helperText={formik.touched.shopifyProductId && formik.errors.shopifyProductId}
-                    placeholder="상품명 또는 ID로 검색"
+                    placeholder="SKU 또는 상품명으로 검색"
                     InputProps={{
                       ...params.InputProps,
                       endAdornment: (
@@ -272,7 +326,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                 fullWidth
                 id="priceMargin"
                 name="priceMargin"
-                label="마진율"
+                label="가격 마진율 (%)"
                 type="number"
                 value={formik.values.priceMargin}
                 onChange={formik.handleChange}
@@ -284,7 +338,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
               />
             </Grid>
 
-            {/* 활성화 여부 */}
+            {/* 활성화 상태 */}
             <Grid item xs={12} md={6}>
               <FormControlLabel
                 control={
@@ -296,59 +350,41 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                   />
                 }
                 label="활성화"
-                sx={{ mt: 1 }}
               />
             </Grid>
 
             {/* 검증 결과 */}
             {validationResult && (
               <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="subtitle2" gutterBottom>
-                  검증 결과
-                </Typography>
-                
-                {validationResult.isValid ? (
-                  <Alert severity="success">
-                    모든 검증을 통과했습니다.
-                  </Alert>
-                ) : (
-                  <>
-                    {validationResult.errors?.length > 0 && (
-                      <Alert severity="error" sx={{ mb: 1 }}>
-                        <Typography variant="body2" fontWeight="bold">오류:</Typography>
-                        <ul style={{ margin: 0, paddingLeft: 20 }}>
-                          {validationResult.errors.map((error: string, index: number) => (
-                            <li key={index}>{error}</li>
-                          ))}
-                        </ul>
-                      </Alert>
-                    )}
-                    
-                    {validationResult.warnings?.length > 0 && (
-                      <Alert severity="warning">
-                        <Typography variant="body2" fontWeight="bold">경고:</Typography>
-                        <ul style={{ margin: 0, paddingLeft: 20 }}>
-                          {validationResult.warnings.map((warning: string, index: number) => (
-                            <li key={index}>{warning}</li>
-                          ))}
-                        </ul>
-                      </Alert>
-                    )}
-                  </>
-                )}
+                <Alert severity={validationResult.isValid ? 'success' : 'warning'}>
+                  {validationResult.message || (validationResult.isValid ? '매핑이 유효합니다.' : '매핑에 문제가 있습니다.')}
+                  {validationResult.details && (
+                    <Box sx={{ mt: 1 }}>
+                      {Object.entries(validationResult.details).map(([key, value]) => (
+                        <Typography key={key} variant="body2">
+                          • {key}: {String(value)}
+                        </Typography>
+                      ))}
+                    </Box>
+                  )}
+                </Alert>
               </Grid>
             )}
           </Grid>
         </DialogContent>
         
         <DialogActions>
-          <Button onClick={handleValidate} disabled={!formik.values.sku || !formik.values.naverProductId || !formik.values.shopifyProductId}>
-            검증하기
+          <Button onClick={onClose} color="inherit">
+            취소
           </Button>
-          <Box sx={{ flex: 1 }} />
-          <Button onClick={onClose}>취소</Button>
-          <Button type="submit" variant="contained" disabled={formik.isSubmitting}>
+          <Button 
+            onClick={handleValidate} 
+            color="secondary"
+            disabled={!formik.values.sku || !formik.values.naverProductId || !formik.values.shopifyProductId}
+          >
+            검증
+          </Button>
+          <Button type="submit" variant="contained" color="primary">
             {initialData ? '수정' : '추가'}
           </Button>
         </DialogActions>

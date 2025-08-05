@@ -8,8 +8,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { connectDatabase } from './config/database';
 import { initializeRedis } from './config/redis';
-import { setupRoutes } from './routes';
-import { errorHandler } from './middlewares/error.middleware';
+import { errorMiddleware } from './middlewares/error.middleware';
 import { logger } from './utils/logger';
 import { setupCronJobs } from './utils/cronjobs';
 import { initializeWebSocket } from './websocket';
@@ -51,12 +50,13 @@ async function initializeApp() {
     // Initialize Redis - 라우터 설정 전에 실행
     await initializeRedis();
 
-    // API Routes - Redis 초기화 후 라우터 설정
+    // API Routes - 동적 import로 변경
+    const { setupRoutes } = await import('./routes');
     const routes = setupRoutes();
     app.use('/api/v1', routes);
 
     // Error handler
-    app.use(errorHandler);
+    app.use(errorMiddleware);
 
     // 404 handler
     app.use((req, res) => {
@@ -70,10 +70,14 @@ async function initializeApp() {
     });
 
     // Initialize WebSocket
-    initializeWebSocket(io);
+    if (initializeWebSocket) {
+      initializeWebSocket(io);
+    }
 
     // Setup cron jobs
-    setupCronJobs();
+    if (setupCronJobs) {
+      setupCronJobs();
+    }
 
     logger.info('App initialized successfully');
   } catch (error) {
@@ -93,8 +97,10 @@ async function startServer() {
   });
 
   // WebSocket server
-  io.listen(config.wsPort);
-  logger.info(`🔌 WebSocket server is running on port ${config.wsPort}`);
+  if (config.wsPort) {
+    io.listen(config.wsPort);
+    logger.info(`🔌 WebSocket server is running on port ${config.wsPort}`);
+  }
 }
 
 // Handle unhandled promise rejections
