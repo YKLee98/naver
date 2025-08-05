@@ -67,56 +67,56 @@ class MappingService {
    * 매핑 목록 조회
    */
   async getMappings(params?: MappingListParams): Promise<AxiosResponse<MappingListResponse>> {
-    return apiClient.get('/api/v1/mappings', { params });
+    return apiClient.get('/mappings', { params });
   }
 
   /**
    * 매핑 생성
    */
   async createMapping(data: Partial<MappingData>): Promise<AxiosResponse<{ success: boolean; data: { mapping: MappingData; validation: ValidationResult } }>> {
-    return apiClient.post('/api/v1/mappings', data);
+    return apiClient.post('/mappings', data);
   }
 
   /**
    * 매핑 수정
    */
   async updateMapping(id: string, data: Partial<MappingData>): Promise<AxiosResponse<{ success: boolean; data: { mapping: MappingData; validation: ValidationResult } }>> {
-    return apiClient.put(`/api/v1/mappings/${id}`, data);
+    return apiClient.put(`/mappings/${id}`, data);
   }
 
   /**
    * 매핑 삭제
    */
   async deleteMapping(id: string): Promise<AxiosResponse<{ success: boolean; message: string }>> {
-    return apiClient.delete(`/api/v1/mappings/${id}`);
+    return apiClient.delete(`/mappings/${id}`);
   }
 
   /**
    * 매핑 검증
    */
   async validateMapping(id: string): Promise<AxiosResponse<{ success: boolean; data: ValidationResult }>> {
-    return apiClient.post(`/api/v1/mappings/${id}/validate`);
+    return apiClient.post(`/mappings/${id}/validate`);
   }
 
   /**
    * 매핑 데이터 검증 (생성 전)
    */
   async validateMappingData(data: { sku: string; naverProductId: string; shopifyProductId: string }): Promise<AxiosResponse<{ success: boolean; data: ValidationResult }>> {
-    return apiClient.post('/api/v1/mappings/validate', data);
+    return apiClient.post('/mappings/validate', data);
   }
 
   /**
    * 자동 매핑 탐색
    */
   async autoDiscoverMappings(options: AutoDiscoverOptions): Promise<AxiosResponse<{ success: boolean; data: { found: number; mappings: any[] } }>> {
-    return apiClient.post('/api/v1/mappings/auto-discover', options);
+    return apiClient.post('/mappings/auto-discover', options);
   }
 
   /**
    * 엑셀 대량 업로드
    */
   async bulkUpload(formData: FormData): Promise<AxiosResponse<{ success: boolean; data: BulkUploadResult }>> {
-    return apiClient.post('/api/v1/mappings/bulk', formData, {
+    return apiClient.post('/mappings/bulk', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -127,7 +127,7 @@ class MappingService {
    * 엑셀 템플릿 다운로드
    */
   async downloadTemplate(): Promise<AxiosResponse<Blob>> {
-    return apiClient.get('/api/v1/mappings/template', {
+    return apiClient.get('/mappings/template', {
       responseType: 'blob',
     });
   }
@@ -136,7 +136,7 @@ class MappingService {
    * 매핑 일괄 활성화/비활성화
    */
   async toggleMappings(ids: string[], isActive: boolean): Promise<AxiosResponse<{ success: boolean; updated: number }>> {
-    return apiClient.put('/api/v1/mappings/bulk-toggle', {
+    return apiClient.put('/mappings/bulk-toggle', {
       ids,
       isActive,
     });
@@ -146,7 +146,7 @@ class MappingService {
    * 매핑 일괄 삭제
    */
   async bulkDelete(ids: string[]): Promise<AxiosResponse<{ success: boolean; deleted: number }>> {
-    return apiClient.post('/api/v1/mappings/bulk-delete', { ids });
+    return apiClient.post('/mappings/bulk-delete', { ids });
   }
 }
 
