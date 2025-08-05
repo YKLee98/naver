@@ -105,11 +105,19 @@ export class MappingController {
       // 각 매핑의 동기화 상태 확인
       const mappingsWithStatus = await Promise.all(
         mappings.map(async (mapping) => {
-          const syncStatus = await this.mappingService.checkMappingStatus(mapping.sku);
-          return {
-            ...mapping,
-            syncStatus
-          };
+          try {
+            const syncStatus = await this.mappingService.checkMappingStatus(mapping.sku);
+            return {
+              ...mapping,
+              syncStatus
+            };
+          } catch (error) {
+            // 상태 확인 실패 시 기본값 사용
+            return {
+              ...mapping,
+              syncStatus: mapping.status || 'unknown'
+            };
+          }
         })
       );
 
@@ -292,16 +300,53 @@ export class MappingController {
 
       logger.info('Starting auto-discovery with options:', options);
 
-      const discoveries = await this.mappingService.autoDiscoverMappings(options);
+      // 서비스가 초기화되었는지 확인
+      if (!this.mappingService) {
+        throw new AppError('Mapping service not initialized', 500);
+      }
 
-      res.json({
-        success: true,
-        data: {
-          found: discoveries.length,
-          mappings: discoveries
+      try {
+        const discoveries = await this.mappingService.autoDiscoverMappings(options);
+
+        res.json({
+          success: true,
+          data: {
+            found: discoveries.length,
+            mappings: discoveries
+          }
+        });
+      } catch (serviceError: any) {
+        logger.error('Auto-discovery service error:', serviceError);
+        
+        // 상세한 에러 처리
+        if (serviceError.message?.includes('NAVER_AUTH_ERROR')) {
+          throw new AppError('네이버 API 인증에 실패했습니다. API 키를 확인해주세요.', 401);
+        } else if (serviceError.message?.includes('SHOPIFY_AUTH_ERROR')) {
+          throw new AppError('Shopify API 인증에 실패했습니다. 액세스 토큰을 확인해주세요.', 401);
+        } else if (serviceError.message?.includes('NETWORK_ERROR')) {
+          throw new AppError('네트워크 연결에 실패했습니다. 잠시 후 다시 시도해주세요.', 503);
+        } else if (serviceError.message?.includes('RATE_LIMIT')) {
+          throw new AppError('API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.', 429);
+        } else if (serviceError.message?.includes('NO_PRODUCTS')) {
+          res.json({
+            success: true,
+            data: {
+              found: 0,
+              mappings: [],
+              message: '탐색할 상품이 없습니다.'
+            }
+          });
+          return;
         }
-      });
+        
+        // 기타 서비스 에러
+        throw new AppError(
+          serviceError.message || '자동 탐색 중 오류가 발생했습니다.',
+          serviceError.statusCode || 500
+        );
+      }
     } catch (error) {
+      logger.error('Auto-discovery controller error:', error);
       next(error);
     }
   };
@@ -362,9 +407,9 @@ export class MappingController {
       }
 
       const results = {
-        success: [],
-        errors: [],
-        skipped: []
+        success: [] as any[],
+        errors: [] as any[],
+        skipped: [] as any[]
       };
 
       for (const [index, row] of data.entries()) {
@@ -420,40 +465,6 @@ export class MappingController {
           ...results
         }
       });
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  /**
-   * 엑셀 템플릿 다운로드
-   * GET /api/v1/mappings/template
-   */
-  downloadTemplate = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const template = [
-        {
-          'SKU': 'ALBUM-001',
-          '네이버상품ID': '12345678',
-          'Shopify상품ID': '7890123456',
-          '활성화': 'Y',
-          '마진율': '15'
-        }
-      ];
-
-      const ws = XLSX.utils.json_to_sheet(template);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'SKU매핑');
-
-      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', 'attachment; filename="sku-mapping-template.xlsx"');
-      res.send(buffer);
     } catch (error) {
       next(error);
     }

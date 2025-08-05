@@ -100,28 +100,63 @@ const Inventory: React.FC = () => {
         stockLevel: stockFilter === 'all' ? undefined : stockFilter,
       });
 
-      setInventories(response.data.inventories);
-      setTotalCount(response.data.pagination.total);
-      setSummary(response.data.summary);
+      // 백엔드의 InventoryController를 보면 data가 직접 배열로 옵니다
+      const inventoryData = response.data.data || [];
+      const totalData = response.data.total || 0;
+      const pageData = response.data.page || 1;
+      const totalPages = response.data.totalPages || 1;
+
+      // 각 항목에서 플랫폼별 재고 정보 추출
+      const processedInventories = inventoryData.map((item: any) => ({
+        _id: item.sku,
+        sku: item.sku,
+        productName: item.productName || '',
+        naverStock: item.currentQuantity || 0, // 플랫폼별 재고는 별도로 조회 필요
+        shopifyStock: item.currentQuantity || 0,
+        difference: 0,
+        status: item.currentQuantity === 0 ? 'error' : 
+                item.currentQuantity <= 10 ? 'warning' : 'normal',
+        lastSyncAt: item.lastUpdated || new Date().toISOString(),
+        syncStatus: item.syncStatus || 'synced'
+      }));
+
+      setInventories(processedInventories);
+      setTotalCount(totalData);
+
+      // 요약 정보 계산
+      const summaryData = {
+        totalSku: totalData,
+        normalCount: processedInventories.filter(i => i.status === 'normal').length,
+        warningCount: processedInventories.filter(i => i.status === 'warning').length,
+        errorCount: processedInventories.filter(i => i.status === 'error').length,
+      };
+      setSummary(summaryData);
     } catch (error) {
+      console.error('Error loading inventories:', error);
       showNotification('재고 목록을 불러오는데 실패했습니다.', 'error');
+      setInventories([]);
     } finally {
       setLoading(false);
     }
   };
 
+  // 초기 로드 및 필터 변경 시 재로드
   useEffect(() => {
     loadInventories();
-  }, [page, rowsPerPage, searchTerm, statusFilter, stockFilter]);
+  }, [page, rowsPerPage, statusFilter, stockFilter]);
 
-  // 자동 새로고침 (30초마다)
+  // 검색어 디바운싱
   useEffect(() => {
-    const interval = setInterval(() => {
-      loadInventories();
-    }, 30000);
+    const timer = setTimeout(() => {
+      if (page === 0) {
+        loadInventories();
+      } else {
+        setPage(0);
+      }
+    }, 500);
 
-    return () => clearInterval(interval);
-  }, [page, rowsPerPage, searchTerm, statusFilter, stockFilter]);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   // 재고 조정
   const handleAdjustInventory = (inventory: InventoryItem) => {
@@ -129,83 +164,91 @@ const Inventory: React.FC = () => {
     setAdjustDialogOpen(true);
   };
 
-  // 재고 이력 보기
+  // 이력 보기
   const handleViewHistory = (inventory: InventoryItem) => {
     setSelectedInventory(inventory);
     setHistoryDialogOpen(true);
   };
 
-  // 재고 조정 완료
-  const handleAdjustComplete = () => {
-    setAdjustDialogOpen(false);
-    loadInventories();
-    showNotification('재고가 조정되었습니다.', 'success');
-  };
-
-  // 엑셀 다운로드
-  const handleExportExcel = async () => {
+  // 재고 동기화
+  const handleSyncInventory = async () => {
+    setLoading(true);
     try {
-      const response = await inventoryService.exportInventory({
-        search: searchTerm,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        stockLevel: stockFilter === 'all' ? undefined : stockFilter,
-      });
-
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `inventory-${new Date().toISOString().split('T')[0]}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      await inventoryService.syncInventory();
+      showNotification('재고 동기화가 시작되었습니다.', 'success');
+      setTimeout(() => loadInventories(), 2000);
     } catch (error) {
-      showNotification('엑셀 다운로드에 실패했습니다.', 'error');
+      showNotification('재고 동기화에 실패했습니다.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // 상태 아이콘 렌더링
-  const renderStatusIcon = (difference: number) => {
-    if (difference === 0) {
-      return <Remove color="success" />;
-    } else if (difference > 0) {
-      return <TrendingUp color="error" />;
-    } else {
-      return <TrendingDown color="error" />;
+  // 재고 내보내기
+  const handleExportInventory = async () => {
+    try {
+      const response = await inventoryService.exportInventory();
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `inventory_${new Date().toISOString().split('T')[0]}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      showNotification('재고 내보내기에 실패했습니다.', 'error');
     }
   };
 
   // 상태 칩 렌더링
   const renderStatusChip = (status: string) => {
-    const statusConfig = {
-      normal: { label: '정상', color: 'success' as const },
-      warning: { label: '주의', color: 'warning' as const },
-      error: { label: '오류', color: 'error' as const },
+    const config = {
+      normal: { color: 'success' as const, label: '정상' },
+      warning: { color: 'warning' as const, label: '부족' },
+      error: { color: 'error' as const, label: '품절' },
+      synced: { color: 'success' as const, label: '동기화됨' },
+      pending: { color: 'warning' as const, label: '대기중' },
     };
 
-    const config = statusConfig[status] || { label: status, color: 'default' as const };
+    const { color, label } = config[status] || { color: 'default' as const, label: status };
+    return <Chip size="small" color={color} label={label} />;
+  };
 
-    return <Chip label={config.label} color={config.color} size="small" />;
+  // 재고 차이 렌더링
+  const renderDifference = (diff: number) => {
+    if (diff === 0) {
+      return <Remove fontSize="small" color="disabled" />;
+    }
+    return diff > 0 ? (
+      <Box display="flex" alignItems="center" color="success.main">
+        <TrendingUp fontSize="small" />
+        <Typography variant="body2" ml={0.5}>+{diff}</Typography>
+      </Box>
+    ) : (
+      <Box display="flex" alignItems="center" color="error.main">
+        <TrendingDown fontSize="small" />
+        <Typography variant="body2" ml={0.5}>{diff}</Typography>
+      </Box>
+    );
   };
 
   return (
     <Box>
-      {/* 헤더 */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          재고 관리
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          네이버와 Shopify의 재고를 실시간으로 확인하고 조정합니다.
-        </Typography>
-      </Box>
+      <Typography variant="h4" gutterBottom>
+        재고 관리
+      </Typography>
 
       {/* 요약 카드 */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
+      <Grid container spacing={3} mb={3}>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                총 SKU
+                전체 SKU
               </Typography>
               <Typography variant="h4">
                 {formatNumber(summary.totalSku)}
@@ -217,7 +260,7 @@ const Inventory: React.FC = () => {
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                정상
+                정상 재고
               </Typography>
               <Typography variant="h4" color="success.main">
                 {formatNumber(summary.normalCount)}
@@ -229,7 +272,7 @@ const Inventory: React.FC = () => {
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                주의
+                재고 부족
               </Typography>
               <Typography variant="h4" color="warning.main">
                 {formatNumber(summary.warningCount)}
@@ -241,7 +284,7 @@ const Inventory: React.FC = () => {
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                오류
+                품절
               </Typography>
               <Typography variant="h4" color="error.main">
                 {formatNumber(summary.errorCount)}
@@ -251,65 +294,71 @@ const Inventory: React.FC = () => {
         </Grid>
       </Grid>
 
-      {/* 필터 바 */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-          <TextField
-            size="small"
-            placeholder="SKU, 상품명 검색"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search />
-                </InputAdornment>
-              ),
-            }}
-            sx={{ flex: 1, minWidth: 300 }}
-          />
+      {/* 필터 및 액션 */}
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Box display="flex" gap={2} flexWrap="wrap" alignItems="center" justifyContent="space-between">
+          <Box display="flex" gap={2} flexWrap="wrap" alignItems="center">
+            <TextField
+              size="small"
+              placeholder="SKU 또는 상품명 검색"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ minWidth: 250 }}
+            />
+            
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>상태</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="상태"
+              >
+                <MenuItem value="all">전체</MenuItem>
+                <MenuItem value="normal">정상</MenuItem>
+                <MenuItem value="warning">부족</MenuItem>
+                <MenuItem value="error">품절</MenuItem>
+              </Select>
+            </FormControl>
 
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>상태</InputLabel>
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              label="상태"
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>재고 수준</InputLabel>
+              <Select
+                value={stockFilter}
+                onChange={(e) => setStockFilter(e.target.value)}
+                label="재고 수준"
+              >
+                <MenuItem value="all">전체</MenuItem>
+                <MenuItem value="inStock">재고 있음</MenuItem>
+                <MenuItem value="lowStock">재고 부족</MenuItem>
+                <MenuItem value="outOfStock">품절</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+
+          <Box display="flex" gap={1}>
+            <Button
+              variant="outlined"
+              startIcon={<FileDownload />}
+              onClick={handleExportInventory}
             >
-              <MenuItem value="all">전체</MenuItem>
-              <MenuItem value="normal">정상</MenuItem>
-              <MenuItem value="warning">주의</MenuItem>
-              <MenuItem value="error">오류</MenuItem>
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>재고 수준</InputLabel>
-            <Select
-              value={stockFilter}
-              onChange={(e) => setStockFilter(e.target.value)}
-              label="재고 수준"
+              내보내기
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<Refresh />}
+              onClick={handleSyncInventory}
+              disabled={loading}
             >
-              <MenuItem value="all">전체</MenuItem>
-              <MenuItem value="low">재고 부족</MenuItem>
-              <MenuItem value="out">품절</MenuItem>
-              <MenuItem value="excess">재고 과다</MenuItem>
-            </Select>
-          </FormControl>
-
-          <Box sx={{ flexGrow: 1 }} />
-
-          <Button
-            variant="outlined"
-            startIcon={<FileDownload />}
-            onClick={handleExportExcel}
-          >
-            엑셀 다운로드
-          </Button>
-
-          <IconButton onClick={loadInventories} disabled={loading}>
-            <Refresh />
-          </IconButton>
+              동기화
+            </Button>
+          </Box>
         </Box>
       </Paper>
 
@@ -320,87 +369,89 @@ const Inventory: React.FC = () => {
             <TableRow>
               <TableCell>SKU</TableCell>
               <TableCell>상품명</TableCell>
-              <TableCell align="right">네이버</TableCell>
-              <TableCell align="right">Shopify</TableCell>
+              <TableCell align="center">네이버 재고</TableCell>
+              <TableCell align="center">Shopify 재고</TableCell>
               <TableCell align="center">차이</TableCell>
               <TableCell align="center">상태</TableCell>
+              <TableCell align="center">동기화 상태</TableCell>
               <TableCell>마지막 동기화</TableCell>
-              <TableCell align="center">작업</TableCell>
+              <TableCell align="right">작업</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {inventories.map((inventory) => (
-              <TableRow key={inventory._id} hover>
-                <TableCell>
-                  <Typography variant="body2" fontWeight="medium">
-                    {inventory.sku}
-                  </Typography>
-                </TableCell>
-                <TableCell>{inventory.productName}</TableCell>
-                <TableCell align="right">
-                  <Typography
-                    variant="body2"
-                    color={inventory.naverStock < 10 ? 'error' : 'inherit'}
-                  >
-                    {formatNumber(inventory.naverStock)}
-                  </Typography>
-                </TableCell>
-                <TableCell align="right">
-                  <Typography
-                    variant="body2"
-                    color={inventory.shopifyStock < 10 ? 'error' : 'inherit'}
-                  >
-                    {formatNumber(inventory.shopifyStock)}
-                  </Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Box display="flex" alignItems="center" justifyContent="center" gap={1}>
-                    {renderStatusIcon(inventory.difference)}
-                    <Typography
-                      variant="body2"
-                      color={inventory.difference !== 0 ? 'error' : 'success.main'}
-                    >
-                      {inventory.difference !== 0 && inventory.difference > 0 && '+'}
-                      {inventory.difference}
-                    </Typography>
-                  </Box>
-                </TableCell>
-                <TableCell align="center">
-                  {renderStatusChip(inventory.status)}
-                </TableCell>
-                <TableCell>
+            {loading && inventories.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} align="center">
                   <Typography variant="body2" color="text.secondary">
-                    {new Date(inventory.lastSyncAt).toLocaleString()}
+                    로딩 중...
                   </Typography>
-                </TableCell>
-                <TableCell align="center">
-                  <Tooltip title="재고 조정">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleAdjustInventory(inventory)}
-                    >
-                      <Edit />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="이력 보기">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleViewHistory(inventory)}
-                    >
-                      <History />
-                    </IconButton>
-                  </Tooltip>
                 </TableCell>
               </TableRow>
-            ))}
+            ) : inventories.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} align="center">
+                  <Typography variant="body2" color="text.secondary">
+                    재고 데이터가 없습니다.
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : (
+              inventories.map((inventory) => (
+                <TableRow key={inventory._id} hover>
+                  <TableCell>
+                    <Typography variant="body2" fontWeight="medium">
+                      {inventory.sku}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>{inventory.productName}</TableCell>
+                  <TableCell align="center">{formatNumber(inventory.naverStock)}</TableCell>
+                  <TableCell align="center">{formatNumber(inventory.shopifyStock)}</TableCell>
+                  <TableCell align="center">
+                    {renderDifference(inventory.difference)}
+                  </TableCell>
+                  <TableCell align="center">
+                    {renderStatusChip(inventory.status)}
+                  </TableCell>
+                  <TableCell align="center">
+                    {renderStatusChip(inventory.syncStatus)}
+                  </TableCell>
+                  <TableCell>
+                    <Tooltip title={new Date(inventory.lastSyncAt).toLocaleString()}>
+                      <Typography variant="caption">
+                        {new Date(inventory.lastSyncAt).toLocaleDateString()}
+                      </Typography>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Box display="flex" gap={1} justifyContent="flex-end">
+                      <Tooltip title="재고 조정">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleAdjustInventory(inventory)}
+                        >
+                          <Edit fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="이력 보기">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleViewHistory(inventory)}
+                        >
+                          <History fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
-
         <TablePagination
           component="div"
           count={totalCount}
           page={page}
-          onPageChange={(e, newPage) => setPage(newPage)}
+          onPageChange={(_, newPage) => setPage(newPage)}
           rowsPerPage={rowsPerPage}
           onRowsPerPageChange={(e) => {
             setRowsPerPage(parseInt(e.target.value, 10));
@@ -411,29 +462,33 @@ const Inventory: React.FC = () => {
         />
       </TableContainer>
 
-      {/* 재고 부족 경고 */}
-      {summary.warningCount > 0 && (
-        <Alert severity="warning" sx={{ mt: 2 }} icon={<Warning />}>
-          재고 부족 상품이 {summary.warningCount}개 있습니다. 확인이 필요합니다.
-        </Alert>
+      {/* 재고 조정 다이얼로그 */}
+      {selectedInventory && (
+        <InventoryAdjustDialog
+          open={adjustDialogOpen}
+          onClose={() => {
+            setAdjustDialogOpen(false);
+            setSelectedInventory(null);
+          }}
+          inventory={selectedInventory}
+          onSuccess={() => {
+            loadInventories();
+            showNotification('재고가 조정되었습니다.', 'success');
+          }}
+        />
       )}
 
-      {/* 다이얼로그 */}
+      {/* 재고 이력 다이얼로그 */}
       {selectedInventory && (
-        <>
-          <InventoryAdjustDialog
-            open={adjustDialogOpen}
-            onClose={() => setAdjustDialogOpen(false)}
-            inventory={selectedInventory}
-            onSuccess={handleAdjustComplete}
-          />
-
-          <InventoryHistoryDialog
-            open={historyDialogOpen}
-            onClose={() => setHistoryDialogOpen(false)}
-            sku={selectedInventory.sku}
-          />
-        </>
+        <InventoryHistoryDialog
+          open={historyDialogOpen}
+          onClose={() => {
+            setHistoryDialogOpen(false);
+            setSelectedInventory(null);
+          }}
+          sku={selectedInventory.sku}
+          productName={selectedInventory.productName}
+        />
       )}
     </Box>
   );

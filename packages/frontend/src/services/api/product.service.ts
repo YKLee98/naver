@@ -37,14 +37,14 @@ class ProductService {
    * 네이버 상품 검색
    */
   async searchNaverProducts(params: SearchProductsParams): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/api/v1/products/search/naver', { params });
+    return apiClient.get('/products/search/naver', { params });
   }
 
   /**
    * Shopify 상품 검색
    */
   async searchShopifyProducts(params: SearchProductsParams): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/api/v1/products/search/shopify', { params });
+    return apiClient.get('/products/search/shopify', { params });
   }
 
   /**
@@ -58,28 +58,28 @@ class ProductService {
     syncStatus?: string;
     search?: string;
   }): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/api/v1/products', { params });
+    return apiClient.get('/products', { params });
   }
 
   /**
    * SKU로 상품 조회
    */
   async getProductBySku(sku: string): Promise<AxiosResponse<{ success: boolean; data: Product }>> {
-    return apiClient.get(`/api/v1/products/${sku}`);
+    return apiClient.get(`/products/${sku}`);
   }
 
   /**
    * 상품 동기화
    */
   async syncProduct(sku: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
-    return apiClient.post(`/api/v1/products/${sku}/sync`);
+    return apiClient.post(`/products/${sku}/sync`);
   }
 
   /**
    * 상품 상태 업데이트
    */
   async updateProductStatus(sku: string, status: string): Promise<AxiosResponse<{ success: boolean }>> {
-    return apiClient.patch(`/api/v1/products/${sku}/status`, { status });
+    return apiClient.patch(`/products/${sku}/status`, { status });
   }
 }
 
