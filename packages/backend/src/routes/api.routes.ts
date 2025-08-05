@@ -1,6 +1,7 @@
 // packages/backend/src/routes/api.routes.ts
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares';
+import authRoutes from './auth.routes';
 import { 
   ProductController,
   InventoryController,
@@ -27,6 +28,9 @@ import { initializeRedis } from '../config/redis';
 // 라우터 설정 함수로 export
 export function setupApiRoutes(): Router {
   const router = Router();
+
+  // Auth routes - 인증 불필요 (로그인, 회원가입 등)
+  router.use('/auth', authRoutes);
 
   // 서비스 인스턴스 생성 - Redis가 초기화된 후에 실행됨
   const redis = initializeRedis();
@@ -75,42 +79,46 @@ export function setupApiRoutes(): Router {
   const mappingController = new MappingController(mappingService);
   const dashboardController = new DashboardController();
 
-  // 인증 미들웨어 적용
-  router.use(authMiddleware);
+  // 인증이 필요한 라우트들을 위한 별도 라우터
+  const protectedRouter = Router();
+  protectedRouter.use(authMiddleware);
 
   // 상품 관련 라우트
-  router.get('/products', productController.getMappedProducts);
-  router.get('/products/:sku', productController.getProductBySku);
-  router.get('/products/search/naver', productController.searchNaverProducts);
-  router.get('/products/search/shopify', productController.searchShopifyProducts);
+  protectedRouter.get('/products', productController.getMappedProducts);
+  protectedRouter.get('/products/:sku', productController.getProductBySku);
+  protectedRouter.get('/products/search/naver', productController.searchNaverProducts);
+  protectedRouter.get('/products/search/shopify', productController.searchShopifyProducts);
 
   // 재고 관련 라우트 - 순서 중요! 구체적인 경로가 먼저 와야 함
-  router.get('/inventory/status', inventoryController.getInventoryStatusList);
-  router.get('/inventory/low-stock', inventoryController.getLowStockProducts);
-  router.get('/inventory/:sku/status', inventoryController.getInventoryStatus);
-  router.get('/inventory/:sku/history', inventoryController.getInventoryHistory);
-  router.post('/inventory/:sku/adjust', inventoryController.adjustInventory);
+  protectedRouter.get('/inventory/status', inventoryController.getInventoryStatusList);
+  protectedRouter.get('/inventory/low-stock', inventoryController.getLowStockProducts);
+  protectedRouter.get('/inventory/:sku/status', inventoryController.getInventoryStatus);
+  protectedRouter.get('/inventory/:sku/history', inventoryController.getInventoryHistory);
+  protectedRouter.post('/inventory/:sku/adjust', inventoryController.adjustInventory);
 
   // 동기화 관련 라우트
-  router.post('/sync/full', syncController.performFullSync);
-  router.post('/sync/inventory', syncController.syncInventory); // 누락된 라우트 추가!
-  router.post('/sync/sku/:sku', syncController.syncSingleSku);
-  router.get('/sync/status', syncController.getSyncStatus);
-  router.get('/sync/settings', syncController.getSyncSettings);
-  router.put('/sync/settings', syncController.updateSyncSettings);
-  router.get('/sync/history', syncController.getSyncHistory);
+  protectedRouter.post('/sync/full', syncController.performFullSync);
+  protectedRouter.post('/sync/inventory', syncController.syncInventory); // 누락된 라우트 추가!
+  protectedRouter.post('/sync/sku/:sku', syncController.syncSingleSku);
+  protectedRouter.get('/sync/status', syncController.getSyncStatus);
+  protectedRouter.get('/sync/settings', syncController.getSyncSettings);
+  protectedRouter.put('/sync/settings', syncController.updateSyncSettings);
+  protectedRouter.get('/sync/history', syncController.getSyncHistory);
 
   // 매핑 관련 라우트
-  router.get('/mappings', mappingController.getMappings);
-  router.post('/mappings', mappingController.createMapping);
-  router.put('/mappings/:id', mappingController.updateMapping);
-  router.delete('/mappings/:id', mappingController.deleteMapping);
-  router.post('/mappings/auto-discover', mappingController.autoDiscoverMappings);
-  router.post('/mappings/:id/validate', mappingController.validateMapping);
-  router.post('/mappings/bulk', mappingController.bulkUploadMappings);
-  router.get('/mappings/template', mappingController.downloadTemplate);
+  protectedRouter.get('/mappings', mappingController.getMappings);
+  protectedRouter.post('/mappings', mappingController.createMapping);
+  protectedRouter.put('/mappings/:id', mappingController.updateMapping);
+  protectedRouter.delete('/mappings/:id', mappingController.deleteMapping);
+  protectedRouter.post('/mappings/auto-discover', mappingController.autoDiscoverMappings);
+  protectedRouter.post('/mappings/:id/validate', mappingController.validateMapping);
+  protectedRouter.post('/mappings/bulk', mappingController.bulkUploadMappings);
+  protectedRouter.get('/mappings/template', mappingController.downloadTemplate);
 
   // 대시보드 관련 라우트 - 별도 설정 필요 없음 (dashboard.routes.ts에서 처리)
+
+  // 인증이 필요한 라우트들을 메인 라우터에 추가
+  router.use('/', protectedRouter);
 
   return router;
 }

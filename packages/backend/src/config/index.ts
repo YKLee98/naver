@@ -111,7 +111,7 @@ const config: Config = {
   },
   
   jwt: {
-    secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+    secret: process.env.JWT_SECRET ,
     expiresIn: process.env.JWT_EXPIRES_IN || '1d',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
@@ -164,7 +164,7 @@ if (config.env === 'production') {
 
 // Warning for default values in production
 if (config.env === 'production') {
-  if (config.jwt.secret === 'your-secret-key-change-in-production') {
+  if (config.jwt.secret === 'y') {
     console.warn('WARNING: Using default JWT secret in production!');
   }
   if (config.encryption.key === 'default-encryption-key-change-in-production') {

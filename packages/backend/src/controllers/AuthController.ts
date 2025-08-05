@@ -29,26 +29,64 @@ export class AuthController {
     try {
       const { email, password } = req.body;
 
+      // 디버그 로그 추가
+      logger.info('Login attempt:', { 
+        email, 
+        hasPassword: !!password,
+        passwordLength: password?.length,
+        bodyKeys: Object.keys(req.body),
+        headers: {
+          contentType: req.headers['content-type'],
+          origin: req.headers.origin,
+          userAgent: req.headers['user-agent']
+        }
+      });
+
       // 사용자 찾기
       const user = await User.findOne({ email }).select('+password');
       
+      logger.info('User lookup result:', { 
+        found: !!user, 
+        email,
+        userEmail: user?.email,
+        userRole: user?.role,
+        userStatus: user?.status,
+        hasPasswordHash: !!user?.password,
+        passwordHashLength: user?.password?.length,
+        passwordHashPrefix: user?.password?.substring(0, 10) // 해시 일부만 로그
+      });
+      
       if (!user) {
+        logger.warn('User not found:', { email });
         throw new AppError('이메일 또는 비밀번호가 올바르지 않습니다.', 401);
       }
 
       // 비밀번호 확인
+      logger.info('Comparing passwords...', {
+        inputPasswordLength: password?.length,
+        storedHashLength: user.password?.length
+      });
+      
       const isPasswordValid = await bcrypt.compare(password, user.password);
       
+      logger.info('Password validation result:', { 
+        isPasswordValid,
+        email: user.email
+      });
+      
       if (!isPasswordValid) {
+        logger.warn('Invalid password for user:', { email });
         throw new AppError('이메일 또는 비밀번호가 올바르지 않습니다.', 401);
       }
 
       // 계정 활성화 확인
       if (user.status !== 'active') {
+        logger.warn('Inactive account login attempt:', { email, status: user.status });
         throw new AppError('계정이 비활성화되었습니다.', 403);
       }
 
       // 토큰 생성
+      logger.info('Generating tokens for user:', { email });
       const accessToken = this.generateAccessToken(user);
       const refreshToken = this.generateRefreshToken(user);
 
@@ -62,7 +100,7 @@ export class AuthController {
       delete userResponse.password;
       delete userResponse.refreshToken;
 
-      logger.info(`User logged in: ${email}`);
+      logger.info(`User logged in successfully: ${email}`);
 
       res.json({
         success: true,
@@ -73,6 +111,12 @@ export class AuthController {
         },
       });
     } catch (error) {
+      logger.error('Login error:', { 
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        email: req.body?.email 
+      });
       next(error);
     }
   }
@@ -106,10 +150,13 @@ export class AuthController {
     try {
       const { email, password, name } = req.body;
 
+      logger.info('Registration attempt:', { email, name });
+
       // 이메일 중복 확인
       const existingUser = await User.findOne({ email });
       
       if (existingUser) {
+        logger.warn('Registration failed - email already exists:', { email });
         throw new AppError('이미 사용 중인 이메일입니다.', 409);
       }
 
@@ -136,6 +183,10 @@ export class AuthController {
         data: userResponse,
       });
     } catch (error) {
+      logger.error('Registration error:', { 
+        message: error.message,
+        email: req.body?.email 
+      });
       next(error);
     }
   }
@@ -274,6 +325,13 @@ export class AuthController {
    * 액세스 토큰 생성
    */
   private generateAccessToken(user: any): string {
+    logger.debug('Generating access token:', { 
+      userId: user._id,
+      email: user.email,
+      jwtSecretExists: !!process.env.JWT_SECRET,
+      jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h'
+    });
+
     return jwt.sign(
       {
         id: user._id,
@@ -291,6 +349,12 @@ export class AuthController {
    * 리프레시 토큰 생성
    */
   private generateRefreshToken(user: any): string {
+    logger.debug('Generating refresh token:', { 
+      userId: user._id,
+      refreshSecretExists: !!process.env.JWT_REFRESH_SECRET,
+      refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d'
+    });
+
     return jwt.sign(
       {
         id: user._id,
