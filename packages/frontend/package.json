@@ -31,6 +31,7 @@
         "react": "^18.2.0",
         "react-chartjs-2": "^5.3.0",
         "react-dom": "^18.2.0",
+        "react-dropzone": "^14.3.8",
         "react-hook-form": "^7.61.1",
         "react-redux": "^9.1.0",
         "react-router-dom": "^6.21.2",
@@ -41,6 +42,7 @@
     "devDependencies": {
         "@types/react": "^18.2.48",
         "@types/react-dom": "^18.2.18",
+        "@types/react-dropzone": "^5.1.0",
         "@typescript-eslint/eslint-plugin": "^6.19.0",
         "@typescript-eslint/parser": "^6.19.0",
         "@vitejs/plugin-react": "^4.2.1",

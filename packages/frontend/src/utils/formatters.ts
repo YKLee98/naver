@@ -1,106 +1,173 @@
-import { format, parseISO, formatDistanceToNow } from 'date-fns';
+// packages/frontend/src/utils/formatters.ts
+import { format, formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
-// 날짜 포맷
-export function formatDate(date: string | Date, formatStr: string = 'yyyy-MM-dd'): string {
-  const d = typeof date === 'string' ? parseISO(date) : date;
-  return format(d, formatStr, { locale: ko });
-}
+/**
+ * 숫자 포맷팅 (천 단위 구분)
+ */
+export const formatNumber = (value: number | string): string => {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(num)) return '0';
+  
+  return new Intl.NumberFormat('ko-KR').format(num);
+};
 
-// 날짜/시간 포맷
-export function formatDateTime(date: string | Date): string {
-  const d = typeof date === 'string' ? parseISO(date) : date;
-  return format(d, 'yyyy-MM-dd HH:mm:ss', { locale: ko });
-}
-
-// 상대 시간 포맷
-export function formatRelativeTime(date: string | Date): string {
-  const d = typeof date === 'string' ? parseISO(date) : date;
-  return formatDistanceToNow(d, { addSuffix: true, locale: ko });
-}
-
-// 숫자 포맷 (천 단위 구분)
-export function formatNumber(value: number): string {
-  return new Intl.NumberFormat('ko-KR').format(value);
-}
-
-// 통화 포맷
-export function formatCurrency(value: number, currency: string = 'KRW'): string {
+/**
+ * 통화 포맷팅
+ */
+export const formatCurrency = (value: number | string, currency: 'KRW' | 'USD' = 'KRW'): string => {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(num)) return currency === 'KRW' ? '₩0' : '$0';
+  
   return new Intl.NumberFormat('ko-KR', {
     style: 'currency',
-    currency,
-  }).format(value);
-}
+    currency: currency,
+    minimumFractionDigits: currency === 'KRW' ? 0 : 2,
+    maximumFractionDigits: currency === 'KRW' ? 0 : 2,
+  }).format(num);
+};
 
-// USD 포맷
-export function formatUSD(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(value);
-}
+/**
+ * 날짜 포맷팅
+ */
+export const formatDate = (date: string | Date, formatString: string = 'yyyy-MM-dd'): string => {
+  if (!date) return '-';
+  
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return '-';
+  
+  return format(dateObj, formatString, { locale: ko });
+};
 
-// 퍼센트 포맷
-export function formatPercent(value: number, decimals: number = 1): string {
+/**
+ * 날짜/시간 포맷팅
+ */
+export const formatDateTime = (date: string | Date, formatString: string = 'yyyy-MM-dd HH:mm:ss'): string => {
+  if (!date) return '-';
+  
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return '-';
+  
+  return format(dateObj, formatString, { locale: ko });
+};
+
+/**
+ * 상대 시간 포맷팅 (예: 3분 전, 2시간 전)
+ */
+export const formatRelativeTime = (date: string | Date): string => {
+  if (!date) return '-';
+  
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return '-';
+  
+  return formatDistanceToNow(dateObj, { addSuffix: true, locale: ko });
+};
+
+/**
+ * 퍼센트 포맷팅
+ */
+export const formatPercent = (value: number, decimals: number = 1): string => {
+  if (isNaN(value)) return '0%';
+  
   return `${value.toFixed(decimals)}%`;
-}
+};
 
-// 파일 크기 포맷
-export function formatFileSize(bytes: number): string {
+/**
+ * 바이트 크기 포맷팅
+ */
+export const formatBytes = (bytes: number, decimals: number = 2): string => {
   if (bytes === 0) return '0 Bytes';
   
   const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+  
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+};
 
-// SKU 포맷
-export function formatSKU(sku: string): string {
-  return sku.toUpperCase().replace(/\s+/g, '-');
-}
+/**
+ * SKU 포맷팅
+ */
+export const formatSku = (sku: string): string => {
+  if (!sku) return '-';
+  return sku.toUpperCase();
+};
 
-// 재고 상태 포맷
-export function formatStockStatus(quantity: number): {
-  text: string;
-  color: 'success' | 'warning' | 'error';
-} {
-  if (quantity > 10) {
-    return { text: '재고 충분', color: 'success' };
-  } else if (quantity > 0) {
-    return { text: '재고 부족', color: 'warning' };
-  } else {
-    return { text: '품절', color: 'error' };
+/**
+ * 상태 라벨 변환
+ */
+export const formatStatus = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    'active': '활성',
+    'inactive': '비활성',
+    'pending': '대기중',
+    'success': '성공',
+    'error': '오류',
+    'warning': '경고',
+    'normal': '정상',
+    'synced': '동기화됨',
+    'not_synced': '미동기화',
+  };
+  
+  return statusMap[status.toLowerCase()] || status;
+};
+
+/**
+ * 플랫폼 이름 변환
+ */
+export const formatPlatform = (platform: string): string => {
+  const platformMap: Record<string, string> = {
+    'naver': '네이버',
+    'shopify': 'Shopify',
+    'both': '양쪽',
+  };
+  
+  return platformMap[platform.toLowerCase()] || platform;
+};
+
+/**
+ * 전화번호 포맷팅
+ */
+export const formatPhone = (phone: string): string => {
+  if (!phone) return '-';
+  
+  const cleaned = phone.replace(/\D/g, '');
+  const match = cleaned.match(/^(\d{3})(\d{3,4})(\d{4})$/);
+  
+  if (match) {
+    return `${match[1]}-${match[2]}-${match[3]}`;
   }
-}
-
-// 동기화 상태 포맷
-export function formatSyncStatus(status: string): {
-  text: string;
-  color: 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning';
-} {
-  const statusMap: Record<string, any> = {
-    synced: { text: '동기화됨', color: 'success' },
-    pending: { text: '대기중', color: 'warning' },
-    error: { text: '오류', color: 'error' },
-  };
   
-  return statusMap[status] || { text: status, color: 'default' };
-}
+  return phone;
+};
 
-// 가격 차이 포맷
-export function formatPriceDifference(naverPrice: number, shopifyPrice: number): {
-  difference: number;
-  percentage: number;
-  text: string;
-} {
-  const difference = shopifyPrice - naverPrice;
-  const percentage = (difference / naverPrice) * 100;
+/**
+ * 가격 차이 계산 및 포맷팅
+ */
+export const formatPriceDifference = (price1: number, price2: number): string => {
+  const diff = price1 - price2;
+  const percent = price2 !== 0 ? (diff / price2) * 100 : 0;
   
-  return {
-    difference,
-    percentage,
-    text: `${difference >= 0 ? '+' : ''}${formatCurrency(difference)} (${formatPercent(percentage)})`,
-  };
-}
+  const sign = diff > 0 ? '+' : '';
+  return `${sign}${formatCurrency(diff)} (${sign}${formatPercent(percent)})`;
+};
+
+/**
+ * 재고 상태 텍스트
+ */
+export const getStockStatusText = (stock: number, threshold: number = 10): string => {
+  if (stock === 0) return '품절';
+  if (stock < threshold) return '재고 부족';
+  return '정상';
+};
+
+/**
+ * 재고 상태 색상
+ */
+export const getStockStatusColor = (stock: number, threshold: number = 10): string => {
+  if (stock === 0) return 'error';
+  if (stock < threshold) return 'warning';
+  return 'success';
+};

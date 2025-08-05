@@ -9,11 +9,12 @@ import Layout from './components/common/Layout';
 
 // Pages
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard/index';
-import Products from './pages/Products/index';
-import Inventory from './pages/Inventory/index';
-import Pricing from './pages/Pricing/index';
-import Reports from './pages/Reports/index';
+import Dashboard from './pages/Dashboard';
+import Products from './pages/Products';
+import Inventory from './pages/Inventory';
+import SkuMapping from './pages/SkuMapping';
+import Pricing from './pages/Pricing';
+import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 
 function App() {
@@ -54,6 +55,7 @@ function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/products" element={<Products />} />
         <Route path="/inventory" element={<Inventory />} />
+        <Route path="/sku-mapping" element={<SkuMapping />} />
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
