@@ -70,6 +70,22 @@ interface ActivityItem {
   details?: string;
 }
 
+interface InventoryChartItem {
+  name: string;
+  value: number;
+}
+
+interface InventoryChartResponse {
+  byStatus: Array<{ _id: string; count: number }>;
+  byRange: Array<{ _id: string; count: number }>;
+  byPlatform: Array<{ 
+    _id: string; 
+    averageQuantity: number;
+    totalQuantity: number;
+    count: number; 
+  }>;
+}
+
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
 const Dashboard: React.FC = () => {
@@ -87,8 +103,22 @@ const Dashboard: React.FC = () => {
   });
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [salesData, setSalesData] = useState<any[]>([]);
-  const [inventoryData, setInventoryData] = useState<any[]>([]);
+  const [inventoryData, setInventoryData] = useState<InventoryChartItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+
+  // 재고 상태 이름 변환
+  const getStatusName = (status: string): string => {
+    switch (status) {
+      case 'inStock':
+        return '정상재고';
+      case 'lowStock':
+        return '재고부족';
+      case 'outOfStock':
+        return '품절';
+      default:
+        return status;
+    }
+  };
 
   // 대시보드 데이터 로드
   const loadDashboardData = async () => {
@@ -101,11 +131,33 @@ const Dashboard: React.FC = () => {
       ]);
 
       setStats(statsRes.data.data);
-      setActivities(activitiesRes.data.data.activities);
-      setSalesData(salesRes.data.data);
-      setInventoryData(inventoryRes.data.data);
+      setActivities(activitiesRes.data.data.activities || []);
+      setSalesData(salesRes.data.data || []);
+      
+      // 재고 차트 데이터 변환
+      const inventoryResponse = inventoryRes.data.data as InventoryChartResponse;
+      if (inventoryResponse && inventoryResponse.byStatus) {
+        const transformedData: InventoryChartItem[] = inventoryResponse.byStatus.map((item) => ({
+          name: getStatusName(item._id),
+          value: item.count || 0,
+        }));
+        setInventoryData(transformedData);
+      } else {
+        // 기본값 설정
+        setInventoryData([
+          { name: '정상재고', value: 0 },
+          { name: '재고부족', value: 0 },
+          { name: '품절', value: 0 },
+        ]);
+      }
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
+      // 오류 발생 시 기본값 설정
+      setInventoryData([
+        { name: '정상재고', value: 0 },
+        { name: '재고부족', value: 0 },
+        { name: '품절', value: 0 },
+      ]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -134,73 +186,41 @@ const Dashboard: React.FC = () => {
       case 'order':
         return <ShoppingCart color="primary" />;
       case 'sync':
-        return <SyncIcon color="success" />;
+        return <SyncIcon color="info" />;
       case 'price':
-        return <AttachMoney color="warning" />;
+        return <AttachMoney color="success" />;
       case 'alert':
-        return <Warning color="error" />;
+        return <Warning color="warning" />;
       default:
-        return <CheckCircle />;
-    }
-  };
-
-  // 동기화 상태 색상
-  const getSyncStatusColor = (status: string) => {
-    switch (status) {
-      case 'normal':
-        return 'success';
-      case 'warning':
-        return 'warning';
-      case 'error':
-        return 'error';
-      default:
-        return 'default';
+        return <CheckCircle color="action" />;
     }
   };
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
         <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <Box>
-      {/* 헤더 */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box>
-          <Typography variant="h4" gutterBottom>
-            대시보드
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {format(new Date(), 'yyyy년 MM월 dd일 EEEE', { locale: ko })}
-          </Typography>
-        </Box>
-        <IconButton onClick={handleRefresh} disabled={refreshing}>
-          <Refresh />
-        </IconButton>
-      </Box>
-
-      {/* 요약 카드 */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+    <Box sx={{ flexGrow: 1, p: 3 }}>
+      {/* 상단 통계 카드 */}
+      <Grid container spacing={3} mb={3}>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    총 재고
+                  <Typography color="textSecondary" gutterBottom variant="body2">
+                    전체 재고
                   </Typography>
-                  <Typography variant="h4">
+                  <Typography variant="h5" component="div">
                     {formatNumber(stats.totalInventory)}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {formatCurrency(stats.inventoryValue)}
-                  </Typography>
                 </Box>
-                <Inventory2 sx={{ fontSize: 40, color: 'primary.main', opacity: 0.3 }} />
+                <Inventory2 sx={{ fontSize: 40, color: 'primary.main', opacity: 0.7 }} />
               </Box>
             </CardContent>
           </Card>
@@ -211,20 +231,14 @@ const Dashboard: React.FC = () => {
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    오늘 매출
+                  <Typography color="textSecondary" gutterBottom variant="body2">
+                    오늘 판매
                   </Typography>
-                  <Typography variant="h4">
-                    {formatCurrency(stats.todaySales)}
+                  <Typography variant="h5" component="div">
+                    {formatNumber(stats.todaySales)}
                   </Typography>
-                  <Box display="flex" alignItems="center" mt={1}>
-                    <TrendingUp fontSize="small" color="success" />
-                    <Typography variant="body2" color="success.main" sx={{ ml: 0.5 }}>
-                      15.3%
-                    </Typography>
-                  </Box>
                 </Box>
-                <AttachMoney sx={{ fontSize: 40, color: 'success.main', opacity: 0.3 }} />
+                <AttachMoney sx={{ fontSize: 40, color: 'success.main', opacity: 0.7 }} />
               </Box>
             </CardContent>
           </Card>
@@ -235,23 +249,16 @@ const Dashboard: React.FC = () => {
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
-                  <Typography color="text.secondary" gutterBottom>
+                  <Typography color="textSecondary" gutterBottom variant="body2">
                     동기화 상태
                   </Typography>
-                  <Typography variant="h5">
-                    {stats.syncStatus === 'normal' ? '정상' : stats.syncStatus === 'warning' ? '주의' : '오류'}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    성공률 {stats.syncSuccessRate}%
-                  </Typography>
+                  <Chip 
+                    label={stats.syncStatus === 'normal' ? '정상' : stats.syncStatus === 'warning' ? '주의' : '오류'}
+                    color={stats.syncStatus === 'normal' ? 'success' : stats.syncStatus === 'warning' ? 'warning' : 'error'}
+                    size="small"
+                  />
                 </Box>
-                <SyncIcon 
-                  sx={{ 
-                    fontSize: 40, 
-                    color: `${getSyncStatusColor(stats.syncStatus)}.main`, 
-                    opacity: 0.3 
-                  }} 
-                />
+                <SyncIcon sx={{ fontSize: 40, color: 'info.main', opacity: 0.7 }} />
               </Box>
             </CardContent>
           </Card>
@@ -262,35 +269,64 @@ const Dashboard: React.FC = () => {
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    주의 필요
+                  <Typography color="textSecondary" gutterBottom variant="body2">
+                    알림
                   </Typography>
-                  <Typography variant="h4">
+                  <Typography variant="h5" component="div">
                     {stats.alertCount}
                   </Typography>
-                  <Box display="flex" gap={1} mt={1}>
-                    <Chip 
-                      label={`재고부족 ${stats.lowStockCount}`} 
-                      size="small" 
-                      color="warning" 
-                    />
-                    <Chip 
-                      label={`품절 ${stats.outOfStockCount}`} 
-                      size="small" 
-                      color="error" 
-                    />
-                  </Box>
                 </Box>
-                <Warning sx={{ fontSize: 40, color: 'warning.main', opacity: 0.3 }} />
+                <Warning sx={{ fontSize: 40, color: 'warning.main', opacity: 0.7 }} />
               </Box>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
+      {/* 차트 및 활동 섹션 */}
       <Grid container spacing={3}>
+        {/* 최근 활동 */}
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 2, height: '100%' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">최근 활동</Typography>
+              <IconButton size="small" onClick={handleRefresh} disabled={refreshing}>
+                <Refresh />
+              </IconButton>
+            </Box>
+            
+            <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+              {activities.map((activity) => (
+                <ListItem key={activity.id} alignItems="flex-start">
+                  <ListItemIcon>
+                    {getActivityIcon(activity.type, activity.status)}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={activity.message}
+                    secondary={
+                      <>
+                        {format(new Date(activity.timestamp), 'MM-dd HH:mm', { locale: ko })}
+                        {activity.details && ` • ${activity.details}`}
+                      </>
+                    }
+                  />
+                </ListItem>
+              ))}
+              
+              {activities.length === 0 && (
+                <ListItem>
+                  <ListItemText
+                    primary="활동 내역이 없습니다"
+                    secondary="시스템 활동이 여기에 표시됩니다"
+                  />
+                </ListItem>
+              )}
+            </List>
+          </Paper>
+        </Grid>
+
         {/* 판매 추이 차트 */}
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12} md={4}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
               판매 추이
@@ -356,7 +392,7 @@ const Dashboard: React.FC = () => {
                   <Typography variant="body2" sx={{ flex: 1 }}>
                     {item.name}
                   </Typography>
-                  <Typography variant="body2" fontWeight="medium">
+                  <Typography variant="body2" color="text.secondary">
                     {formatNumber(item.value)}
                   </Typography>
                 </Box>
@@ -364,58 +400,66 @@ const Dashboard: React.FC = () => {
             </Box>
           </Paper>
         </Grid>
+      </Grid>
 
-        {/* 최근 활동 */}
-        <Grid item xs={12}>
+      {/* 추가 정보 카드 */}
+      <Grid container spacing={3} mt={2}>
+        <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
-              실시간 활동
+              재고 상태 요약
             </Typography>
-            <List>
-              {activities.map((activity) => (
-                <ListItem key={activity.id}>
-                  <ListItemIcon>
-                    {getActivityIcon(activity.type, activity.status)}
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={activity.message}
-                    secondary={
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <Typography variant="caption" color="text.secondary">
-                          {format(new Date(activity.timestamp), 'HH:mm:ss')}
-                        </Typography>
-                        {activity.details && (
-                          <>
-                            <Typography variant="caption" color="text.secondary">•</Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {activity.details}
-                            </Typography>
-                          </>
-                        )}
-                      </Box>
-                    }
-                  />
-                </ListItem>
-              ))}
-            </List>
+            <Grid container spacing={2}>
+              <Grid item xs={4}>
+                <Box textAlign="center">
+                  <Typography variant="h4" color="error.main">
+                    {stats.outOfStockCount}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    품절
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={4}>
+                <Box textAlign="center">
+                  <Typography variant="h4" color="warning.main">
+                    {stats.lowStockCount}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    재고 부족
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={4}>
+                <Box textAlign="center">
+                  <Typography variant="h4" color="success.main">
+                    {stats.syncSuccessRate}%
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    동기화 성공률
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              재고 가치
+            </Typography>
+            <Box display="flex" alignItems="baseline">
+              <Typography variant="h4" component="span">
+                {formatCurrency(stats.inventoryValue)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" ml={2}>
+                총 재고 가치
+              </Typography>
+            </Box>
           </Paper>
         </Grid>
       </Grid>
-
-      {/* 알림 */}
-      {stats.alertCount > 0 && (
-        <Alert 
-          severity="warning" 
-          sx={{ mt: 3 }}
-          action={
-            <Button color="inherit" size="small">
-              확인
-            </Button>
-          }
-        >
-          주의가 필요한 항목이 {stats.alertCount}개 있습니다. 재고 부족 {stats.lowStockCount}개, 품절 {stats.outOfStockCount}개
-        </Alert>
-      )}
     </Box>
   );
 };

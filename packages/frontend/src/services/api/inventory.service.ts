@@ -105,14 +105,14 @@ class InventoryService {
    * 재고 목록 조회
    */
   async getInventoryList(params?: InventoryListParams): Promise<AxiosResponse<InventoryListResponse>> {
-    return apiClient.get('/api/v1/inventory/status', { params });
+    return apiClient.get('/inventory/status', { params });
   }
 
   /**
    * 재고 상태 조회 (단일 SKU)
    */
   async getInventoryStatus(sku: string): Promise<AxiosResponse<{ success: boolean; data: InventoryStatus }>> {
-    return apiClient.get(`/api/v1/inventory/${sku}/status`);
+    return apiClient.get(`/inventory/${sku}/status`);
   }
 
   /**
@@ -128,21 +128,21 @@ class InventoryService {
       page?: number;
     }
   ): Promise<AxiosResponse<{ success: boolean; data: { history: InventoryHistory[]; total: number } }>> {
-    return apiClient.get(`/api/v1/inventory/${sku}/history`, { params });
+    return apiClient.get(`/inventory/${sku}/history`, { params });
   }
 
   /**
    * 재고 조정
    */
   async adjustInventory(params: AdjustInventoryParams): Promise<AxiosResponse<{ success: boolean; data: InventoryStatus }>> {
-    return apiClient.post(`/api/v1/inventory/${params.sku}/adjust`, params);
+    return apiClient.post(`inventory/${params.sku}/adjust`, params);
   }
 
   /**
    * 일괄 재고 조정
    */
   async bulkAdjustInventory(params: BulkAdjustParams): Promise<AxiosResponse<{ success: boolean; data: { adjusted: number; failed: number } }>> {
-    return apiClient.post('/api/v1/inventory/bulk-adjust', params);
+    return apiClient.post('/inventory/bulk-adjust', params);
   }
 
   /**
@@ -152,7 +152,7 @@ class InventoryService {
     threshold?: number; 
     category?: string 
   }): Promise<AxiosResponse<{ success: boolean; data: LowStockProduct[] }>> {
-    return apiClient.get('/api/v1/inventory/low-stock', { params });
+    return apiClient.get('/inventory/low-stock', { params });
   }
 
   /**
@@ -162,7 +162,7 @@ class InventoryService {
     skus?: string[];
     category?: string;
   }): Promise<AxiosResponse<{ success: boolean; data: { countId: string; products: any[] } }>> {
-    return apiClient.post('/api/v1/inventory/count/start', params);
+    return apiClient.post('/inventory/count/start', params);
   }
 
   /**
@@ -172,7 +172,7 @@ class InventoryService {
     sku: string; 
     actualStock: number 
   }>): Promise<AxiosResponse<{ success: boolean; data: { adjusted: number; discrepancies: any[] } }>> {
-    return apiClient.post(`/api/v1/inventory/count/${countId}/submit`, { counts: data });
+    return apiClient.post(`/inventory/count/${countId}/submit`, { counts: data });
   }
 
   /**
@@ -183,7 +183,7 @@ class InventoryService {
     status?: string;
     stockLevel?: string;
   }): Promise<AxiosResponse<Blob>> {
-    return apiClient.get('/api/v1/inventory/export', {
+    return apiClient.get('/inventory/export', {
       params,
       responseType: 'blob',
     });
@@ -193,7 +193,7 @@ class InventoryService {
    * 재고 동기화 실행
    */
   async syncInventory(sku?: string): Promise<AxiosResponse<{ success: boolean; data: { synced: number; failed: number } }>> {
-    const endpoint = sku ? `/api/v1/sync/sku/${sku}` : '/api/v1/sync/inventory';
+    const endpoint = sku ? `/sync/sku/${sku}` : '/sync/inventory';
     return apiClient.post(endpoint);
   }
 
@@ -201,7 +201,7 @@ class InventoryService {
    * 재고 알림 설정 조회
    */
   async getAlertSettings(): Promise<AxiosResponse<{ success: boolean; data: any }>> {
-    return apiClient.get('/api/v1/inventory/alerts/settings');
+    return apiClient.get('/inventory/alerts/settings');
   }
 
   /**
@@ -213,7 +213,7 @@ class InventoryService {
     alertMethods?: string[];
     alertFrequency?: string;
   }): Promise<AxiosResponse<{ success: boolean; data: any }>> {
-    return apiClient.put('/api/v1/inventory/alerts/settings', settings);
+    return apiClient.put('/inventory/alerts/settings', settings);
   }
 }
 
