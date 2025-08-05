@@ -1,104 +1,123 @@
 // packages/backend/src/server.ts
-import 'dotenv/config';
-import { App } from './app';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import morgan from 'morgan';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import { connectDatabase } from './config/database';
+import { initializeRedis } from './config/redis';
+import { setupRoutes } from './routes';
+import { errorHandler } from './middlewares/error.middleware';
 import { logger } from './utils/logger';
-import { connectDatabase, disconnectDatabase } from './config/database';
-import { setupCronJobs, setCronServices } from './utils/cronjobs';
-import { initializeRedis, disconnectRedis } from './config/redis';  // 올바른 import
-import {
-  NaverAuthService,
-  NaverProductService,
-  NaverOrderService
-} from './services/naver';
-import { ShopifyBulkService } from './services/shopify';
-import { SyncService } from './services/sync';
-import { ExchangeRateService } from './services/exchangeRate';  
+import { setupCronJobs } from './utils/cronjobs';
+import { initializeWebSocket } from './websocket';
+import config from './config';
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+// Initialize Express app
+const app = express();
+const httpServer = createServer(app);
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: config.corsOrigin,
+    credentials: true
+  }
+});
 
-async function startServer() {
+// Global middlewares
+app.use(helmet());
+app.use(compression());
+app.use(cors({
+  origin: config.corsOrigin,
+  credentials: true
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Request logging
+app.use(morgan('combined', {
+  stream: {
+    write: (message: string) => logger.info(message.trim())
+  }
+}));
+
+// Initialize services
+async function initializeApp() {
   try {
-    // 데이터베이스 연결
+    // Connect to MongoDB
     await connectDatabase();
-    
-    // Redis 클라이언트 초기화 - initializeRedis 사용
-    const redis = initializeRedis();
-    
-    // 서비스 인스턴스 생성 (의존성 주입)
-    const naverAuthService = new NaverAuthService(redis);
-    const naverProductService = new NaverProductService(naverAuthService);
-    const naverOrderService = new NaverOrderService(naverAuthService);
-    const shopifyBulkService = new ShopifyBulkService();
-    
-    const syncService = new SyncService(
-      naverProductService,
-      naverOrderService,
-      shopifyBulkService,
-      redis
-    );
-    
-    const exchangeRateService = new ExchangeRateService(redis);
 
-    // 크론 작업에 서비스 전달
-    setCronServices({
-      syncService,
-      exchangeRateService
+    // Initialize Redis - 라우터 설정 전에 실행
+    await initializeRedis();
+
+    // API Routes - Redis 초기화 후 라우터 설정
+    const routes = setupRoutes();
+    app.use('/api/v1', routes);
+
+    // Error handler
+    app.use(errorHandler);
+
+    // 404 handler
+    app.use((req, res) => {
+      res.status(404).json({
+        success: false,
+        error: {
+          message: 'Route not found',
+          path: req.path
+        }
+      });
     });
 
-    // 앱 인스턴스 생성 및 초기화
-    const app = new App();
-    await app.initialize();
-    
-    // 크론 작업 시작
+    // Initialize WebSocket
+    initializeWebSocket(io);
+
+    // Setup cron jobs
     setupCronJobs();
-    
-    // 서버 시작
-    app.listen(PORT);
 
-    // Graceful shutdown 처리
-    const gracefulShutdown = async (signal: string) => {
-      logger.info(`${signal} received, shutting down gracefully`);
-      
-      try {
-        // 서버 종료
-        app.close(() => {
-          logger.info('HTTP server closed');
-        });
-        
-        // 데이터베이스 연결 해제
-        await disconnectDatabase();
-        
-        // Redis 연결 해제
-        await disconnectRedis();
-        
-        logger.info('All connections closed successfully');
-        process.exit(0);
-      } catch (error) {
-        logger.error('Error during graceful shutdown:', error);
-        process.exit(1);
-      }
-    };
-
-    // 시그널 핸들러 등록
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-    // 예외 처리
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception:', error);
-      process.exit(1);
-    });
-
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      process.exit(1);
-    });
-
+    logger.info('App initialized successfully');
   } catch (error) {
-    logger.error('Failed to start server:', error);
+    logger.error('Failed to initialize app:', error);
     process.exit(1);
   }
 }
 
-// 서버 시작
+// Start server
+async function startServer() {
+  await initializeApp();
+
+  httpServer.listen(config.port, () => {
+    logger.info(`🚀 Server is running on port ${config.port}`);
+    logger.info(`🌍 Environment: ${config.env}`);
+    logger.info(`📍 API Endpoint: http://localhost:${config.port}/api/v1`);
+  });
+
+  // WebSocket server
+  io.listen(config.wsPort);
+  logger.info(`🔌 WebSocket server is running on port ${config.wsPort}`);
+}
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err: Error) => {
+  logger.error('Unhandled Promise Rejection:', err);
+  // Close server & exit process
+  httpServer.close(() => process.exit(1));
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err: Error) => {
+  logger.error('Uncaught Exception:', err);
+  // Close server & exit process
+  httpServer.close(() => process.exit(1));
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM signal received: closing HTTP server');
+  httpServer.close(() => {
+    logger.info('HTTP server closed');
+    process.exit(0);
+  });
+});
+
 startServer();

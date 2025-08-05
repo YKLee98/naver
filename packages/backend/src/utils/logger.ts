@@ -1,7 +1,15 @@
+// packages/backend/src/utils/logger.ts
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import path from 'path';
-import { config } from '../config';
+import fs from 'fs';
+import config from '../config';
+
+// 로그 디렉토리 생성
+const logDir = config.logging.dir;
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
+}
 
 // 로그 포맷 정의
 const logFormat = winston.format.combine(
@@ -34,9 +42,6 @@ const consoleFormat = winston.format.combine(
     return msg;
   })
 );
-
-// 로그 디렉토리 생성
-const logDir = config.logging.dir;
 
 // 트랜스포트 설정
 const transports: winston.transport[] = [

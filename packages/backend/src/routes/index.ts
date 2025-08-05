@@ -5,30 +5,36 @@ import webhookRoutes from './webhook.routes';
 import healthRoutes from './health.routes';
 import setupPriceSyncRoutes from './priceSync.routes';
 import setupExchangeRateRoutes from './exchangeRate.routes';
-import settingsRoutes from './settings.routes';
-import dashboardRoutes from './dashboard.routes';
+import { setupSettingsRoutes } from './settings.routes';
+import { setupDashboardRoutes } from './dashboard.routes';
 
-const router = Router();
+// 라우터 설정을 함수로만 export - 기본 export 제거
+export function setupRoutes(): Router {
+  const router = Router();
 
-// Health check routes (no auth required)
-router.use('/health', healthRoutes);
+  // Health check routes (no auth required)
+  router.use('/health', healthRoutes);
 
-// Webhook routes (special auth)
-router.use('/webhooks', webhookRoutes);
+  // Webhook routes (special auth)
+  router.use('/webhooks', webhookRoutes);
 
-// API routes - 함수로 설정
-router.use('/api/v1', setupApiRoutes());
+  // API v1 routes - 중복 경로 수정
+  const apiRouter = setupApiRoutes();
 
-// Dashboard routes
-router.use('/api/v1/dashboard', dashboardRoutes);
+  // Dashboard routes - API router에 직접 추가
+  router.use('/dashboard', setupDashboardRoutes());
 
-// Price sync routes - 함수로 설정
-router.use('/api/v1/price-sync', setupPriceSyncRoutes());
+  // Main API routes
+  router.use('/', apiRouter);
 
-// Exchange rate routes - 함수로 설정  
-router.use('/api/v1/exchange-rate', setupExchangeRateRoutes());
+  // Price sync routes - API router에 추가
+  router.use('/price-sync', setupPriceSyncRoutes());
 
-// Settings routes
-router.use('/api/v1/settings', settingsRoutes);
+  // Exchange rate routes - API router에 추가
+  router.use('/exchange-rate', setupExchangeRateRoutes());
 
-export default router;
+  // Settings routes
+  router.use('/settings', setupSettingsRoutes());
+
+  return router;
+}

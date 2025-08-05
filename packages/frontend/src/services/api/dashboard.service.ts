@@ -39,7 +39,7 @@ class DashboardService {
    * 대시보드 통계 조회
    */
   async getStatistics(): Promise<AxiosResponse<{ success: boolean; data: DashboardStats }>> {
-    return apiClient.get('/api/v1/dashboard/statistics');
+    return apiClient.get('/dashboard/statistics');
   }
 
   /**
@@ -49,7 +49,7 @@ class DashboardService {
     limit?: number;
     types?: string[];
   }): Promise<AxiosResponse<{ success: boolean; data: { activities: ActivityItem[]; total: number } }>> {
-    return apiClient.get('/api/v1/dashboard/activities', { params });
+    return apiClient.get('/dashboard/activities', { params });
   }
 
   /**
@@ -60,7 +60,7 @@ class DashboardService {
     startDate?: string;
     endDate?: string;
   }): Promise<AxiosResponse<{ success: boolean; data: ChartDataPoint[] }>> {
-    return apiClient.get('/api/v1/dashboard/charts/price', { params });
+    return apiClient.get('/dashboard/charts/price', { params });
   }
 
   /**
@@ -69,7 +69,7 @@ class DashboardService {
   async getInventoryChartData(params?: {
     groupBy?: 'category' | 'vendor' | 'status';
   }): Promise<AxiosResponse<{ success: boolean; data: InventoryDistribution[] }>> {
-    return apiClient.get('/api/v1/dashboard/charts/inventory', { params });
+    return apiClient.get('/dashboard/charts/inventory', { params });
   }
 
   /**
@@ -88,7 +88,7 @@ class DashboardService {
       }>;
     }
   }>> {
-    return apiClient.get('/api/v1/sync/status');
+    return apiClient.get('/sync/status');
   }
 
   /**
@@ -112,21 +112,21 @@ class DashboardService {
       unreadCount: number;
     }
   }>> {
-    return apiClient.get('/api/v1/notifications', { params });
+    return apiClient.get('/notifications', { params });
   }
 
   /**
    * 알림 읽음 처리
    */
   async markNotificationAsRead(notificationId: string): Promise<AxiosResponse<{ success: boolean }>> {
-    return apiClient.put(`/api/v1/notifications/${notificationId}/read`);
+    return apiClient.put(`/notifications/${notificationId}/read`);
   }
 
   /**
    * 모든 알림 읽음 처리
    */
   async markAllNotificationsAsRead(): Promise<AxiosResponse<{ success: boolean }>> {
-    return apiClient.put('/api/v1/notifications/read-all');
+    return apiClient.put('/notifications/read-all');
   }
 
   /**
@@ -141,7 +141,7 @@ class DashboardService {
       pendingAlerts: number;
     }
   }>> {
-    return apiClient.get('/api/v1/dashboard/quick-stats');
+    return apiClient.get('/dashboard/quick-stats');
   }
 }
 

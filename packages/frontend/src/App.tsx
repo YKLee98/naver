@@ -2,6 +2,10 @@
 import React, { useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Box } from '@mui/material';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import { useAppDispatch, useAppSelector } from './hooks';
 import { getCurrentUser } from './store/slices/authSlice';
 import AuthGuard from './guards/AuthGuard';
@@ -16,6 +20,32 @@ import SkuMapping from './pages/SkuMapping';
 import Pricing from './pages/Pricing';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+
+// MUI 테마 설정
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#1976d2',
+    },
+    secondary: {
+      main: '#dc004e',
+    },
+    background: {
+      default: '#f5f5f5',
+    },
+  },
+  typography: {
+    fontFamily: [
+      '-apple-system',
+      'BlinkMacSystemFont',
+      '"Segoe UI"',
+      'Roboto',
+      '"Helvetica Neue"',
+      'Arial',
+      'sans-serif',
+    ].join(','),
+  },
+});
 
 function App() {
   const dispatch = useAppDispatch();
@@ -39,31 +69,54 @@ function App() {
   }, [dispatch, navigate]);
 
   return (
-    <Routes>
-      {/* Public Routes */}
-      <Route path="/login" element={
-        isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />
-      } />
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/login" element={
+            isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />
+          } />
 
-      {/* Protected Routes */}
-      <Route element={
-        <AuthGuard>
-          <Layout />
-        </AuthGuard>
-      }>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/products" element={<Products />} />
-        <Route path="/inventory" element={<Inventory />} />
-        <Route path="/sku-mapping" element={<SkuMapping />} />
-        <Route path="/pricing" element={<Pricing />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/settings" element={<Settings />} />
-      </Route>
+          {/* Protected Routes */}
+          <Route element={
+            <AuthGuard>
+              <Layout />
+            </AuthGuard>
+          }>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/products" element={<Products />} />
+            <Route path="/inventory" element={<Inventory />} />
+            <Route path="/sku-mapping" element={<SkuMapping />} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
 
-      {/* 404 */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+          {/* 404 */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Box>
+      
+      {/* Toast 알림 컨테이너 */}
+      <ToastContainer
+        position="top-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="light"
+        style={{
+          fontSize: '14px',
+          fontFamily: theme.typography.fontFamily,
+        }}
+      />
+    </ThemeProvider>
   );
 }
 

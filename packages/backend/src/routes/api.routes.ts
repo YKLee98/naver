@@ -1,5 +1,4 @@
-// ===== 1. packages/backend/src/routes/api.routes.ts =====
-// 매핑 목록 조회 라우트 추가
+// packages/backend/src/routes/api.routes.ts
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares';
 import { 
@@ -96,12 +95,6 @@ export function setupApiRoutes(): Router {
   router.post('/mappings/auto-discover', mappingController.autoDiscoverMappings);
   router.post('/mappings/:id/validate', mappingController.validateMapping);
   router.post('/mappings/bulk', mappingController.bulkUploadMappings);
-
-  // 대시보드 관련 라우트
-  router.get('/dashboard/statistics', dashboardController.getStats);
-  router.get('/dashboard/activities', dashboardController.getRecentActivity);
-  router.get('/dashboard/charts/price', dashboardController.getSalesChartData);
-  router.get('/dashboard/charts/inventory', dashboardController.getInventoryChartData);
 
   return router;
 }
