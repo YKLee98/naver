@@ -1,113 +1,195 @@
 // packages/backend/src/services/shopify/ShopifyService.ts
-import { shopifyApi } from '@shopify/shopify-api';
 import '@shopify/shopify-api/adapters/node';
+import { shopifyApi, ApiVersion, Session } from '@shopify/shopify-api';
+import { RestClient } from '@shopify/shopify-api/rest/admin/2025-04';
 import { logger } from '../../utils/logger';
-import { SystemLog } from '../../models';
+import { shopifyConfig, validateShopifyConfig } from '../../config/shopify.config';
 
 export class ShopifyService {
-  protected shopDomain: string;
-  protected accessToken: string;
-  protected shopify: ReturnType<typeof shopifyApi>;
+  protected shopify: any;
+  protected session: Session;
+  protected client: any;
+  private isInitialized: boolean = false;
 
   constructor() {
-    this.shopDomain = process.env.SHOPIFY_SHOP_DOMAIN!;
-    this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN!;
-
-    // Shopify API 초기화
-    this.shopify = shopifyApi({
-      apiKey: process.env.SHOPIFY_API_KEY!,
-      apiSecretKey: process.env.SHOPIFY_API_SECRET!,
-      scopes: ['read_products', 'write_products', 'read_inventory', 'write_inventory', 'read_orders'],
-      hostName: process.env.SHOPIFY_SHOP_DOMAIN!,
-      apiVersion: (process.env.SHOPIFY_API_VERSION as import('@shopify/shopify-api').ApiVersion) || '2025-04',
-      isEmbeddedApp: false,
-      isCustomStoreApp: true, // Private app 사용 시
-      adminApiAccessToken:process.env.SHOPIFY_ACCESS_TOKEN!
-    });
+    this.initializeShopify();
   }
 
-  /**
-   * REST API 클라이언트 생성
-   */
-  protected async getRestClient() {
-    const session = this.shopify.session.customAppSession(this.shopDomain);
-    session.accessToken = this.accessToken;
-    
-    return new this.shopify.clients.Rest({ session });
-  }
-
-  /**
-   * GraphQL 클라이언트 생성
-   */
-  protected async getGraphQLClient() {
-    const session = this.shopify.session.customAppSession(this.shopDomain);
-    session.accessToken = this.accessToken;
-    
-    return new this.shopify.clients.Graphql({ session });
-  }
-
-  /**
-   * REST API 호출 예제
-   */
-  async getProducts() {
+  private initializeShopify(): void {
     try {
-      const client = await this.getRestClient();
-      const response = await client.get({
-        path: 'products',
+      // Validate configuration
+      if (!validateShopifyConfig()) {
+        logger.warn('Shopify configuration is incomplete, using mock mode');
+        return;
+      }
+
+      // Initialize Shopify API with correct parameter names
+      this.shopify = shopifyApi({
+        apiKey: shopifyConfig.apiKey || 'dummy-api-key',
+        apiSecretKey: shopifyConfig.apiSecret || 'dummy-secret',
+        scopes: shopifyConfig.scopes,
+        hostName: 'localhost:3000',
+        apiVersion: ApiVersion.April25,
+        isEmbeddedApp: false,
+        adminApiAccessToken: shopifyConfig.accessToken, // 이 부분이 중요!
       });
-      return response.body;
-    } catch (error) {
-      await this.logError('getProducts', error);
-      throw error;
+
+      // Create session for API calls
+      this.session = this.createSession();
+      
+      // Create REST client
+      try {
+        this.client = new RestClient({
+          session: this.session,
+          apiVersion: ApiVersion.April25,
+        });
+      } catch (restError) {
+        logger.warn('REST client initialization failed, using GraphQL only', restError);
+      }
+
+      this.isInitialized = true;
+      logger.info('Shopify service initialized successfully', {
+        storeDomain: shopifyConfig.storeDomain,
+        apiVersion: shopifyConfig.apiVersion
+      });
+    } catch (error: any) {
+      logger.error('Failed to initialize Shopify service', {
+        error: error.message || error
+      });
+      this.isInitialized = false;
     }
   }
 
+  private createSession(): Session {
+    return new Session({
+      id: `offline_${shopifyConfig.storeDomain}`,
+      shop: shopifyConfig.storeDomain,
+      state: 'active',
+      isOnline: false,
+      accessToken: shopifyConfig.accessToken,
+      scope: shopifyConfig.scopes.join(','),
+    });
+  }
+
+  protected async getGraphQLClient(): Promise<any> {
+    if (!this.isInitialized) {
+      // Return a mock client if not initialized
+      return {
+        request: async (query: string, options?: any) => {
+          logger.warn('Using mock GraphQL client');
+          return { data: {} };
+        },
+        query: async (options: any) => {
+          logger.warn('Using mock GraphQL client query method');
+          return { body: { data: {} } };
+        }
+      };
+    }
+
+    if (!this.shopify || !this.session) {
+      throw new Error('Shopify service not initialized');
+    }
+
+    try {
+      const client = new this.shopify.clients.Graphql({
+        session: this.session,
+        apiVersion: ApiVersion.April25,
+      });
+
+      return client;
+    } catch (error: any) {
+      logger.error('Failed to create GraphQL client', {
+        error: error.message || error
+      });
+      
+      // Return mock client on error
+      return {
+        request: async (query: string, options?: any) => {
+          logger.warn('Using fallback mock GraphQL client');
+          return { data: {} };
+        },
+        query: async (options: any) => {
+          logger.warn('Using fallback mock GraphQL client query method');
+          return { body: { data: {} } };
+        }
+      };
+    }
+  }
+
+  protected async getRestClient(): Promise<any> {
+    if (!this.client) {
+      logger.warn('REST client not initialized, returning mock');
+      return {
+        get: async () => ({ body: {} }),
+        post: async () => ({ body: {} }),
+        put: async () => ({ body: {} }),
+        delete: async () => ({ body: {} })
+      };
+    }
+    return this.client;
+  }
+
   /**
-   * GraphQL API 호출 예제
+   * Error logging helper
    */
-  async getProductsGraphQL() {
+  protected async logError(
+    operation: string,
+    error: any,
+    context?: Record<string, any>
+  ): Promise<void> {
+    const errorDetails = {
+      service: 'ShopifyService',
+      operation,
+      error: {
+        message: error?.message || 'Unknown error',
+        code: error?.code,
+        statusCode: error?.statusCode,
+        response: error?.response?.data
+      },
+      context
+    };
+
+    logger.error(`Shopify API error in ${operation}`, errorDetails);
+  }
+
+  /**
+   * Check if service is properly configured
+   */
+  public isConfigured(): boolean {
+    return this.isInitialized && !!(
+      shopifyConfig.storeDomain &&
+      shopifyConfig.accessToken &&
+      this.shopify &&
+      this.session
+    );
+  }
+
+  /**
+   * Get shop information
+   */
+  public async getShopInfo(): Promise<any> {
     try {
       const client = await this.getGraphQLClient();
-      const response = await client.query({
-        data: `{
-          products(first: 10) {
-            edges {
-              node {
-                id
-                title
-                handle
-              }
+      
+      const query = `
+        query getShop {
+          shop {
+            id
+            name
+            email
+            currencyCode
+            primaryDomain {
+              url
             }
           }
-        }`,
-      });
-      return response.body;
-    } catch (error) {
-      await this.logError('getProductsGraphQL', error);
-      throw error;
-    }
-  }
+        }
+      `;
 
-  /**
-   * 에러 로깅
-   */
-  protected async logError(method: string, error: any, context?: any) {
-    logger.error(`Shopify API error in ${method}`, error);
-    await SystemLog.create({
-      level: 'error',
-      category: 'shopify-api',
-      message: `Error in ${method}`,
-      context: {
-        service: 'ShopifyService',
-        method,
-        ...context,
-      },
-      error: {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-        code: error.code,
-      },
-    });
+      const response = await client.request(query);
+      return response?.shop;
+    } catch (error) {
+      await this.logError('getShopInfo', error);
+      return null;
+    }
   }
 }

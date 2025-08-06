@@ -31,16 +31,17 @@ import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import { priceApi } from '@/services/api/price.service';
 
 const Pricing: React.FC = () => {
-  // 환율 관련 상태
-  const [exchangeRate, setExchangeRate] = useState(1305.50);
+  // 환율 관련 상태 - 안전한 초기값 설정
+  const [exchangeRate, setExchangeRate] = useState<number>(1305.50);
+  const [exchangeRateData, setExchangeRateData] = useState<any>(null);
   const [exchangeRateSource, setExchangeRateSource] = useState<'manual' | 'api'>('manual');
-  const [customExchangeRate, setCustomExchangeRate] = useState(1305.50);
+  const [customExchangeRate, setCustomExchangeRate] = useState<number>(1305.50);
   
   // 기타 상태
-  const [marginPercent, setMarginPercent] = useState(10);
-  const [priceHistory, setPriceHistory] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [syncLoading, setSyncLoading] = useState(false);
+  const [marginPercent, setMarginPercent] = useState<number>(10);
+  const [priceHistory, setPriceHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [syncLoading, setSyncLoading] = useState<boolean>(false);
 
   const columns: GridColDef[] = [
     { field: 'sku', headerName: 'SKU', width: 130 },
@@ -49,117 +50,118 @@ const Pricing: React.FC = () => {
       field: 'naverPrice', 
       headerName: '네이버 가격 (KRW)', 
       width: 150,
-      valueFormatter: (params) => `₩${params.value?.toLocaleString('ko-KR')}`,
+      valueFormatter: (params) => {
+        if (!params.value) return '₩0';
+        return `₩${Number(params.value).toLocaleString('ko-KR')}`;
+      },
     },
     { 
       field: 'shopifyPrice', 
       headerName: 'Shopify 가격 (USD)', 
       width: 150,
-      valueFormatter: (params) => `$${params.value?.toFixed(2)}`,
+      valueFormatter: (params) => {
+        if (!params.value) return '$0.00';
+        return `$${Number(params.value).toFixed(2)}`;
+      },
     },
     {
       field: 'margin',
       headerName: '마진율',
       width: 100,
-      renderCell: (params) => (
-        <Chip 
-          label={`${params.value}%`} 
-          size="small" 
-          color={params.value >= 10 ? 'success' : 'warning'}
-        />
-      ),
+      renderCell: (params) => {
+        const value = params.value || 0;
+        return (
+          <Chip 
+            label={`${value}%`} 
+            size="small" 
+            color={value >= 10 ? 'success' : 'warning'}
+          />
+        );
+      },
     },
     {
       field: 'lastUpdated',
       headerName: '마지막 업데이트',
       width: 180,
       valueGetter: (params) => {
-        return params.value ? new Date(params.value).toLocaleString('ko-KR') : '-';
+        if (!params.value) return '업데이트 없음';
+        try {
+          return new Date(params.value).toLocaleString('ko-KR');
+        } catch {
+          return '날짜 오류';
+        }
       },
     },
   ];
 
   useEffect(() => {
     loadPriceData();
-    loadCurrentExchangeRate();
+    loadExchangeRate();
   }, []);
 
   const loadPriceData = async () => {
     setLoading(true);
     try {
       const response = await priceApi.getPriceHistory();
-      setPriceHistory(response.data || []);
+      if (response?.data) {
+        setPriceHistory(response.data);
+      }
     } catch (error) {
       console.error('Failed to load price data:', error);
-      // 임시 데이터 설정 (개발 중)
-      setPriceHistory([
-        {
-          id: '1',
-          sku: 'TEST-001',
-          productName: '테스트 상품 1',
-          naverPrice: 45000,
-          shopifyPrice: 38.08,
-          margin: 10,
-          lastUpdated: new Date().toISOString(),
-        },
-      ]);
+      // 오류 발생시 빈 배열 유지
     } finally {
       setLoading(false);
     }
   };
 
-  const loadCurrentExchangeRate = async () => {
+  const loadExchangeRate = async () => {
     try {
       const response = await priceApi.getCurrentExchangeRate();
-      if (response) {
-        setExchangeRate(response.rate);
-        setExchangeRateSource(response.source || 'api');
-        if (response.source === 'manual') {
-          setCustomExchangeRate(response.rate);
-        }
+      if (response?.data?.USD) {
+        const rate = response.data.USD.KRW || response.data.USD.rate || 1305.50;
+        setExchangeRate(rate);
+        setExchangeRateData(response.data.USD);
       }
     } catch (error) {
       console.error('Failed to load exchange rate:', error);
+      // 오류 발생시 기본값 유지
+      setExchangeRate(1305.50);
     }
   };
 
   const handleExchangeRateSourceChange = (event: SelectChangeEvent) => {
-    const newSource = event.target.value as 'manual' | 'api';
-    setExchangeRateSource(newSource);
+    const source = event.target.value as 'manual' | 'api';
+    setExchangeRateSource(source);
     
-    if (newSource === 'manual') {
-      // 수동 모드로 전환 시 현재 환율을 커스텀 환율로 설정
-      setCustomExchangeRate(exchangeRate);
+    if (source === 'manual') {
+      setExchangeRate(customExchangeRate);
     } else {
-      // API 모드로 전환 시 API에서 환율 가져오기
-      loadCurrentExchangeRate();
+      loadExchangeRate();
     }
   };
 
-  const handleExchangeRateUpdate = async () => {
+  const handleCustomExchangeRateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(event.target.value) || 0;
+    setCustomExchangeRate(value);
+    if (exchangeRateSource === 'manual') {
+      setExchangeRate(value);
+    }
+  };
+
+  const handleMarginChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(event.target.value) || 0;
+    setMarginPercent(Math.max(0, Math.min(100, value))); // 0-100% 범위 제한
+  };
+
+  const handlePriceSync = async () => {
     setSyncLoading(true);
     try {
-      if (exchangeRateSource === 'manual') {
-        // 수동 환율 업데이트
-        await priceApi.updateExchangeRate({
-          rate: customExchangeRate,
-          isManual: true,
-        });
-        setExchangeRate(customExchangeRate);
-        alert('환율이 업데이트되었습니다.');
-      } else {
-        // API에서 최신 환율 가져오기
-        const response = await priceApi.getCurrentExchangeRate();
-        if (response) {
-          setExchangeRate(response.rate);
-          alert(`최신 환율로 업데이트되었습니다: ₩${response.rate}`);
-        }
-      }
-      // 가격 데이터 새로고침
+      await priceApi.syncPrices();
+      alert('가격 동기화가 시작되었습니다.');
       await loadPriceData();
     } catch (error) {
-      console.error('Failed to update exchange rate:', error);
-      alert('환율 업데이트에 실패했습니다.');
+      console.error('Failed to sync prices:', error);
+      alert('가격 동기화에 실패했습니다.');
     } finally {
       setSyncLoading(false);
     }
@@ -182,6 +184,14 @@ const Pricing: React.FC = () => {
     }
   };
 
+  // 안전한 숫자 포맷팅 함수
+  const formatNumber = (value: any, locale: string = 'ko-KR'): string => {
+    if (value === null || value === undefined || isNaN(value)) {
+      return '0';
+    }
+    return Number(value).toLocaleString(locale);
+  };
+
   return (
     <Box>
       <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 600 }}>
@@ -198,17 +208,22 @@ const Pricing: React.FC = () => {
                 <Typography variant="h6">현재 환율</Typography>
               </Box>
               <Typography variant="h3" sx={{ mb: 1 }}>
-                ₩{exchangeRate.toLocaleString('ko-KR')}
+                ₩{formatNumber(exchangeRate, 'ko-KR')}
               </Typography>
               <Typography variant="caption" display="block" sx={{ color: 'text.secondary' }}>
-                1 USD = {exchangeRate.toFixed(2)} KRW
+                1 USD = {exchangeRate ? exchangeRate.toFixed(2) : '0.00'} KRW
               </Typography>
               <Chip 
                 label={exchangeRateSource === 'api' ? 'API 자동' : '수동 설정'} 
                 size="small" 
-                color={exchangeRateSource === 'api' ? 'primary' : 'warning'}
+                color={exchangeRateSource === 'api' ? 'primary' : 'default'}
                 sx={{ mt: 1 }}
               />
+              {exchangeRateData && (
+                <Typography variant="caption" display="block" sx={{ mt: 1, color: 'text.secondary' }}>
+                  변동: {exchangeRateData.changePercent >= 0 ? '+' : ''}{exchangeRateData.changePercent}%
+                </Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -221,11 +236,28 @@ const Pricing: React.FC = () => {
                 <Typography variant="h6">평균 마진율</Typography>
               </Box>
               <Typography variant="h3" sx={{ mb: 1 }}>
-                15.2%
+                {marginPercent}%
               </Typography>
-              <Typography variant="caption" display="block" sx={{ mt: 1, color: 'success.main' }}>
-                +2.3% 지난 주 대비
+              <Typography variant="caption" display="block" sx={{ color: 'text.secondary' }}>
+                전체 상품 평균
               </Typography>
+              <Box sx={{ mt: 2 }}>
+                <TextField
+                  size="small"
+                  type="number"
+                  value={marginPercent}
+                  onChange={handleMarginChange}
+                  InputProps={{
+                    endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                  }}
+                  inputProps={{
+                    min: 0,
+                    max: 100,
+                    step: 0.1,
+                  }}
+                  fullWidth
+                />
+              </Box>
             </CardContent>
           </Card>
         </Grid>
@@ -234,110 +266,97 @@ const Pricing: React.FC = () => {
           <Card>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <TrendingUpIcon sx={{ mr: 1, color: 'info.main' }} />
-                <Typography variant="h6">동기화 상품</Typography>
+                <UpdateIcon sx={{ mr: 1, color: 'info.main' }} />
+                <Typography variant="h6">동기화 상태</Typography>
               </Box>
               <Typography variant="h3" sx={{ mb: 1 }}>
-                234개
+                {priceHistory.length}
               </Typography>
-              <Typography variant="caption" display="block" sx={{ mt: 1, color: 'info.main' }}>
-                +23% 지난 주 대비
+              <Typography variant="caption" display="block" sx={{ color: 'text.secondary' }}>
+                동기화된 상품 수
               </Typography>
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  onClick={handlePriceSync}
+                  disabled={syncLoading}
+                  startIcon={<UpdateIcon />}
+                >
+                  {syncLoading ? '동기화 중...' : '가격 동기화'}
+                </Button>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      {/* 환율 설정 섹션 */}
+      {/* 환율 설정 패널 */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           환율 설정
         </Typography>
         <Divider sx={{ mb: 2 }} />
         
-        <Grid container spacing={2} alignItems="flex-end">
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              label="환율 (KRW/USD)"
-              type="number"
-              value={exchangeRateSource === 'manual' ? customExchangeRate : exchangeRate}
-              onChange={(e) => {
-                if (exchangeRateSource === 'manual') {
-                  setCustomExchangeRate(Number(e.target.value));
-                }
-              }}
-              disabled={exchangeRateSource === 'api'}
-              InputProps={{
-                startAdornment: <InputAdornment position="start">₩</InputAdornment>,
-              }}
-              helperText={exchangeRateSource === 'api' ? 'API 모드에서는 자동으로 설정됩니다' : '수동으로 환율을 입력하세요'}
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
+        <Grid container spacing={3} alignItems="center">
+          <Grid item xs={12} md={3}>
             <FormControl fullWidth>
               <InputLabel>환율 소스</InputLabel>
-              <Select 
-                value={exchangeRateSource} 
-                label="환율 소스"
+              <Select
+                value={exchangeRateSource}
                 onChange={handleExchangeRateSourceChange}
+                label="환율 소스"
               >
-                <MenuItem value="manual">수동 입력</MenuItem>
-                <MenuItem value="api">API 자동 업데이트</MenuItem>
+                <MenuItem value="api">API 자동</MenuItem>
+                <MenuItem value="manual">수동 설정</MenuItem>
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={4}>
-            <Button
-              fullWidth
-              variant="contained"
-              startIcon={<UpdateIcon />}
-              onClick={handleExchangeRateUpdate}
-              disabled={syncLoading}
-              sx={{ height: 56 }}
-            >
-              {syncLoading ? '업데이트 중...' : '환율 업데이트'}
-            </Button>
-          </Grid>
-        </Grid>
-
-        <Alert severity="info" sx={{ mt: 2 }}>
-          {exchangeRateSource === 'api' 
-            ? 'API 자동 모드: 6시간마다 자동으로 환율이 업데이트됩니다.'
-            : '수동 모드: 설정한 환율이 모든 가격 계산에 적용됩니다.'}
-          환율 변경 시 모든 상품의 Shopify 가격이 자동으로 재계산됩니다.
-        </Alert>
-      </Paper>
-
-      {/* 마진율 설정 섹션 */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          일괄 마진율 적용
-        </Typography>
-        <Divider sx={{ mb: 2 }} />
-        
-        <Grid container spacing={2} alignItems="flex-end">
-          <Grid item xs={12} md={6}>
+          
+          {exchangeRateSource === 'manual' && (
+            <Grid item xs={12} md={3}>
+              <TextField
+                label="환율 (1 USD)"
+                type="number"
+                value={customExchangeRate}
+                onChange={handleCustomExchangeRateChange}
+                InputProps={{
+                  startAdornment: <InputAdornment position="start">₩</InputAdornment>,
+                }}
+                inputProps={{
+                  min: 0,
+                  step: 0.01,
+                }}
+                fullWidth
+              />
+            </Grid>
+          )}
+          
+          <Grid item xs={12} md={3}>
             <TextField
-              fullWidth
-              label="마진율 (%)"
+              label="기본 마진율"
               type="number"
               value={marginPercent}
-              onChange={(e) => setMarginPercent(Number(e.target.value))}
+              onChange={handleMarginChange}
               InputProps={{
                 endAdornment: <InputAdornment position="end">%</InputAdornment>,
               }}
-              helperText="네이버 가격에 적용할 마진율을 입력하세요"
+              inputProps={{
+                min: 0,
+                max: 100,
+                step: 0.1,
+              }}
+              fullWidth
             />
           </Grid>
-          <Grid item xs={12} md={6}>
+          
+          <Grid item xs={12} md={3}>
             <Button
-              fullWidth
               variant="outlined"
-              startIcon={<SettingsIcon />}
+              fullWidth
               onClick={handleBulkPriceUpdate}
               disabled={syncLoading}
-              sx={{ height: 56 }}
+              startIcon={<SettingsIcon />}
             >
               {syncLoading ? '적용 중...' : '마진율 일괄 적용'}
             </Button>
@@ -361,6 +380,7 @@ const Pricing: React.FC = () => {
             checkboxSelection
             disableSelectionOnClick
             loading={loading}
+            getRowId={(row) => row.id || row._id || Math.random().toString()}
             sx={{
               '& .MuiDataGrid-cell:hover': {
                 color: 'primary.main',
