@@ -125,10 +125,13 @@ export class App {
     // Price Sync 라우트 - 함수 호출로 변경
     const setupPriceSyncRoutes = require('./routes/priceSync.routes').default;
     this.app.use(`${config.apiPrefix}/price-sync`, setupPriceSyncRoutes());
+    // Price 라우트
+    const setupPriceRoutes = require('./routes/price.routes').default;
+    this.app.use(`${config.apiPrefix}/prices`, setupPriceRoutes());
 
-    // Exchange Rate 라우트 - 함수 호출로 변경
-    const setupExchangeRateRoutes = require('./routes/exchangeRate.routes').default;
-    this.app.use(`${config.apiPrefix}/exchange-rate`, setupExchangeRateRoutes());
+    // Exchange Rates 라우트  
+    const setupExchangeRatesRoutes = require('./routes/exchangeRates.routes').default;
+    this.app.use(`${config.apiPrefix}/exchange-rates`, setupExchangeRatesRoutes());
 
     // 404 핸들러
     this.app.use((req: Request, res: Response) => {

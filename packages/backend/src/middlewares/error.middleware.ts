@@ -1,96 +1,131 @@
-// packages/backend/src/middlewares/error.middleware.ts
+// ===== 1. packages/backend/src/middlewares/error.middleware.ts =====
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
-import { SystemLog } from '../models';
+import { AppError } from '../utils/errors';
+import { config } from '../config';
 
-export class AppError extends Error {
-  statusCode: number;
-  isOperational: boolean;
-
-  constructor(message: string, statusCode: number = 500) {
-    super(message);
-    this.statusCode = statusCode;
-    this.isOperational = true;
-    Error.captureStackTrace(this, this.constructor);
-  }
+interface ErrorWithStatus extends Error {
+  statusCode?: number;
+  status?: string;
+  isOperational?: boolean;
+  code?: string;
+  path?: string;
+  value?: string;
+  errors?: any;
 }
 
-export const errorMiddleware = async (
-  err: Error | AppError,
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  const error = err as AppError;
-  const statusCode = error.statusCode || 500;
-  const message = error.message || 'Internal server error';
+/**
+ * MongoDB 에러 처리
+ */
+const handleCastErrorDB = (err: any): AppError => {
+  const message = `Invalid ${err.path}: ${err.value}`;
+  return new AppError(message, 400);
+};
 
-  // 상세한 에러 로깅
-  const errorDetails = {
-    error: message,
-    statusCode,
-    stack: error.stack,
-    path: req.path,
-    method: req.method,
-    query: req.query,
-    body: req.body,
-    headers: req.headers,
-    ip: req.ip,
-    timestamp: new Date().toISOString(),
-  };
+const handleDuplicateFieldsDB = (err: any): AppError => {
+  const value = err.errmsg.match(/(["'])(\\?.)*?\1/)[0];
+  const message = `Duplicate field value: ${value}. Please use another value!`;
+  return new AppError(message, 400);
+};
 
-  logger.error('Error middleware:', errorDetails);
+const handleValidationErrorDB = (err: any): AppError => {
+  const errors = Object.values(err.errors).map((el: any) => el.message);
+  const message = `Invalid input data. ${errors.join('. ')}`;
+  return new AppError(message, 400);
+};
 
-  // Shopify API 관련 에러 특별 처리
-  if (error.message?.includes('Shopify') || error.message?.includes('GraphQL')) {
-    logger.error('Shopify API Error Details:', {
-      response: (error as any).response?.data,
-      extensions: (error as any).extensions,
-      query: req.query,
+const handleJWTError = (): AppError =>
+  new AppError('Invalid token. Please log in again!', 401);
+
+const handleJWTExpiredError = (): AppError =>
+  new AppError('Your token has expired! Please log in again.', 401);
+
+/**
+ * 개발 환경 에러 응답
+ */
+const sendErrorDev = (err: ErrorWithStatus, req: Request, res: Response) => {
+  // API
+  if (req.originalUrl.startsWith('/api')) {
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      error: err,
+      message: err.message,
+      stack: err.stack,
     });
   }
 
-  // 데이터베이스에 에러 로그 저장 (500 에러만)
-  if (statusCode >= 500) {
-    try {
-      await SystemLog.create({
-        level: 'error',
-        category: 'http-error',
-        message,
-        context: {
-          service: 'express',
-          method: req.method,
-          path: req.path,
-          query: req.query,
-        },
-        error: {
-          name: error.name,
-          message: error.message,
-          stack: error.stack,
-        },
-        metadata: {
-          statusCode,
-          ip: req.ip,
-          userAgent: req.headers['user-agent'],
-        },
+  // 렌더링된 웹사이트
+  logger.error('ERROR 💥', err);
+  return res.status(err.statusCode || 500).json({
+    success: false,
+    message: err.message,
+  });
+};
+
+/**
+ * 프로덕션 환경 에러 응답
+ */
+const sendErrorProd = (err: ErrorWithStatus, req: Request, res: Response) => {
+  // API
+  if (req.originalUrl.startsWith('/api')) {
+    // 운영상 에러: 클라이언트에 메시지 전송
+    if (err.isOperational) {
+      return res.status(err.statusCode || 500).json({
+        success: false,
+        message: err.message,
       });
-    } catch (dbError) {
-      logger.error('Failed to save error log:', dbError);
     }
+
+    // 프로그래밍 또는 알 수 없는 에러: 상세 정보 노출 안함
+    logger.error('ERROR 💥', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Something went wrong!',
+    });
   }
 
-  // 개발 환경과 프로덕션 환경 구분
-  const isDevelopment = process.env.NODE_ENV === 'development';
+  // 렌더링된 웹사이트
+  if (err.isOperational) {
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 
-  res.status(statusCode).json({
+  logger.error('ERROR 💥', err);
+  return res.status(err.statusCode || 500).json({
     success: false,
-    message,
-    ...(isDevelopment && {
-      error: {
-        name: error.name,
-        stack: error.stack,
-        details: errorDetails,
-      }
-    }),
+    message: 'Please try again later.',
   });
+};
+
+/**
+ * 글로벌 에러 핸들러
+ */
+export const errorHandler = (
+  err: ErrorWithStatus,
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  err.statusCode = err.statusCode || 500;
+  err.status = err.status || 'error';
+
+  if (config.env === 'development') {
+    sendErrorDev(err, req, res);
+  } else {
+    let error = { ...err };
+    error.message = err.message;
+
+    // MongoDB 에러 처리
+    if (err.name === 'CastError') error = handleCastErrorDB(err);
+    if (err.code === '11000') error = handleDuplicateFieldsDB(err);
+    if (err.name === 'ValidationError') error = handleValidationErrorDB(err);
+    
+    // JWT 에러 처리
+    if (err.name === 'JsonWebTokenError') error = handleJWTError();
+    if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
+
+    sendErrorProd(error, req, res);
+  }
 };

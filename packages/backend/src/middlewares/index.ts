@@ -1,7 +1,8 @@
-// packages/backend/src/middlewares/index.ts
+// ===== 12. packages/backend/src/middlewares/index.ts =====
 export { authMiddleware } from './auth.middleware';
-export { errorHandler, errorMiddleware, AppError } from './error.middleware';
-export { rateLimiter, strictRateLimiter } from './rateLimit.middleware';
+export { adminMiddleware } from './admin.middleware';
+export { errorMiddleware } from './error.middleware';
+export { rateLimiter } from './rateLimit.middleware';
 export { requestLogger } from './logger.middleware';
 export { healthCheck } from './health.middleware';
-export { adminMiddleware } from './admin.middleware';
+export { validateRequest } from './validation.middleware';

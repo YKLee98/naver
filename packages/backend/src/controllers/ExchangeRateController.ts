@@ -1,10 +1,9 @@
-// ===== 3. packages/backend/src/controllers/ExchangeRateController.ts =====
+// ===== 2. packages/backend/src/controllers/ExchangeRateController.ts =====
 import { Request, Response, NextFunction } from 'express';
-import { ExchangeRateService } from '../services/exchangeRate';
-import { ExchangeRate } from '../models';
-import { logger } from '../utils/logger';
+import { ExchangeRateService } from '../services/exchangeRate/ExchangeRateService';
 import { asyncHandler } from '../utils/asyncHandler';
 import { AppError } from '../utils/errors';
+import { logger } from '../utils/logger';
 
 export class ExchangeRateController {
   private exchangeRateService: ExchangeRateService;
@@ -15,116 +14,123 @@ export class ExchangeRateController {
 
   /**
    * 현재 환율 조회
+   * GET /api/v1/exchange-rates/current
    */
   getCurrentRate = asyncHandler(async (
     req: Request,
-    res: Response,
-    next: NextFunction
+    res: Response
   ): Promise<void> => {
     const rate = await this.exchangeRateService.getCurrentRate();
     
+    // KRW to USD 변환 (프론트엔드 기대값)
+    const krwToUsd = 1 / rate;
+    
     res.json({
-      success: true,
-      data: {
-        rate,
-        currency: 'CAD/KRW',
-        source: 'Bank of Canada',
-        timestamp: new Date()
-      }
+      rate: krwToUsd,
+      source: 'api',
+      baseCurrency: 'KRW',
+      targetCurrency: 'USD',
+      krwPerUsd: rate,
+      updatedAt: new Date()
     });
   });
 
   /**
    * 환율 이력 조회
+   * GET /api/v1/exchange-rates
    */
   getRateHistory = asyncHandler(async (
     req: Request,
-    res: Response,
-    next: NextFunction
+    res: Response
   ): Promise<void> => {
     const { days = 30 } = req.query;
     
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - Number(days));
-    
-    const history = await ExchangeRate.find({
-      createdAt: { $gte: startDate }
-    })
-    .sort({ createdAt: -1 })
-    .lean();
+    const history = await this.exchangeRateService.getRateHistory(Number(days));
     
     res.json({
-      success: true,
-      data: history,
-      total: history.length
+      data: history.map(h => ({
+        ...h,
+        krwToUsd: 1 / h.rate
+      }))
     });
   });
 
   /**
    * 수동 환율 설정
+   * POST /api/v1/exchange-rates/manual
    */
   setManualRate = asyncHandler(async (
     req: Request,
-    res: Response,
-    next: NextFunction
+    res: Response
   ): Promise<void> => {
     const { rate, reason, validHours = 24 } = req.body;
     
-    // 유효 기간 설정
-    const validUntil = new Date();
-    validUntil.setHours(validUntil.getHours() + validHours);
+    if (!rate || rate <= 0) {
+      throw new AppError('Invalid exchange rate', 400);
+    }
+
+    // 입력받은 rate는 KRW to USD (예: 0.00075)
+    // 저장할 때는 USD to KRW로 변환 (예: 1333.33)
+    const usdToKrw = 1 / rate;
     
-    // 기존 활성 환율 비활성화
-    await ExchangeRate.updateMany(
-      { isActive: true },
-      { isActive: false }
-    );
+    await this.exchangeRateService.setManualRate(usdToKrw, validHours);
     
-    // 새 환율 생성
-    const newRate = await ExchangeRate.create({
-      rate,
-      source: 'manual',
-      isActive: true,
-      validUntil,
-      reason,
-      createdBy: (req as any).user?.id || 'system'
-    });
-    
-    // 캐시 업데이트
-    await this.exchangeRateService.setManualRate(rate, validHours);
-    
-    logger.info(`Manual exchange rate set: ${rate} CAD/KRW`, {
+    logger.info(`Manual exchange rate set: ${rate} KRW/USD (${usdToKrw} USD/KRW)`, {
       userId: (req as any).user?.id,
-      reason,
-      validHours
+      reason
     });
     
     res.json({
-      success: true,
       message: 'Exchange rate updated successfully',
-      data: newRate
+      rate,
+      krwPerUsd: usdToKrw,
+      validHours
+    });
+  });
+
+  /**
+   * 환율 업데이트
+   * POST /api/v1/exchange-rates/update
+   */
+  updateRate = asyncHandler(async (
+    req: Request,
+    res: Response
+  ): Promise<void> => {
+    const { rate, isManual } = req.body;
+    
+    if (isManual && rate) {
+      const usdToKrw = 1 / rate;
+      await this.exchangeRateService.setManualRate(usdToKrw);
+    } else {
+      await this.exchangeRateService.updateExchangeRate();
+    }
+    
+    const currentRate = await this.exchangeRateService.getCurrentRate();
+    const krwToUsd = 1 / currentRate;
+    
+    res.json({
+      message: 'Exchange rate updated successfully',
+      rate: krwToUsd,
+      krwPerUsd: currentRate
     });
   });
 
   /**
    * 환율 갱신
+   * POST /api/v1/exchange-rates/refresh
    */
   refreshRate = asyncHandler(async (
     req: Request,
-    res: Response,
-    next: NextFunction
+    res: Response
   ): Promise<void> => {
-    const rate = await this.exchangeRateService.updateExchangeRate();
+    const newRate = await this.exchangeRateService.updateExchangeRate();
+    const krwToUsd = 1 / newRate;
     
     res.json({
-      success: true,
       message: 'Exchange rate refreshed',
-      data: {
-        rate,
-        currency: 'CAD/KRW',
-        source: 'Bank of Canada',
-        timestamp: new Date()
-      }
+      rate: krwToUsd,
+      krwPerUsd: newRate,
+      timestamp: new Date()
     });
   });
 }
