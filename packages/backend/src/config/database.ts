@@ -1,9 +1,8 @@
 // packages/backend/src/config/database.ts
-
 import mongoose from 'mongoose';
 import { logger } from '../utils/logger';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hallyu-fomaholic';
+const MONGODB_URI = process.env.MONGODB_URI ;
 const isDevelopment = process.env.NODE_ENV === 'development';
 
 // MongoDB connection options
@@ -16,7 +15,7 @@ const mongoOptions: mongoose.ConnectOptions = {
 /**
  * Connect to MongoDB
  */
-export async function connectDB(): Promise<void> {
+export async function connectDatabase(): Promise<void> {
   try {
     // Set mongoose options
     mongoose.set('strictQuery', false);
@@ -38,6 +37,10 @@ export async function connectDB(): Promise<void> {
       logger.warn('MongoDB disconnected');
     });
 
+    mongoose.connection.on('reconnected', () => {
+      logger.info('MongoDB reconnected');
+    });
+
     // Connect to MongoDB
     await mongoose.connect(MONGODB_URI, mongoOptions);
     
@@ -48,6 +51,7 @@ export async function connectDB(): Promise<void> {
     // In development, continue without database
     if (isDevelopment) {
       logger.warn('Running without database connection in development mode');
+      throw error; // 여전히 에러를 throw하되, 상위에서 처리
     } else {
       throw error;
     }
@@ -57,7 +61,7 @@ export async function connectDB(): Promise<void> {
 /**
  * Disconnect from MongoDB
  */
-export async function disconnectDB(): Promise<void> {
+export async function disconnectDatabase(): Promise<void> {
   try {
     await mongoose.connection.close();
     logger.info('MongoDB connection closed');
@@ -70,7 +74,7 @@ export async function disconnectDB(): Promise<void> {
 /**
  * Check if MongoDB is connected
  */
-export function isDBConnected(): boolean {
+export function isDatabaseConnected(): boolean {
   return mongoose.connection.readyState === 1;
 }
 
@@ -78,7 +82,7 @@ export function isDBConnected(): boolean {
  * Get MongoDB connection status
  */
 export function getDBStatus(): string {
-  const states = {
+  const states: { [key: number]: string } = {
     0: 'disconnected',
     1: 'connected',
     2: 'connecting',
@@ -89,14 +93,24 @@ export function getDBStatus(): string {
 
 // Handle process termination
 process.on('SIGINT', async () => {
-  await disconnectDB();
+  await disconnectDatabase();
   process.exit(0);
 });
 
-// Export as default as well for compatibility
+// Named exports - 중요!
+export {
+  connectDatabase as connectDB,
+  disconnectDatabase as disconnectDB,
+  isDatabaseConnected as isDBConnected,
+};
+
+// Default export for compatibility
 export default {
-  connectDB,
-  disconnectDB,
-  isDBConnected,
+  connectDatabase,
+  disconnectDatabase,
+  isDatabaseConnected,
   getDBStatus,
+  connectDB: connectDatabase,
+  disconnectDB: disconnectDatabase,
+  isDBConnected: isDatabaseConnected,
 };

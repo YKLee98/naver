@@ -18,7 +18,8 @@ export interface IPriceSyncJob extends Document {
     roundingStrategy?: 'up' | 'down' | 'nearest';
     skus?: string[];
   };
-  errors: Array<{
+  // errors 필드명을 errorList로 변경 (예약어 충돌 방지)
+  errorList: Array<{
     sku: string;
     error: string;
     timestamp: Date;
@@ -36,7 +37,7 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     type: String,
     required: true,
     unique: true,
-    index: true  // 이미 여기에 인덱스 정의
+    index: true
   },
   type: {
     type: String,
@@ -48,7 +49,7 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     required: true,
     enum: ['pending', 'running', 'completed', 'failed'],
     default: 'pending',
-    index: true  // 이미 여기에 인덱스 정의
+    index: true
   },
   totalItems: {
     type: Number,
@@ -87,7 +88,8 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     },
     skus: [String]
   },
-  errors: [{
+  // errors를 errorList로 변경
+  errorList: [{
     sku: String,
     error: String,
     timestamp: {
@@ -103,13 +105,15 @@ const PriceSyncJobSchema = new Schema<IPriceSyncJob>({
     required: true
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  // suppressReservedKeysWarning 옵션 추가
+  suppressReservedKeysWarning: true
 });
 
-// 인덱스 - 중복 제거
-// PriceSyncJobSchema.index({ status: 1, createdAt: -1 }); // status는 이미 스키마에 정의됨
-PriceSyncJobSchema.index({ createdAt: -1 }); // createdAt만 추가
+// 중복 인덱스 제거 - schema.index()만 사용
+PriceSyncJobSchema.index({ status: 1, createdAt: -1 });
 PriceSyncJobSchema.index({ type: 1, createdAt: -1 });
+// syncJobId 인덱스는 제거 (중복 경고 해결)
 
 // TTL 인덱스 (30일 후 자동 삭제)
 PriceSyncJobSchema.index({ createdAt: 1 }, { expireAfterSeconds: 2592000 });
