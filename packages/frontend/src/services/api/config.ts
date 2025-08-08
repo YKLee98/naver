@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
 // Axios 인스턴스 생성
-const api: AxiosInstance = axios.create({
+export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
@@ -14,157 +14,127 @@ const api: AxiosInstance = axios.create({
 });
 
 // Request interceptor
-api.interceptors.request.use(
+apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    // 토큰 추가
-    const token = localStorage.getItem('authToken');
+    // 토큰 추가 - 두 가지 키 모두 확인
+    const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+    
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
 
     // 요청 로깅
     if (import.meta.env.DEV) {
-      console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`, config.params || config.data);
+      console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
+        params: config.params,
+        data: config.data,
+        hasToken: !!token
+      });
     }
 
     return config;
   },
   (error: AxiosError) => {
+    console.error('[API Request Error]', error);
     return Promise.reject(error);
   }
 );
 
 // Response interceptor
-api.interceptors.response.use(
+apiClient.interceptors.response.use(
   (response) => {
+    if (import.meta.env.DEV) {
+      console.log(`[API Response] ${response.config.url}`, response.data);
+    }
     return response;
   },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    if (import.meta.env.DEV) {
+      console.error('[API Response Error]', {
+        url: originalRequest?.url,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+    }
 
     // 401 에러 처리 (인증 만료)
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
       try {
-        // 토큰 갱신 로직
+        // 토큰 갱신 시도
         const refreshToken = localStorage.getItem('refreshToken');
         if (refreshToken) {
           const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
             refreshToken,
           });
 
-          const { accessToken } = response.data;
+          const { accessToken } = response.data.data;
+          
+          // 새 토큰 저장
           localStorage.setItem('authToken', accessToken);
+          localStorage.setItem('token', accessToken);
 
           // 원래 요청 재시도
           if (originalRequest.headers) {
             originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           }
-          return api(originalRequest);
+          return apiClient(originalRequest);
         }
       } catch (refreshError) {
         // 리프레시 실패 시 로그인 페이지로 이동
         localStorage.removeItem('authToken');
+        localStorage.removeItem('token');
         localStorage.removeItem('refreshToken');
-        window.location.href = '/login';
+        localStorage.removeItem('user');
+        
+        // 로그인 페이지가 아닌 경우에만 리다이렉트
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
         return Promise.reject(refreshError);
       }
     }
 
     // 에러 메시지 표시
     if (error.response?.data && typeof error.response.data === 'object' && 'message' in error.response.data) {
-      const errorMessage = (error.response.data as { message: string }).message;
-      toast.error(errorMessage);
-    } else if (error.message) {
-      toast.error(error.message);
+      const errorMessage = (error.response.data as any).message;
+      if (error.response.status !== 401) { // 401은 위에서 처리
+        toast.error(errorMessage);
+      }
     }
 
     return Promise.reject(error);
   }
 );
 
-export default api;
-export { api as apiClient }; // apiClient로도 export
-
-// API 엔드포인트 상수
-export const API_ENDPOINTS = {
-  // Auth
-  AUTH: {
-    LOGIN: '/auth/login',
-    LOGOUT: '/auth/logout',
-    REFRESH: '/auth/refresh',
-    ME: '/auth/me',
-  },
-
-  // Dashboard
-  DASHBOARD: {
-    STATISTICS: '/dashboard/statistics',
-    ACTIVITIES: '/dashboard/activities',
-    CHARTS: {
-      PRICE: '/dashboard/charts/price',
-      INVENTORY: '/dashboard/charts/inventory',
-    },
-  },
-
-  // Products
-  PRODUCTS: {
-    LIST: '/products',
-    DETAIL: (sku: string) => `/products/${sku}`,
-    SEARCH: {
-      NAVER: '/products/search/naver',
-      SHOPIFY: '/products/search/shopify',
-    },
-  },
-
-  // Inventory
-  INVENTORY: {
-    STATUS_LIST: '/inventory/status',
-    STATUS: (sku: string) => `/inventory/${sku}/status`,
-    HISTORY: (sku: string) => `/inventory/${sku}/history`,
-    ADJUST: (sku: string) => `/inventory/${sku}/adjust`,
-    LOW_STOCK: '/inventory/low-stock',
-  },
-
-  // Sync
-  SYNC: {
-    FULL: '/sync/full',
-    SKU: (sku: string) => `/sync/sku/${sku}`,
-    STATUS: '/sync/status',
-    SETTINGS: '/sync/settings',
-    HISTORY: '/sync/history',
-  },
-
-  // Mappings
-  MAPPINGS: {
-    LIST: '/mappings',
-    CREATE: '/mappings',
-    UPDATE: (id: string) => `/mappings/${id}`,
-    DELETE: (id: string) => `/mappings/${id}`,
-    AUTO_DISCOVER: '/mappings/auto-discover',
-    VALIDATE: (id: string) => `/mappings/${id}/validate`,
-    BULK: '/mappings/bulk',
-  },
-
-  // Price Sync
-  PRICE_SYNC: {
-    INITIAL_PRICES: '/price-sync/initial-prices',
-    SYNC: '/price-sync/sync',
-    APPLY_MARGINS: '/price-sync/apply-margins',
-    HISTORY: '/price-sync/history',
-  },
-
-  // Exchange Rate
-  EXCHANGE_RATE: {
-    CURRENT: '/exchange-rate/current',
-    HISTORY: '/exchange-rate/history',
-    MANUAL: '/exchange-rate/manual',
-    REFRESH: '/exchange-rate/refresh',
-  },
-
-  // Settings
-  SETTINGS: {
-    GET: '/settings',
-    UPDATE: '/settings',
-  },
+// API 메서드들
+export const get = async <T = any>(url: string, config?: any): Promise<T> => {
+  const response = await apiClient.get(url, config);
+  return response.data?.data || response.data;
 };
+
+export const post = async <T = any>(url: string, data?: any, config?: any): Promise<T> => {
+  const response = await apiClient.post(url, data, config);
+  return response.data?.data || response.data;
+};
+
+export const put = async <T = any>(url: string, data?: any, config?: any): Promise<T> => {
+  const response = await apiClient.put(url, data, config);
+  return response.data?.data || response.data;
+};
+
+export const patch = async <T = any>(url: string, data?: any, config?: any): Promise<T> => {
+  const response = await apiClient.patch(url, data, config);
+  return response.data?.data || response.data;
+};
+
+export const del = async <T = any>(url: string, config?: any): Promise<T> => {
+  const response = await apiClient.delete(url, config);
+  return response.data?.data || response.data;
+};
+
+// default export도 제공
+export default apiClient;

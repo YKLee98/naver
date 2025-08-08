@@ -8,7 +8,7 @@ import { body } from 'express-validator';
 const router = Router();
 const authController = new AuthController();
 
-// 로그인
+// 로그인 (인증 불필요)
 router.post(
   '/login',
   [
@@ -19,10 +19,7 @@ router.post(
   authController.login.bind(authController)
 );
 
-// 로그아웃
-router.post('/logout', authMiddleware, authController.logout.bind(authController));
-
-// 회원가입
+// 회원가입 (인증 불필요)
 router.post(
   '/register',
   [
@@ -36,7 +33,7 @@ router.post(
   authController.register.bind(authController)
 );
 
-// 토큰 갱신
+// 토큰 갱신 (인증 불필요)
 router.post(
   '/refresh',
   [body('refreshToken').notEmpty().withMessage('리프레시 토큰이 필요합니다')],
@@ -44,13 +41,22 @@ router.post(
   authController.refresh.bind(authController)
 );
 
-// 토큰 검증
-router.get('/verify', authMiddleware, authController.verify.bind(authController));
+// 로그아웃 (인증 필요)
+router.post('/logout', authMiddleware, authController.logout.bind(authController));
 
-// 현재 사용자 정보
-router.get('/me', authMiddleware, authController.getCurrentUser.bind(authController));
+// 토큰 검증 (인증 필요)
+router.get('/verify', authMiddleware, (req, res) => {
+  res.json({
+    success: true,
+    message: 'Token is valid',
+    user: (req as any).user
+  });
+});
 
-// 비밀번호 변경
+// 현재 사용자 정보 (인증 필요)
+router.get('/me', authMiddleware, authController.me.bind(authController));
+
+// 비밀번호 변경 (인증 필요)
 router.post(
   '/change-password',
   authMiddleware,

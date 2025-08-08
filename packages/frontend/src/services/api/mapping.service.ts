@@ -1,4 +1,5 @@
 // packages/frontend/src/services/api/mapping.service.ts
+
 import { apiClient } from './config';
 import { AxiosResponse } from 'axios';
 
@@ -9,12 +10,14 @@ export interface MappingData {
   shopifyProductId: string;
   shopifyVariantId?: string;
   productName?: string;
+  vendor?: string;
   priceMargin: number;
   isActive: boolean;
   status?: string;
   syncStatus?: string;
-  lastSyncAt?: string;
-  updatedAt?: string;
+  lastSyncAt?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface MappingListParams {
@@ -28,15 +31,12 @@ export interface MappingListParams {
 }
 
 export interface MappingListResponse {
-  success: boolean;
-  data: {
-    mappings: MappingData[];
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-      pages: number;
-    };
+  mappings: MappingData[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
   };
 }
 
@@ -62,18 +62,77 @@ export interface BulkUploadResult {
   skipped: Array<{ row: number; sku: string; reason: string }>;
 }
 
+export interface SkuSearchResult {
+  sku: string;
+  naver: {
+    found: boolean;
+    products: Array<{
+      id: string;
+      name: string;
+      sku: string;
+      price: number;
+      imageUrl?: string;
+      stockQuantity?: number;
+      status?: string;
+    }>;
+    message?: string;
+    error?: string;
+  };
+  shopify: {
+    found: boolean;
+    products: Array<{
+      id: string;
+      variantId: string;
+      title: string;
+      variantTitle?: string;
+      sku: string;
+      price: string;
+      compareAtPrice?: string;
+      imageUrl?: string;
+      inventoryQuantity?: number;
+      vendor?: string;
+      productType?: string;
+      tags?: string[];
+    }>;
+    message?: string;
+    error?: string;
+  };
+}
+
+export interface DiscoveredMapping {
+  sku: string;
+  naverProduct: {
+    id: string;
+    name: string;
+    price: number;
+  };
+  shopifyMatches: Array<{
+    id: string;
+    title: string;
+    price: string;
+    similarity: number;
+  }>;
+}
+
 class MappingService {
+  /**
+   * SKU로 네이버와 Shopify 상품 자동 검색
+   */
+  async searchProductsBySku(sku: string): Promise<AxiosResponse<{ success: boolean; data: SkuSearchResult }>> {
+    return apiClient.get('/mappings/search-by-sku', { params: { sku } });
+  }
+
   /**
    * 매핑 목록 조회
    */
-  async getMappings(params?: MappingListParams): Promise<AxiosResponse<MappingListResponse>> {
+  async getMappings(params?: MappingListParams): Promise<AxiosResponse<{ success: boolean; data: MappingListResponse }>> {
     return apiClient.get('/mappings', { params });
   }
 
   /**
-   * 매핑 생성
+   * 매핑 생성 (개선된 버전)
    */
-  async createMapping(data: Partial<MappingData>): Promise<AxiosResponse<{ success: boolean; data: { mapping: MappingData; validation: ValidationResult } }>> {
+  async createMapping(data: Partial<MappingData> & { autoSearch?: boolean }): Promise<AxiosResponse<{ success: boolean; data: { mapping: MappingData; validation: ValidationResult } }>> {
     return apiClient.post('/mappings', data);
   }
 
@@ -108,7 +167,7 @@ class MappingService {
   /**
    * 자동 매핑 탐색
    */
-  async autoDiscoverMappings(options: AutoDiscoverOptions): Promise<AxiosResponse<{ success: boolean; data: { found: number; mappings: any[] } }>> {
+  async autoDiscoverMappings(options: AutoDiscoverOptions): Promise<AxiosResponse<{ success: boolean; data: { found: number; mappings: DiscoveredMapping[] } }>> {
     return apiClient.post('/mappings/auto-discover', options);
   }
 
@@ -147,6 +206,40 @@ class MappingService {
    */
   async bulkDelete(ids: string[]): Promise<AxiosResponse<{ success: boolean; deleted: number }>> {
     return apiClient.post('/mappings/bulk-delete', { ids });
+  }
+
+  /**
+   * 매핑 내보내기 (엑셀)
+   */
+  async exportMappings(params?: MappingListParams): Promise<AxiosResponse<Blob>> {
+    return apiClient.get('/mappings/export', {
+      params,
+      responseType: 'blob',
+    });
+  }
+
+  /**
+   * 매핑 상태 일괄 업데이트
+   */
+  async bulkUpdateStatus(updates: Array<{ id: string; status: string }>): Promise<AxiosResponse<{ success: boolean; updated: number }>> {
+    return apiClient.put('/mappings/bulk-status', { updates });
+  }
+
+  /**
+   * 매핑 통계 조회
+   */
+  async getMappingStatistics(): Promise<AxiosResponse<{ 
+    success: boolean; 
+    data: {
+      total: number;
+      active: number;
+      inactive: number;
+      error: number;
+      warning: number;
+      lastUpdated: Date;
+    }
+  }>> {
+    return apiClient.get('/mappings/statistics');
   }
 }
 

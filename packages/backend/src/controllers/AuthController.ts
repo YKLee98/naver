@@ -23,98 +23,124 @@ interface RegisterRequest extends Request {
 
 export class AuthController {
   /**
+   * JWT 액세스 토큰 생성
+   */
+  private generateAccessToken(user: any): string {
+    const payload = {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+      name: user.name
+    };
+
+    const secret = process.env.JWT_SECRET || 'default-jwt-secret-change-in-production';
+    const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
+
+    return jwt.sign(payload, secret, { expiresIn });
+  }
+
+  /**
+   * JWT 리프레시 토큰 생성
+   */
+  private generateRefreshToken(user: any): string {
+    const payload = {
+      id: user._id.toString(),
+      type: 'refresh'
+    };
+
+    const secret = process.env.JWT_SECRET || 'default-jwt-secret-change-in-production';
+    const expiresIn = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+
+    return jwt.sign(payload, secret, { expiresIn });
+  }
+
+  /**
    * 로그인
    */
   async login(req: LoginRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { email, password } = req.body;
 
-      // 디버그 로그 추가
+      // 입력값 검증
+      if (!email || !password) {
+        throw new AppError('이메일과 비밀번호를 입력해주세요.', 400);
+      }
+
+      // 디버그 로그
       logger.info('Login attempt:', { 
         email, 
         hasPassword: !!password,
         passwordLength: password?.length,
-        bodyKeys: Object.keys(req.body),
-        headers: {
-          contentType: req.headers['content-type'],
-          origin: req.headers.origin,
-          userAgent: req.headers['user-agent']
-        }
+        timestamp: new Date().toISOString()
       });
 
-      // 사용자 찾기
-      const user = await User.findOne({ email }).select('+password');
-      
-      logger.info('User lookup result:', { 
-        found: !!user, 
-        email,
-        userEmail: user?.email,
-        userRole: user?.role,
-        userStatus: user?.status,
-        hasPasswordHash: !!user?.password,
-        passwordHashLength: user?.password?.length,
-        passwordHashPrefix: user?.password?.substring(0, 10) // 해시 일부만 로그
-      });
+      // 사용자 찾기 (password 필드 포함)
+      const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
       
       if (!user) {
-        logger.warn('User not found:', { email });
+        logger.warn('Login failed - user not found:', { email });
         throw new AppError('이메일 또는 비밀번호가 올바르지 않습니다.', 401);
       }
+
+      logger.info('User found:', { 
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        hasPassword: !!user.password
+      });
 
       // 비밀번호 확인
-      logger.info('Comparing passwords...', {
-        inputPasswordLength: password?.length,
-        storedHashLength: user.password?.length
-      });
-      
       const isPasswordValid = await bcrypt.compare(password, user.password);
       
-      logger.info('Password validation result:', { 
-        isPasswordValid,
-        email: user.email
-      });
-      
       if (!isPasswordValid) {
-        logger.warn('Invalid password for user:', { email });
+        logger.warn('Login failed - invalid password:', { email });
         throw new AppError('이메일 또는 비밀번호가 올바르지 않습니다.', 401);
       }
 
-      // 계정 활성화 확인
+      // 계정 상태 확인
       if (user.status !== 'active') {
-        logger.warn('Inactive account login attempt:', { email, status: user.status });
+        logger.warn('Login failed - inactive account:', { 
+          email, 
+          status: user.status 
+        });
         throw new AppError('계정이 비활성화되었습니다.', 403);
       }
 
       // 토큰 생성
-      logger.info('Generating tokens for user:', { email });
       const accessToken = this.generateAccessToken(user);
       const refreshToken = this.generateRefreshToken(user);
 
-      // 리프레시 토큰 저장
+      // 리프레시 토큰 저장 및 마지막 로그인 시간 업데이트
       user.refreshToken = refreshToken;
       user.lastLogin = new Date();
       await user.save();
 
-      // 비밀번호 제거
+      // 응답 데이터 준비 (민감한 정보 제거)
       const userResponse = user.toObject();
       delete userResponse.password;
       delete userResponse.refreshToken;
+      delete userResponse.__v;
 
-      logger.info(`User logged in successfully: ${email}`);
+      logger.info('Login successful:', { 
+        email: user.email,
+        role: user.role 
+      });
 
+      // 응답
       res.json({
         success: true,
         data: {
           user: userResponse,
           accessToken,
           refreshToken,
+          expiresIn: process.env.JWT_EXPIRES_IN || '7d'
         },
+        message: '로그인에 성공했습니다.'
       });
     } catch (error) {
       logger.error('Login error:', { 
         message: error.message,
         stack: error.stack,
-        name: error.name,
         email: req.body?.email 
       });
       next(error);
@@ -130,8 +156,11 @@ export class AuthController {
 
       if (userId) {
         // 리프레시 토큰 제거
-        await User.findByIdAndUpdate(userId, { refreshToken: null });
-        logger.info(`User logged out: ${userId}`);
+        await User.findByIdAndUpdate(userId, { 
+          $unset: { refreshToken: 1 } 
+        });
+        
+        logger.info('User logged out:', { userId });
       }
 
       res.json({
@@ -139,6 +168,7 @@ export class AuthController {
         message: '로그아웃되었습니다.',
       });
     } catch (error) {
+      logger.error('Logout error:', error);
       next(error);
     }
   }
@@ -150,10 +180,26 @@ export class AuthController {
     try {
       const { email, password, name } = req.body;
 
+      // 입력값 검증
+      if (!email || !password || !name) {
+        throw new AppError('필수 정보를 모두 입력해주세요.', 400);
+      }
+
+      // 이메일 형식 검증
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        throw new AppError('올바른 이메일 형식이 아닙니다.', 400);
+      }
+
+      // 비밀번호 강도 검증 (최소 6자)
+      if (password.length < 6) {
+        throw new AppError('비밀번호는 최소 6자 이상이어야 합니다.', 400);
+      }
+
       logger.info('Registration attempt:', { email, name });
 
       // 이메일 중복 확인
-      const existingUser = await User.findOne({ email });
+      const existingUser = await User.findOne({ email: email.toLowerCase() });
       
       if (existingUser) {
         logger.warn('Registration failed - email already exists:', { email });
@@ -165,22 +211,27 @@ export class AuthController {
 
       // 사용자 생성
       const user = await User.create({
-        email,
+        email: email.toLowerCase(),
         password: hashedPassword,
         name,
         role: 'user',
         status: 'active',
       });
 
-      // 비밀번호 제거
+      // 응답 데이터 준비 (민감한 정보 제거)
       const userResponse = user.toObject();
       delete userResponse.password;
+      delete userResponse.__v;
 
-      logger.info(`New user registered: ${email}`);
+      logger.info('User registered successfully:', { 
+        email: user.email,
+        name: user.name 
+      });
 
       res.status(201).json({
         success: true,
         data: userResponse,
+        message: '회원가입이 완료되었습니다.'
       });
     } catch (error) {
       logger.error('Registration error:', { 
@@ -203,58 +254,51 @@ export class AuthController {
       }
 
       // 토큰 검증
-      const decoded = jwt.verify(
-        refreshToken,
-        process.env.JWT_REFRESH_SECRET!
-      ) as any;
+      const secret = process.env.JWT_SECRET || 'default-jwt-secret-change-in-production';
+      let decoded: any;
 
-      // 사용자 찾기
-      const user = await User.findById(decoded.id);
+      try {
+        decoded = jwt.verify(refreshToken, secret);
+      } catch (err) {
+        throw new AppError('유효하지 않은 리프레시 토큰입니다.', 401);
+      }
+
+      // 사용자 확인
+      const user = await User.findById(decoded.id).select('+refreshToken');
       
       if (!user || user.refreshToken !== refreshToken) {
         throw new AppError('유효하지 않은 리프레시 토큰입니다.', 401);
+      }
+
+      // 계정 상태 확인
+      if (user.status !== 'active') {
+        throw new AppError('계정이 비활성화되었습니다.', 403);
       }
 
       // 새 토큰 생성
       const newAccessToken = this.generateAccessToken(user);
       const newRefreshToken = this.generateRefreshToken(user);
 
-      // 리프레시 토큰 업데이트
+      // 새 리프레시 토큰 저장
       user.refreshToken = newRefreshToken;
       await user.save();
+
+      logger.info('Token refreshed for user:', { 
+        userId: user._id,
+        email: user.email 
+      });
 
       res.json({
         success: true,
         data: {
           accessToken: newAccessToken,
           refreshToken: newRefreshToken,
+          expiresIn: process.env.JWT_EXPIRES_IN || '7d'
         },
+        message: '토큰이 갱신되었습니다.'
       });
     } catch (error) {
-      if (error instanceof jwt.TokenExpiredError) {
-        next(new AppError('리프레시 토큰이 만료되었습니다.', 401));
-      } else {
-        next(error);
-      }
-    }
-  }
-
-  /**
-   * 토큰 검증
-   */
-  async verify(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const user = (req as any).user;
-
-      if (!user) {
-        throw new AppError('인증되지 않았습니다.', 401);
-      }
-
-      res.json({
-        success: true,
-        data: { valid: true },
-      });
-    } catch (error) {
+      logger.error('Token refresh error:', error);
       next(error);
     }
   }
@@ -262,15 +306,15 @@ export class AuthController {
   /**
    * 현재 사용자 정보 조회
    */
-  async getCurrentUser(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async me(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = (req as any).user?.id;
 
       if (!userId) {
-        throw new AppError('인증되지 않았습니다.', 401);
+        throw new AppError('인증이 필요합니다.', 401);
       }
 
-      const user = await User.findById(userId).select('-password -refreshToken');
+      const user = await User.findById(userId).select('-password -refreshToken -__v');
 
       if (!user) {
         throw new AppError('사용자를 찾을 수 없습니다.', 404);
@@ -281,6 +325,7 @@ export class AuthController {
         data: user,
       });
     } catch (error) {
+      logger.error('Get current user error:', error);
       next(error);
     }
   }
@@ -293,8 +338,16 @@ export class AuthController {
       const userId = (req as any).user?.id;
       const { currentPassword, newPassword } = req.body;
 
+      if (!currentPassword || !newPassword) {
+        throw new AppError('현재 비밀번호와 새 비밀번호를 입력해주세요.', 400);
+      }
+
+      if (newPassword.length < 6) {
+        throw new AppError('새 비밀번호는 최소 6자 이상이어야 합니다.', 400);
+      }
+
       const user = await User.findById(userId).select('+password');
-      
+
       if (!user) {
         throw new AppError('사용자를 찾을 수 없습니다.', 404);
       }
@@ -306,63 +359,22 @@ export class AuthController {
         throw new AppError('현재 비밀번호가 올바르지 않습니다.', 401);
       }
 
-      // 새 비밀번호 해시
+      // 새 비밀번호 해시 및 저장
       user.password = await bcrypt.hash(newPassword, 10);
       await user.save();
 
-      logger.info(`Password changed for user: ${user.email}`);
+      logger.info('Password changed for user:', { 
+        userId: user._id,
+        email: user.email 
+      });
 
       res.json({
         success: true,
-        message: '비밀번호가 변경되었습니다.',
+        message: '비밀번호가 변경되었습니다.'
       });
     } catch (error) {
+      logger.error('Change password error:', error);
       next(error);
     }
-  }
-
-  /**
-   * 액세스 토큰 생성
-   */
-  private generateAccessToken(user: any): string {
-    logger.debug('Generating access token:', { 
-      userId: user._id,
-      email: user.email,
-      jwtSecretExists: !!process.env.JWT_SECRET,
-      jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h'
-    });
-
-    return jwt.sign(
-      {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-      },
-      process.env.JWT_SECRET!,
-      {
-        expiresIn: process.env.JWT_EXPIRES_IN || '1h',
-      }
-    );
-  }
-
-  /**
-   * 리프레시 토큰 생성
-   */
-  private generateRefreshToken(user: any): string {
-    logger.debug('Generating refresh token:', { 
-      userId: user._id,
-      refreshSecretExists: !!process.env.JWT_REFRESH_SECRET,
-      refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d'
-    });
-
-    return jwt.sign(
-      {
-        id: user._id,
-      },
-      process.env.JWT_REFRESH_SECRET!,
-      {
-        expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
-      }
-    );
   }
 }

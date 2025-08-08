@@ -1,491 +1,560 @@
 // packages/backend/src/services/shopify/ShopifyGraphQLService.ts
-import { ShopifyService } from './ShopifyService';
+
+import axios from 'axios';
 import { logger } from '../../utils/logger';
+import { AppError } from '../../utils/errors';
 
-// Error class definition
-export class AppError extends Error {
-  public statusCode: number;
-  public isOperational: boolean;
-
-  constructor(message: string, statusCode: number = 500) {
-    super(message);
-    this.statusCode = statusCode;
-    this.isOperational = true;
-    Error.captureStackTrace(this, this.constructor);
-  }
-}
-
-// Type definitions
-interface ShopifyProductSimplified {
+export interface ShopifyProduct {
   id: string;
-  shopifyId?: string;
   title: string;
-  handle: string;
   vendor: string;
-  productType?: string;
-  status: string;
-  images: Array<{
-    url: string;
-    altText?: string;
-  }>;
-  variants: Array<{
-    id: string;
-    variantId?: string;
-    title: string;
-    sku: string;
-    price: string;
-    inventoryQuantity?: number;
-    barcode?: string;
-  }>;
+  productType: string;
   tags: string[];
-  createdAt: string;
-  updatedAt: string;
+  featuredImage?: {
+    url: string;
+  };
+  variants: {
+    edges: Array<{
+      node: ShopifyVariant;
+    }>;
+  };
 }
 
-export class ShopifyGraphQLService extends ShopifyService {
-  private defaultLocationId: string | null = null;
+export interface ShopifyVariant {
+  id: string;
+  title: string;
+  sku: string;
+  price: string;
+  compareAtPrice?: string;
+  inventoryQuantity: number;
+  image?: {
+    url: string;
+  };
+  product?: ShopifyProduct;
+}
+
+export class ShopifyGraphQLService {
+  private shopDomain: string;
+  private accessToken: string;
+  private apiVersion: string;
+  private endpoint: string;
+
+  constructor() {
+    this.shopDomain = process.env.SHOPIFY_SHOP_DOMAIN || '';
+    this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN || '';
+    this.apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01';
+    this.endpoint = `https://${this.shopDomain}/admin/api/${this.apiVersion}/graphql.json`;
+
+    if (!this.shopDomain || !this.accessToken) {
+      logger.error('Shopify configuration missing');
+      throw new AppError('Shopify configuration is incomplete', 500);
+    }
+  }
 
   /**
-   * Execute GraphQL query with proper error handling
+   * GraphQL 요청 헬퍼 메서드
    */
-  private async executeQuery<T = any>(query: string, variables: any = {}): Promise<T> {
+  private async makeGraphQLRequest(query: string, variables?: any): Promise<any> {
     try {
-      const client = await this.getGraphQLClient();
-      
-      logger.info('Executing GraphQL query', { 
-        query: query.substring(0, 100) + '...', 
-        variables 
-      });
+      const response = await axios.post(
+        this.endpoint,
+        {
+          query,
+          variables
+        },
+        {
+          headers: {
+            'X-Shopify-Access-Token': this.accessToken,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000
+        }
+      );
 
-      const response = await client.request(query, {
-        variables
-      });
+      if (response.data.errors) {
+        logger.error('GraphQL errors:', response.data.errors);
+        throw new Error(`GraphQL errors: ${JSON.stringify(response.data.errors)}`);
+      }
 
-      return response as T;
+      return response.data.data;
     } catch (error: any) {
-      // Handle error safely without instanceof check
-      const errorMessage = error?.message || 'Unknown GraphQL error';
-      const errorCode = error?.extensions?.code || 'UNKNOWN_ERROR';
+      logger.error('GraphQL request failed:', error);
       
-      logger.error('GraphQL query failed', {
-        error: errorMessage,
-        code: errorCode,
-        query: query.substring(0, 100) + '...',
-        variables
-      });
-
-      // Throw AppError
-      throw new AppError(`GraphQL Error: ${errorMessage}`, 400);
+      if (error.response?.status === 401) {
+        throw new AppError('Shopify authentication failed', 401);
+      }
+      
+      throw error;
     }
   }
 
   /**
-   * Get default location ID
+   * SKU로 Variant 검색
    */
-  private async getDefaultLocationId(): Promise<string> {
-    if (this.defaultLocationId) {
-      return this.defaultLocationId;
-    }
-
-    const query = `
-      query getLocations {
-        locations(first: 10) {
-          edges {
-            node {
-              id
-              name
-              isActive
-            }
-          }
-        }
-      }
-    `;
-
+  async findVariantBySku(sku: string): Promise<ShopifyVariant | null> {
     try {
-      const response = await this.executeQuery<any>(query);
-      const locations = response?.locations?.edges || [];
-      
-      // Find active location
-      const activeLocation = locations.find((edge: any) => edge.node.isActive);
-      if (activeLocation) {
-        this.defaultLocationId = activeLocation.node.id;
-        logger.info(`Default location set to: ${activeLocation.node.name} (${activeLocation.node.id})`);
-        return this.defaultLocationId;
-      }
-
-      // Use first location if no active location
-      if (locations.length > 0) {
-        this.defaultLocationId = locations[0].node.id;
-        logger.info(`Default location set to first location: ${locations[0].node.name}`);
-        return this.defaultLocationId;
-      }
-
-      // Return a default ID if no locations found
-      this.defaultLocationId = 'gid://shopify/Location/1';
-      return this.defaultLocationId;
-    } catch (error) {
-      logger.warn('Failed to get locations, using default', error);
-      this.defaultLocationId = 'gid://shopify/Location/1';
-      return this.defaultLocationId;
-    }
-  }
-
-  /**
-   * Get products by vendor with 2025-04 API
-   */
-  async getProductsByVendor(
-    vendor: string,
-    options: {
-      limit?: number;
-      includeInactive?: boolean;
-    } = {}
-  ): Promise<ShopifyProductSimplified[]> {
-    const { limit = 100, includeInactive = false } = options;
-    const products: ShopifyProductSimplified[] = [];
-    let hasNextPage = true;
-    let cursor: string | null = null;
-
-    // Updated query for 2025-04 API
-    const query = `
-      query GetProductsByVendor($query: String!, $first: Int!, $after: String) {
-        products(first: $first, after: $after, query: $query) {
-          edges {
-            node {
-              id
-              title
-              handle
-              vendor
-              productType
-              status
-              createdAt
-              updatedAt
-              tags
-              featuredImage {
-                url
-                altText
-              }
-              images(first: 10) {
-                edges {
-                  node {
-                    url
-                    altText
-                  }
-                }
-              }
-              variants(first: 100) {
-                edges {
-                  node {
-                    id
-                    title
-                    sku
-                    price
-                    barcode
-                    inventoryQuantity
-                    inventoryItem {
-                      id
-                    }
-                  }
-                }
-              }
-            }
-            cursor
-          }
-          pageInfo {
-            hasNextPage
-          }
-        }
-      }
-    `;
-
-    try {
-      while (hasNextPage && products.length < limit) {
-        const queryString = includeInactive 
-          ? `vendor:"${vendor}"`
-          : `vendor:"${vendor}" AND status:ACTIVE`;
-
-        const response = await this.executeQuery<any>(query, {
-          query: queryString,
-          first: Math.min(limit - products.length, 50),
-          after: cursor
-        });
-
-        const edges = response?.products?.edges || [];
-        
-        for (const edge of edges) {
-          const node = edge.node;
-          
-          // Transform to simplified format
-          const simplifiedProduct: ShopifyProductSimplified = {
-            id: node.id,
-            shopifyId: node.id.split('/').pop(),
-            title: node.title,
-            handle: node.handle,
-            vendor: node.vendor,
-            productType: node.productType,
-            status: node.status,
-            tags: node.tags || [],
-            createdAt: node.createdAt,
-            updatedAt: node.updatedAt,
-            images: [],
-            variants: []
-          };
-
-          // Add featured image if exists
-          if (node.featuredImage) {
-            simplifiedProduct.images.push({
-              url: node.featuredImage.url,
-              altText: node.featuredImage.altText
-            });
-          }
-
-          // Add other images
-          if (node.images?.edges) {
-            for (const imgEdge of node.images.edges) {
-              if (imgEdge.node.url !== node.featuredImage?.url) {
-                simplifiedProduct.images.push({
-                  url: imgEdge.node.url,
-                  altText: imgEdge.node.altText
-                });
-              }
-            }
-          }
-
-          // Add variants
-          if (node.variants?.edges) {
-            for (const varEdge of node.variants.edges) {
-              const variant = varEdge.node;
-              simplifiedProduct.variants.push({
-                id: variant.id,
-                variantId: variant.id.split('/').pop(),
-                title: variant.title || 'Default',
-                sku: variant.sku || '',
-                price: variant.price || '0',
-                inventoryQuantity: variant.inventoryQuantity || 0,
-                barcode: variant.barcode
-              });
-            }
-          }
-
-          products.push(simplifiedProduct);
-        }
-
-        hasNextPage = response?.products?.pageInfo?.hasNextPage || false;
-        cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
-      }
-
-      logger.info(`Found ${products.length} products for vendor: ${vendor}`);
-      return products;
-
-    } catch (error: any) {
-      logger.error('Failed to get products by vendor', {
-        vendor,
-        error: error.message || error
-      });
-      
-      // Return empty array instead of throwing to prevent UI crash
-      return [];
-    }
-  }
-
-  /**
-   * Search products with various filters
-   */
-  async searchProducts(params: {
-    search?: string;
-    vendor?: string;
-    productType?: string;
-    limit?: number;
-  }): Promise<ShopifyProductSimplified[]> {
-    const { search, vendor, productType, limit = 50 } = params;
-    
-    // Build query string
-    const queryParts: string[] = [];
-    if (search) queryParts.push(`title:*${search}* OR sku:*${search}*`);
-    if (vendor) queryParts.push(`vendor:"${vendor}"`);
-    if (productType) queryParts.push(`product_type:"${productType}"`);
-    
-    const queryString = queryParts.length > 0 
-      ? queryParts.join(' AND ')
-      : 'status:ACTIVE';
-
-    return this.getProductsByVendor(vendor || '', { 
-      limit,
-      includeInactive: false 
-    });
-  }
-
-  /**
-   * Get single product by ID
-   */
-  async getProductById(productId: string): Promise<ShopifyProductSimplified | null> {
-    const query = `
-      query GetProduct($id: ID!) {
-        product(id: $id) {
-          id
-          title
-          handle
-          vendor
-          productType
-          status
-          createdAt
-          updatedAt
-          tags
-          featuredImage {
-            url
-            altText
-          }
-          variants(first: 100) {
+      const query = `
+        query findVariantBySku($sku: String!) {
+          productVariants(first: 10, query: $sku) {
             edges {
               node {
                 id
                 title
                 sku
                 price
-                barcode
+                compareAtPrice
                 inventoryQuantity
+                image {
+                  url
+                }
+                product {
+                  id
+                  title
+                  vendor
+                  productType
+                  tags
+                  featuredImage {
+                    url
+                  }
+                }
               }
             }
           }
         }
-      }
-    `;
+      `;
 
-    try {
-      const response = await this.executeQuery<any>(query, { id: productId });
+      const response = await this.makeGraphQLRequest(query, { sku: `sku:${sku}` });
       
-      if (!response?.product) {
-        return null;
+      if (response.productVariants?.edges?.length > 0) {
+        // 정확한 SKU 매치 찾기
+        const exactMatch = response.productVariants.edges.find(
+          (edge: any) => edge.node.sku === sku
+        );
+        
+        if (exactMatch) {
+          return exactMatch.node;
+        }
+        
+        // 정확한 매치가 없으면 첫 번째 결과 반환
+        return response.productVariants.edges[0].node;
       }
 
-      const product = response.product;
+      return null;
+    } catch (error) {
+      logger.error(`Error finding variant by SKU ${sku}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 상품 검색 (쿼리 문자열 사용)
+   */
+  async searchProducts(searchQuery: string): Promise<any> {
+    try {
+      const query = `
+        query searchProducts($query: String!) {
+          products(first: 20, query: $query) {
+            edges {
+              node {
+                id
+                title
+                vendor
+                productType
+                tags
+                featuredImage {
+                  url
+                }
+                variants(first: 10) {
+                  edges {
+                    node {
+                      id
+                      title
+                      sku
+                      price
+                      compareAtPrice
+                      inventoryQuantity
+                      image {
+                        url
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await this.makeGraphQLRequest(query, { query: searchQuery });
+      return response.products;
+    } catch (error) {
+      logger.error('Error searching products:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 상품 목록 조회
+   */
+  async listProducts(options: {
+    limit?: number;
+    status?: string;
+    vendor?: string;
+  } = {}): Promise<any> {
+    try {
+      let queryString = '';
+      
+      if (options.status) {
+        queryString += `status:${options.status} `;
+      }
+      
+      if (options.vendor) {
+        queryString += `vendor:"${options.vendor}" `;
+      }
+
+      const query = `
+        query listProducts($first: Int!, $query: String) {
+          products(first: $first, query: $query) {
+            edges {
+              node {
+                id
+                title
+                vendor
+                productType
+                tags
+                variants(first: 10) {
+                  edges {
+                    node {
+                      id
+                      sku
+                      price
+                      inventoryQuantity
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const variables: any = {
+        first: options.limit || 100
+      };
+
+      if (queryString) {
+        variables.query = queryString.trim();
+      }
+
+      const response = await this.makeGraphQLRequest(query, variables);
       
       return {
-        id: product.id,
-        shopifyId: product.id.split('/').pop(),
-        title: product.title,
-        handle: product.handle,
-        vendor: product.vendor,
-        productType: product.productType,
-        status: product.status,
-        tags: product.tags || [],
-        createdAt: product.createdAt,
-        updatedAt: product.updatedAt,
-        images: product.featuredImage ? [{
-          url: product.featuredImage.url,
-          altText: product.featuredImage.altText
-        }] : [],
-        variants: product.variants.edges.map((edge: any) => ({
-          id: edge.node.id,
-          variantId: edge.node.id.split('/').pop(),
-          title: edge.node.title || 'Default',
-          sku: edge.node.sku || '',
-          price: edge.node.price || '0',
-          inventoryQuantity: edge.node.inventoryQuantity || 0,
-          barcode: edge.node.barcode
-        }))
+        products: response.products?.edges?.map((edge: any) => edge.node) || []
       };
     } catch (error) {
-      logger.error('Failed to get product by ID', { productId, error });
+      logger.error('Error listing products:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 벤더별 상품 조회
+   */
+  async getProductsByVendor(vendor: string): Promise<ShopifyProduct[]> {
+    try {
+      const query = `
+        query getProductsByVendor($vendor: String!) {
+          products(first: 100, query: $vendor) {
+            edges {
+              node {
+                id
+                title
+                vendor
+                productType
+                tags
+                featuredImage {
+                  url
+                }
+                variants(first: 10) {
+                  edges {
+                    node {
+                      id
+                      title
+                      sku
+                      price
+                      inventoryQuantity
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await this.makeGraphQLRequest(query, { vendor: `vendor:"${vendor}"` });
+      return response.products?.edges?.map((edge: any) => edge.node) || [];
+    } catch (error) {
+      logger.error(`Error getting products by vendor ${vendor}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 재고 수량 조정
+   */
+  async adjustInventoryQuantity(
+    inventoryItemId: string,
+    locationId: string,
+    delta: number,
+    reason?: string
+  ): Promise<boolean> {
+    try {
+      const mutation = `
+        mutation inventoryAdjustQuantity($input: InventoryAdjustQuantityInput!) {
+          inventoryAdjustQuantity(input: $input) {
+            inventoryLevel {
+              id
+              available
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          inventoryItemId,
+          locationId,
+          delta,
+          reason: reason || 'Manual adjustment'
+        }
+      };
+
+      const response = await this.makeGraphQLRequest(mutation, variables);
+      
+      if (response.inventoryAdjustQuantity?.userErrors?.length > 0) {
+        const errors = response.inventoryAdjustQuantity.userErrors;
+        throw new Error(`Inventory adjustment failed: ${JSON.stringify(errors)}`);
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error adjusting inventory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 상품 가격 업데이트
+   */
+  async updateProductPrice(variantId: string, price: string): Promise<boolean> {
+    try {
+      const mutation = `
+        mutation productVariantUpdate($input: ProductVariantInput!) {
+          productVariantUpdate(input: $input) {
+            productVariant {
+              id
+              price
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: variantId,
+          price
+        }
+      };
+
+      const response = await this.makeGraphQLRequest(mutation, variables);
+      
+      if (response.productVariantUpdate?.userErrors?.length > 0) {
+        const errors = response.productVariantUpdate.userErrors;
+        throw new Error(`Price update failed: ${JSON.stringify(errors)}`);
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error updating product price:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 상품 ID로 상세 정보 조회
+   */
+  async getProductById(productId: string): Promise<ShopifyProduct | null> {
+    try {
+      const query = `
+        query getProduct($id: ID!) {
+          product(id: $id) {
+            id
+            title
+            vendor
+            productType
+            tags
+            featuredImage {
+              url
+            }
+            variants(first: 100) {
+              edges {
+                node {
+                  id
+                  title
+                  sku
+                  price
+                  compareAtPrice
+                  inventoryQuantity
+                  image {
+                    url
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await this.makeGraphQLRequest(query, { id: productId });
+      return response.product;
+    } catch (error) {
+      logger.error(`Error getting product ${productId}:`, error);
       return null;
     }
   }
 
   /**
-   * Update product price
+   * Variant ID로 상세 정보 조회
    */
-  async updateProductPrice(variantId: string, price: number): Promise<boolean> {
-    const mutation = `
-      mutation UpdateVariantPrice($input: ProductVariantInput!) {
-        productVariantUpdate(input: $input) {
-          productVariant {
-            id
-            price
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-    `;
-
+  async getVariantById(variantId: string): Promise<ShopifyVariant | null> {
     try {
-      const response = await this.executeQuery<any>(mutation, {
-        input: {
-          id: variantId,
-          price: price.toString()
+      const query = `
+        query getVariant($id: ID!) {
+          productVariant(id: $id) {
+            id
+            title
+            sku
+            price
+            compareAtPrice
+            inventoryQuantity
+            image {
+              url
+            }
+            product {
+              id
+              title
+              vendor
+              productType
+              tags
+            }
+          }
         }
-      });
+      `;
 
-      if (response?.productVariantUpdate?.userErrors?.length > 0) {
-        const errors = response.productVariantUpdate.userErrors;
-        logger.error('Failed to update variant price', { variantId, errors });
-        return false;
-      }
-
-      logger.info(`Updated price for variant ${variantId} to ${price}`);
-      return true;
+      const response = await this.makeGraphQLRequest(query, { id: variantId });
+      return response.productVariant;
     } catch (error) {
-      logger.error('Failed to update product price', { variantId, price, error });
-      return false;
+      logger.error(`Error getting variant ${variantId}:`, error);
+      return null;
     }
   }
 
   /**
-   * Adjust inventory quantity
+   * 재고 레벨 조회
    */
-  async adjustInventoryQuantity(
-    inventoryItemId: string,
-    locationId: string,
-    quantity: number
-  ): Promise<boolean> {
-    const mutation = `
-      mutation AdjustInventory($input: InventoryAdjustQuantitiesInput!) {
-        inventoryAdjustQuantities(input: $input) {
-          inventoryAdjustmentGroup {
-            id
-            reason
-            changes {
-              name
-              delta
+  async getInventoryLevel(inventoryItemId: string, locationId: string): Promise<number> {
+    try {
+      const query = `
+        query getInventoryLevel($inventoryItemId: ID!, $locationId: ID!) {
+          inventoryItem(id: $inventoryItemId) {
+            inventoryLevel(locationId: $locationId) {
+              available
             }
           }
-          userErrors {
-            field
-            message
+        }
+      `;
+
+      const response = await this.makeGraphQLRequest(query, {
+        inventoryItemId,
+        locationId
+      });
+
+      return response.inventoryItem?.inventoryLevel?.available || 0;
+    } catch (error) {
+      logger.error('Error getting inventory level:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 대량 작업 생성
+   */
+  async createBulkOperation(mutation: string): Promise<string> {
+    try {
+      const bulkMutation = `
+        mutation {
+          bulkOperationRunMutation(
+            mutation: "${mutation.replace(/"/g, '\\"')}"
+          ) {
+            bulkOperation {
+              id
+              status
+            }
+            userErrors {
+              field
+              message
+            }
           }
         }
-      }
-    `;
+      `;
 
-    try {
-      const response = await this.executeQuery<any>(mutation, {
-        input: {
-          reason: "correction",
-          name: "available",
-          changes: [{
-            inventoryItemId,
-            locationId: locationId || await this.getDefaultLocationId(),
-            delta: quantity
-          }]
-        }
-      });
-
-      if (response?.inventoryAdjustQuantities?.userErrors?.length > 0) {
-        const errors = response.inventoryAdjustQuantities.userErrors;
-        logger.error('Failed to adjust inventory', { inventoryItemId, errors });
-        return false;
+      const response = await this.makeGraphQLRequest(bulkMutation);
+      
+      if (response.bulkOperationRunMutation?.userErrors?.length > 0) {
+        const errors = response.bulkOperationRunMutation.userErrors;
+        throw new Error(`Bulk operation failed: ${JSON.stringify(errors)}`);
       }
 
-      logger.info(`Adjusted inventory for ${inventoryItemId} by ${quantity}`);
-      return true;
+      return response.bulkOperationRunMutation?.bulkOperation?.id;
     } catch (error) {
-      logger.error('Failed to adjust inventory quantity', { 
-        inventoryItemId, 
-        quantity, 
-        error 
-      });
-      return false;
+      logger.error('Error creating bulk operation:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 대량 작업 상태 확인
+   */
+  async getBulkOperationStatus(operationId: string): Promise<any> {
+    try {
+      const query = `
+        query getBulkOperation($id: ID!) {
+          node(id: $id) {
+            ... on BulkOperation {
+              id
+              status
+              errorCode
+              createdAt
+              completedAt
+            }
+          }
+        }
+      `;
+
+      const response = await this.makeGraphQLRequest(query, { id: operationId });
+      return response.node;
+    } catch (error) {
+      logger.error('Error getting bulk operation status:', error);
+      throw error;
     }
   }
 }

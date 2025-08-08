@@ -1,41 +1,76 @@
 // packages/backend/src/routes/index.ts
 import { Router } from 'express';
-import { authMiddleware } from '../middlewares';
+import authRoutes from './auth.routes';
 
-// 라우터 설정을 함수로만 export
 export function setupRoutes(): Router {
   const router = Router();
 
-  // Health check routes (no auth required)
-  const healthRoutes = require('./health.routes').default;
-  router.use('/health', healthRoutes);
+  // Health check routes (인증 불필요)
+  try {
+    const healthRoutes = require('./health.routes').default;
+    router.use('/health', healthRoutes);
+  } catch (error) {
+    console.log('Health routes not found, skipping...');
+  }
 
-  // Webhook routes (special auth)
-  const webhookRoutes = require('./webhook.routes').default;
-  router.use('/webhooks', webhookRoutes);
+  // Auth routes (인증 불필요) - 가장 먼저 등록!
+  router.use('/auth', authRoutes);
+  console.log('✅ Auth routes registered at /auth');
 
-  // API routes - 함수 호출로 변경
-  const { setupApiRoutes } = require('./api.routes');
-  const apiRouter = setupApiRoutes();
+  // Webhook routes (특별 인증)
+  try {
+    const webhookRoutes = require('./webhook.routes').default;
+    router.use('/webhooks', webhookRoutes);
+  } catch (error) {
+    console.log('Webhook routes not found, skipping...');
+  }
+
+  // API routes - 다른 라우트들
+  try {
+    const { setupApiRoutes } = require('./api.routes');
+    const apiRouter = setupApiRoutes();
+    router.use('/', apiRouter);
+  } catch (error) {
+    console.log('API routes error:', error.message);
+  }
 
   // Dashboard routes
-  const { setupDashboardRoutes } = require('./dashboard.routes');
-  router.use('/dashboard', setupDashboardRoutes());
+  try {
+    const { setupDashboardRoutes } = require('./dashboard.routes');
+    const dashboardRouter = setupDashboardRoutes();
+    router.use('/dashboard', dashboardRouter);
+  } catch (error) {
+    console.log('Dashboard routes not found, skipping...');
+  }
 
   // Settings routes
-  const { setupSettingsRoutes } = require('./settings.routes');
-  router.use('/settings', setupSettingsRoutes());
+  try {
+    const { setupSettingsRoutes } = require('./settings.routes');
+    const settingsRouter = setupSettingsRoutes();
+    router.use('/settings', settingsRouter);
+  } catch (error) {
+    console.log('Settings routes not found, skipping...');
+  }
 
   // Price sync routes
-  const setupPriceSyncRoutes = require('./priceSync.routes').default;
-  router.use('/price-sync', setupPriceSyncRoutes());
+  try {
+    const setupPriceSyncRoutes = require('./priceSync.routes').default;
+    if (typeof setupPriceSyncRoutes === 'function') {
+      router.use('/price-sync', setupPriceSyncRoutes());
+    }
+  } catch (error) {
+    console.log('Price sync routes not found, skipping...');
+  }
 
   // Exchange rate routes
-  const setupExchangeRateRoutes = require('./exchangeRate.routes').default;
-  router.use('/exchange-rate', setupExchangeRateRoutes());
-
-  // Main API routes
-  router.use('/', apiRouter);
+  try {
+    const setupExchangeRateRoutes = require('./exchangeRate.routes').default;
+    if (typeof setupExchangeRateRoutes === 'function') {
+      router.use('/exchange-rate', setupExchangeRateRoutes());
+    }
+  } catch (error) {
+    console.log('Exchange rate routes not found, skipping...');
+  }
 
   return router;
 }

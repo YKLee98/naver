@@ -1,4 +1,221 @@
-// API 응답 타입
+// packages/frontend/src/types/index.ts
+
+// 사용자 관련
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'manager' | 'viewer';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// 상품 매핑
+export interface ProductMapping {
+  _id?: string;
+  sku: string;
+  naverProductId: string;
+  shopifyProductId: string;
+  shopifyVariantId?: string;
+  productName?: string;
+  vendor?: string;
+  priceMargin: number;
+  isActive: boolean;
+  status?: 'ACTIVE' | 'INACTIVE' | 'ERROR' | 'WARNING';
+  syncStatus?: string;
+  lastSyncAt?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// 네이버 상품
+export interface NaverProduct {
+  id: string;
+  productNo?: string;
+  name: string;
+  sellerManagementCode?: string;
+  sellerProductTag?: string;
+  salePrice: number;
+  stockQuantity: number;
+  statusType?: 'SALE' | 'SUSPENSION' | 'OUTOFSTOCK';
+  status?: string;
+  representativeImage?: {
+    url: string;
+  };
+  imageUrl?: string;
+  options?: NaverProductOption[];
+}
+
+export interface NaverProductOption {
+  id: string;
+  name: string;
+  value: string;
+  price: number;
+  stockQuantity: number;
+}
+
+// Shopify 상품
+export interface ShopifyProduct {
+  id: string;
+  title: string;
+  vendor: string;
+  productType: string;
+  tags: string[];
+  featuredImage?: {
+    url: string;
+  };
+  variants: ShopifyVariant[];
+}
+
+export interface ShopifyVariant {
+  id: string;
+  title: string;
+  sku: string;
+  price: string;
+  compareAtPrice?: string;
+  inventoryQuantity: number;
+  inventoryItemId?: string;
+  image?: {
+    url: string;
+  };
+}
+
+// 재고 관련
+export interface InventoryStatus {
+  sku: string;
+  naverStock: number;
+  shopifyStock: number;
+  difference: number;
+  status: 'SYNCED' | 'OUT_OF_SYNC' | 'ERROR';
+  lastSyncAt?: Date;
+}
+
+export interface InventoryTransaction {
+  id: string;
+  sku: string;
+  platform: 'naver' | 'shopify';
+  type: 'sale' | 'adjustment' | 'return' | 'restock';
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  orderId?: string;
+  reason?: string;
+  createdAt: Date;
+}
+
+export interface InventoryAdjustment {
+  sku: string;
+  platform: 'naver' | 'shopify' | 'both';
+  quantity: number;
+  reason: string;
+}
+
+// 가격 관련
+export interface PriceInfo {
+  sku: string;
+  naverPrice: number;
+  shopifyPrice: number;
+  exchangeRate: number;
+  margin: number;
+  calculatedPrice: number;
+  difference: number;
+  status: 'SYNCED' | 'OUT_OF_SYNC' | 'ERROR';
+}
+
+export interface PriceHistory {
+  id: string;
+  sku: string;
+  platform: 'naver' | 'shopify';
+  oldPrice: number;
+  newPrice: number;
+  exchangeRate?: number;
+  reason?: string;
+  createdAt: Date;
+}
+
+// 동기화 관련
+export interface SyncJob {
+  id: string;
+  type: 'FULL' | 'INVENTORY' | 'PRICE' | 'SINGLE_SKU';
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  totalItems: number;
+  processedItems: number;
+  successCount: number;
+  failureCount: number;
+  errors?: SyncError[];
+  startedAt?: Date;
+  completedAt?: Date;
+  duration?: number;
+}
+
+export interface SyncError {
+  sku: string;
+  error: string;
+  timestamp: Date;
+}
+
+export interface SyncSettings {
+  autoSync: boolean;
+  syncInterval: number; // 분 단위
+  syncInventory: boolean;
+  syncPrice: boolean;
+  priceMargin: number;
+  exchangeRateMode: 'AUTO' | 'MANUAL';
+  manualExchangeRate?: number;
+}
+
+export interface SyncHistory {
+  id: string;
+  type: string;
+  status: string;
+  details?: any;
+  createdAt: Date;
+}
+
+// 대시보드 관련
+export interface DashboardStatistics {
+  totalMappings: number;
+  activeMappings: number;
+  totalProducts: number;
+  inventorySyncStatus: {
+    synced: number;
+    outOfSync: number;
+    error: number;
+  };
+  priceSyncStatus: {
+    synced: number;
+    outOfSync: number;
+    error: number;
+  };
+  lastSyncTime?: Date;
+  todaySales?: number;
+  monthSales?: number;
+}
+
+export interface Activity {
+  id: string;
+  type: 'SYNC' | 'MAPPING' | 'INVENTORY' | 'PRICE' | 'ERROR';
+  action: string;
+  details?: string;
+  user?: string;
+  status: 'SUCCESS' | 'FAILURE' | 'WARNING';
+  timestamp: Date;
+}
+
+// 환율 관련
+export interface ExchangeRate {
+  id?: string;
+  rate: number;
+  source: 'AUTO' | 'MANUAL';
+  baseCurrency: string;
+  targetCurrency: string;
+  validFrom: Date;
+  validTo?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// API 응답
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -7,7 +224,7 @@ export interface ApiResponse<T> {
 }
 
 export interface PaginatedResponse<T> {
-  data: T[];
+  items: T[];
   pagination: {
     page: number;
     limit: number;
@@ -16,183 +233,54 @@ export interface PaginatedResponse<T> {
   };
 }
 
-// 상품 매핑 타입
-export interface ProductMapping {
-  _id: string;
-  sku: string;
-  naverProductId: string;
-  shopifyProductId: string;
-  shopifyVariantId: string;
-  shopifyInventoryItemId: string;
-  shopifyLocationId: string;
-  productName: string;
-  vendor: string;
-  isActive: boolean;
-  status: 'ACTIVE' | 'INACTIVE' | 'ERROR';
-  lastSyncedAt: string | null;
-  syncStatus: 'synced' | 'pending' | 'error';
-  syncError?: string;
-  priceMargin: number;
-  metadata?: {
-    naverCategory?: string;
-    shopifyTags?: string[];
-    customFields?: Record<string, any>;
-  };
-  createdAt: string;
-  updatedAt: string;
+// 파일 업로드
+export interface FileUploadResult {
+  total: number;
+  success: number;
+  failed: number;
+  errors?: Array<{
+    row: number;
+    error: string;
+  }>;
 }
 
-// 재고 트랜잭션 타입
-export interface InventoryTransaction {
-  _id: string;
-  sku: string;
-  platform: 'naver' | 'shopify' | 'manual';
-  transactionType: 'sale' | 'restock' | 'adjustment' | 'sync';
-  quantity: number;
-  previousQuantity: number;
-  newQuantity: number;
-  orderId?: string;
-  orderLineItemId?: string;
-  reason?: string;
-  performedBy: 'system' | 'manual' | 'webhook';
-  syncStatus: 'pending' | 'completed' | 'failed';
-  syncedAt?: string;
-  errorMessage?: string;
-  metadata?: Record<string, any>;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// 가격 이력 타입
-export interface PriceHistory {
-  _id: string;
-  sku: string;
-  naverPrice: number;
-  exchangeRate: number;
-  calculatedShopifyPrice: number;
-  finalShopifyPrice: number;
-  priceMargin: number;
-  currency: string;
-  syncStatus: 'pending' | 'completed' | 'failed';
-  syncedAt?: string;
-  errorMessage?: string;
-  metadata?: {
-    manualOverride?: boolean;
-    overrideReason?: string;
-    originalPrice?: number;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-// 환율 타입
-export interface ExchangeRate {
-  _id: string;
-  baseCurrency: string;
-  targetCurrency: string;
-  rate: number;
-  source: string;
-  isManual: boolean;
-  validFrom: string;
-  validUntil: string;
-  metadata?: {
-    apiResponse?: Record<string, any>;
-    manualReason?: string;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-// 대시보드 통계 타입
-export interface DashboardStats {
-  mappings: {
-    total: number;
-    active: number;
-    pending: number;
-    failed: number;
-  };
-  transactions: {
-    today: number;
-    week: number;
-  };
-  orders: {
-    today: number;
-    week: number;
-  };
-}
-
-// 동기화 상태 타입
-export interface SyncStatus {
-  isRunning: boolean;
-  lastSync: string | null;
-  statistics: {
-    totalMappings: number;
-    syncedMappings: number;
-    pendingMappings: number;
-    errorMappings: number;
-  };
-}
-
-// 동기화 설정 타입
-export interface SyncSettings {
-  syncInterval: string;
-  autoSync: boolean;
-  priceMargin: string;
-  lastSync: string | null;
-}
-
-// WebSocket 이벤트 타입
-export interface InventoryUpdateEvent {
-  sku: string;
-  quantity: number;
-  platform: string;
-  transactionType: string;
-  reason?: string;
-  timestamp: string;
-}
-
-export interface PriceUpdateEvent {
-  sku: string;
-  naverPrice: number;
-  shopifyPrice: number;
-  exchangeRate: number;
-  margin: number;
-  timestamp: string;
-}
-
-export interface ExchangeRateUpdateEvent {
-  baseCurrency: string;
-  targetCurrency: string;
-  rate: number;
-  timestamp: string;
-}
-
-// 검색/필터 타입
-export interface ProductFilter {
+// 필터 및 정렬
+export interface FilterOptions {
   search?: string;
-  vendor?: string;
+  status?: string;
   isActive?: boolean;
-  syncStatus?: 'synced' | 'pending' | 'error';
+  vendor?: string;
+  startDate?: Date;
+  endDate?: Date;
 }
 
-export interface DateRange {
-  startDate: string;
-  endDate: string;
+export interface SortOptions {
+  field: string;
+  order: 'asc' | 'desc';
 }
 
-// 사용자 타입
-export interface User {
-  id: string;
-  email: string;
-  role: string;
-}
-
-// 알림 타입
+// 알림
 export interface Notification {
   id: string;
-  type: 'info' | 'success' | 'warning' | 'error';
+  type: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
   title: string;
   message: string;
-  timestamp: string;
   read: boolean;
+  createdAt: Date;
+}
+
+// 설정
+export interface AppSettings {
+  theme: 'light' | 'dark';
+  language: 'ko' | 'en';
+  notifications: {
+    email: boolean;
+    push: boolean;
+    inApp: boolean;
+  };
+  display: {
+    itemsPerPage: number;
+    dateFormat: string;
+    currencyFormat: string;
+  };
 }

@@ -1,64 +1,102 @@
 // packages/backend/src/config/database.ts
+
 import mongoose from 'mongoose';
 import { logger } from '../utils/logger';
 
-export async function connectDatabase(): Promise<void> {
-  const uri = process.env['MONGODB_URI'];
-  
-  if (!uri) {
-    throw new Error('MONGODB_URI environment variable is not defined');
-  }
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hallyu-fomaholic';
+const isDevelopment = process.env.NODE_ENV === 'development';
 
-  const options: mongoose.ConnectOptions = {
-    // 연결 풀 설정
-    maxPoolSize: 10,
-    minPoolSize: 5,
-    // 타임아웃 설정
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-    // 재시도 설정
-    retryWrites: true,
-    retryReads: true,
-  };
+// MongoDB connection options
+const mongoOptions: mongoose.ConnectOptions = {
+  maxPoolSize: 10,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+};
 
+/**
+ * Connect to MongoDB
+ */
+export async function connectDB(): Promise<void> {
   try {
-    await mongoose.connect(uri, options);
+    // Set mongoose options
+    mongoose.set('strictQuery', false);
     
-    logger.info('MongoDB connected successfully');
+    if (isDevelopment) {
+      mongoose.set('debug', false); // Set to true if you want to see queries
+    }
 
-    // 연결 이벤트 리스너
-    mongoose.connection.on('error', (error) => {
-      logger.error('MongoDB connection error:', error);
+    // Event listeners
+    mongoose.connection.on('connected', () => {
+      logger.info('MongoDB connected successfully');
+    });
+
+    mongoose.connection.on('error', (err) => {
+      logger.error('MongoDB connection error:', err);
     });
 
     mongoose.connection.on('disconnected', () => {
       logger.warn('MongoDB disconnected');
     });
 
-    mongoose.connection.on('reconnected', () => {
-      logger.info('MongoDB reconnected');
-    });
-
-    // Graceful shutdown
-    process.on('SIGINT', async () => {
-      await mongoose.connection.close();
-      logger.info('MongoDB connection closed through app termination');
-      process.exit(0);
-    });
-
+    // Connect to MongoDB
+    await mongoose.connect(MONGODB_URI, mongoOptions);
+    
+    logger.info(`MongoDB connected to ${MONGODB_URI}`);
   } catch (error) {
     logger.error('MongoDB connection failed:', error);
+    
+    // In development, continue without database
+    if (isDevelopment) {
+      logger.warn('Running without database connection in development mode');
+    } else {
+      throw error;
+    }
+  }
+}
+
+/**
+ * Disconnect from MongoDB
+ */
+export async function disconnectDB(): Promise<void> {
+  try {
+    await mongoose.connection.close();
+    logger.info('MongoDB connection closed');
+  } catch (error) {
+    logger.error('Error closing MongoDB connection:', error);
     throw error;
   }
 }
 
-// 연결 상태 확인 헬퍼
-export function isDatabaseConnected(): boolean {
+/**
+ * Check if MongoDB is connected
+ */
+export function isDBConnected(): boolean {
   return mongoose.connection.readyState === 1;
 }
 
-// 데이터베이스 연결 닫기
-export async function disconnectDatabase(): Promise<void> {
-  await mongoose.connection.close();
-  logger.info('MongoDB connection closed');
+/**
+ * Get MongoDB connection status
+ */
+export function getDBStatus(): string {
+  const states = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting',
+  };
+  return states[mongoose.connection.readyState] || 'unknown';
 }
+
+// Handle process termination
+process.on('SIGINT', async () => {
+  await disconnectDB();
+  process.exit(0);
+});
+
+// Export as default as well for compatibility
+export default {
+  connectDB,
+  disconnectDB,
+  isDBConnected,
+  getDBStatus,
+};

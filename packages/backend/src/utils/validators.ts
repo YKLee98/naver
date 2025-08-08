@@ -1,19 +1,7 @@
 // packages/backend/src/utils/validators.ts
 
-/**
- * SKU 유효성 검사
- */
-export const validateSKU = (sku: string): boolean => {
-  if (!sku || typeof sku !== 'string') return false;
-  
-  // SKU 패턴: 영문(대소문자), 숫자, 하이픈(-), 언더바(_)만 허용
-  // 3-50자 길이 제한
-  const skuPattern = /^[A-Z0-9_-]{3,50}$/i;
-  return skuPattern.test(sku);
-};
 
-/**
- * 상품 ID 유효성 검사
+ /* 상품 ID 유효성 검사
  */
 export const validateProductId = (id: string, platform: 'naver' | 'shopify'): boolean => {
   if (!id || typeof id !== 'string') return false;
