@@ -1,8 +1,8 @@
-// ===== 3. packages/backend/src/controllers/PriceController.ts =====
+// packages/backend/src/controllers/PriceController.ts
 import { Request, Response, NextFunction } from 'express';
 import { PriceHistory, ExchangeRate, ProductMapping } from '../models';
 import { asyncHandler } from '../utils/asyncHandler';
-import { AppError } from '../utils/errors';
+import { AppError } from '../middlewares/error.middleware';
 import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 

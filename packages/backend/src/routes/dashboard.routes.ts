@@ -13,18 +13,14 @@ export function setupDashboardRoutes(): Router {
   // 인증 미들웨어 적용
   router.use(authMiddleware);
 
-  // 대시보드 통계 - 메서드 이름 수정됨
-  router.get('/statistics', dashboardController.getStats);
-
-  // 최근 활동 - 메서드 이름 수정됨
-  router.get('/activities', dashboardController.getRecentActivity);
-
-  // 차트 데이터 - 메서드 이름 수정됨
-  router.get('/charts/price', dashboardController.getSalesChartData);
+  // ✅ 수정된 라우트 - 메서드 이름을 올바르게 매핑
+  router.get('/statistics', dashboardController.getStatistics);
+  router.get('/activities', dashboardController.getRecentActivities);
+  router.get('/charts/price', dashboardController.getPriceChartData);
   router.get('/charts/inventory', dashboardController.getInventoryChartData);
 
   return router;
 }
 
-// 기본 export도 제공 (임시)
+// 기본 export도 제공
 export default setupDashboardRoutes();

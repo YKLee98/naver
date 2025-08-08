@@ -4,15 +4,6 @@ import { ProductMapping, InventoryTransaction, Activity } from '../models';
 import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 
-// Extended Request type with user
-interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-  };
-}
-
 interface DashboardStats {
   totalProducts: number;
   activeProducts: number;
@@ -39,16 +30,12 @@ interface ChartDataQuery {
   endDate?: string;
 }
 
-interface NotificationQuery {
-  unreadOnly?: string;
-  limit?: string;
-}
-
 export class DashboardController {
   /**
    * 대시보드 통계 조회
+   * ✅ 메서드 이름 변경: getStats → getStatistics
    */
-  getStats = async (
+  getStatistics = async (
     _req: Request,
     res: Response,
     next: NextFunction
@@ -78,7 +65,7 @@ export class DashboardController {
           .lean(),
       ]);
 
-      // 재고 상태 계산 - 최신 트랜잭션 기반
+      // 재고 상태 계산
       const inventoryAggregation = await InventoryTransaction.aggregate([
         {
           $sort: { sku: 1, createdAt: -1 }
@@ -156,22 +143,23 @@ export class DashboardController {
         data: stats,
       });
     } catch (error) {
-      logger.error('Error in getStats:', error);
+      logger.error('Error in getStatistics:', error);
       next(error);
     }
   };
 
   /**
    * 최근 활동 조회
+   * ✅ 메서드 이름 변경: getRecentActivity → getRecentActivities
    */
-  getRecentActivity = async (
+  getRecentActivities = async (
     req: Request<{}, {}, {}, { limit?: string }>,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
       const { limit = '10' } = req.query;
-      const limitNum = Math.min(parseInt(limit), 100); // 최대 100개
+      const limitNum = Math.min(parseInt(limit), 100);
 
       const activities = await Activity.find()
         .sort({ createdAt: -1 })
@@ -180,25 +168,28 @@ export class DashboardController {
 
       res.json({
         success: true,
-        data: activities,
-        total: activities.length,
+        data: {
+          activities,
+          total: activities.length,
+        }
       });
     } catch (error) {
-      logger.error('Error in getRecentActivity:', error);
+      logger.error('Error in getRecentActivities:', error);
       next(error);
     }
   };
 
   /**
-   * 판매 차트 데이터 조회
+   * 가격 차트 데이터 조회
+   * ✅ 메서드 이름 변경: getSalesChartData → getPriceChartData
    */
-  getSalesChartData = async (
+  getPriceChartData = async (
     req: Request<{}, {}, {}, ChartDataQuery>,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { period = 'week', startDate, endDate } = req.query;
+      const { period = 'day', startDate, endDate } = req.query;
 
       const dateFilter = this.getDateFilter(period, startDate, endDate);
 
@@ -236,6 +227,15 @@ export class DashboardController {
             totalQuantity: { $sum: '$quantity' },
           },
         },
+        {
+          $project: {
+            _id: 0,
+            date: '$_id',
+            platforms: 1,
+            totalCount: 1,
+            totalQuantity: 1,
+          },
+        },
       ]);
 
       res.json({
@@ -243,30 +243,33 @@ export class DashboardController {
         data: salesData,
       });
     } catch (error) {
-      logger.error('Error in getSalesChartData:', error);
+      logger.error('Error in getPriceChartData:', error);
       next(error);
     }
   };
 
   /**
    * 재고 차트 데이터 조회
+   * ✅ 메서드 이름 유지
    */
   getInventoryChartData = async (
-    _req: Request,
+    req: Request<{}, {}, {}, { groupBy?: string }>,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
+      const { groupBy = 'status' } = req.query;
+
       const inventoryData = await InventoryTransaction.aggregate([
         {
-          $sort: { sku: 1, createdAt: -1 },
+          $sort: { sku: 1, createdAt: -1 }
         },
         {
           $group: {
             _id: '$sku',
             latestQuantity: { $first: '$newQuantity' },
             platform: { $first: '$platform' },
-          },
+          }
         },
         {
           $facet: {
@@ -281,12 +284,13 @@ export class DashboardController {
                         $cond: [
                           { $lte: ['$latestQuantity', 10] },
                           'lowStock',
-                          'inStock',
-                        ],
-                      },
-                    ],
+                          'inStock'
+                        ]
+                      }
+                    ]
                   },
                   count: { $sum: 1 },
+                  totalQuantity: { $sum: '$latestQuantity' },
                 },
               },
             ],
@@ -327,244 +331,35 @@ export class DashboardController {
   };
 
   /**
-   * 동기화 차트 데이터 조회
-   */
-  getSyncChartData = async (
-    req: Request<{}, {}, {}, ChartDataQuery>,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const { period = 'week' } = req.query;
-
-      const dateFilter = this.getDateFilter(period);
-
-      const syncData = await Activity.aggregate([
-        {
-          $match: {
-            type: 'sync',
-            ...dateFilter,
-          },
-        },
-        {
-          $group: {
-            _id: {
-              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-              action: '$action',
-            },
-            count: { $sum: 1 },
-          },
-        },
-        {
-          $group: {
-            _id: '$_id.date',
-            actions: {
-              $push: {
-                action: '$_id.action',
-                count: '$count',
-              },
-            },
-            totalCount: { $sum: '$count' },
-          },
-        },
-        {
-          $sort: { _id: 1 },
-        },
-      ]);
-
-      res.json({
-        success: true,
-        data: syncData,
-      });
-    } catch (error) {
-      logger.error('Error in getSyncChartData:', error);
-      next(error);
-    }
-  };
-
-  /**
-   * 알림 조회
-   */
-  getNotifications = async (
-    req: Request<{}, {}, {}, NotificationQuery>,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const { unreadOnly = 'false', limit = '20' } = req.query;
-      const redis = getRedisClient();
-      const userId = (req as AuthenticatedRequest).user?.id || 'system';
-
-      // Redis에서 알림 조회
-      const notificationsKey = `notifications:${userId}`;
-      const notifications = await redis.lrange(notificationsKey, 0, parseInt(limit) - 1);
-
-      const parsedNotifications = notifications.map((n: string) => {
-        try {
-          return JSON.parse(n);
-        } catch {
-          return null;
-        }
-      }).filter((n: any) => n !== null);
-
-      // unreadOnly 필터링
-      const filteredNotifications = unreadOnly === 'true' 
-        ? parsedNotifications.filter((n: any) => !n.read)
-        : parsedNotifications;
-
-      res.json({
-        success: true,
-        data: filteredNotifications,
-        total: filteredNotifications.length,
-      });
-    } catch (error) {
-      logger.error('Error in getNotifications:', error);
-      next(error);
-    }
-  };
-
-  /**
-   * 알림 읽음 처리
-   */
-  markNotificationAsRead = async (
-    req: Request<{ id: string }>,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const { id } = req.params;
-      const redis = getRedisClient();
-      const userId = (req as AuthenticatedRequest).user?.id || 'system';
-
-      // Redis에서 알림 업데이트
-      const notificationsKey = `notifications:${userId}`;
-      const notifications = await redis.lrange(notificationsKey, 0, -1);
-
-      const updatedNotifications = notifications.map((n: string) => {
-        const notification = JSON.parse(n);
-        if (notification.id === id) {
-          notification.read = true;
-          notification.readAt = new Date().toISOString();
-        }
-        return JSON.stringify(notification);
-      });
-
-      // Redis 업데이트
-      await redis.del(notificationsKey);
-      if (updatedNotifications.length > 0) {
-        await redis.rpush(notificationsKey, ...updatedNotifications);
-      }
-
-      res.json({
-        success: true,
-        message: 'Notification marked as read',
-      });
-    } catch (error) {
-      logger.error('Error in markNotificationAsRead:', error);
-      next(error);
-    }
-  };
-
-  /**
-   * 시스템 상태 조회
-   */
-  getSystemHealth = async (
-    _req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const redis = getRedisClient();
-      const checks = {
-        database: false,
-        redis: false,
-        naver: false,
-        shopify: false,
-      };
-
-      // MongoDB 상태 확인
-      try {
-        await ProductMapping.findOne().limit(1).exec();
-        checks.database = true;
-      } catch {
-        logger.error('MongoDB health check failed');
-      }
-
-      // Redis 상태 확인
-      try {
-        await redis.ping();
-        checks.redis = true;
-      } catch {
-        logger.error('Redis health check failed');
-      }
-
-      // 외부 API 상태는 Redis에 캐시된 값 사용
-      const naverHealth = await redis.get('health:naver');
-      const shopifyHealth = await redis.get('health:shopify');
-      
-      checks.naver = naverHealth === 'healthy';
-      checks.shopify = shopifyHealth === 'healthy';
-
-      const allHealthy = Object.values(checks).every(v => v === true);
-      const anyDown = Object.values(checks).some(v => v === false);
-
-      res.json({
-        status: anyDown ? (allHealthy ? 'healthy' : 'degraded') : 'down',
-        services: {
-          api: true,
-          ...checks,
-        },
-        lastChecked: new Date().toISOString(),
-      });
-    } catch (error) {
-      logger.error('Error in getSystemHealth:', error);
-      res.status(500).json({
-        status: 'error',
-        services: {
-          api: true,
-          database: false,
-          redis: false,
-          naver: false,
-          shopify: false,
-        },
-        lastChecked: new Date().toISOString(),
-      });
-    }
-  };
-
-  /**
-   * 날짜 필터 생성 헬퍼
+   * Helper: 날짜 필터 생성
    */
   private getDateFilter(period?: string, startDate?: string, endDate?: string): any {
     const filter: any = {};
 
-    if (startDate && endDate) {
-      filter.createdAt = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    } else if (period) {
-      const now = new Date();
-      let start: Date;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+      return filter;
+    }
 
-      switch (period) {
-        case 'day':
-          start = new Date(now.setDate(now.getDate() - 1));
-          break;
-        case 'week':
-          start = new Date(now.setDate(now.getDate() - 7));
-          break;
-        case 'month':
-          start = new Date(now.setMonth(now.getMonth() - 1));
-          break;
-        case 'year':
-          start = new Date(now.setFullYear(now.getFullYear() - 1));
-          break;
-        default:
-          start = new Date(now.setDate(now.getDate() - 7));
-      }
-
-      filter.createdAt = { $gte: start };
+    // 기간별 필터
+    const now = new Date();
+    switch (period) {
+      case 'hour':
+        filter.createdAt = { $gte: new Date(now.getTime() - 60 * 60 * 1000) };
+        break;
+      case 'day':
+        filter.createdAt = { $gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) };
+        break;
+      case 'week':
+        filter.createdAt = { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) };
+        break;
+      case 'month':
+        filter.createdAt = { $gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) };
+        break;
+      default:
+        filter.createdAt = { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) };
     }
 
     return filter;

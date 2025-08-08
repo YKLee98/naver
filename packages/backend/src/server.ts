@@ -43,8 +43,20 @@ import {
 } from './services/sync';
 import { ExchangeRateService } from './services/exchangeRate';
 
+// 컨트롤러 - 개별 import로 변경하여 에러 방지
+import { AuthController } from './controllers/AuthController';
+import { ProductController } from './controllers/ProductController';
+import { InventoryController } from './controllers/InventoryController';
+import { SyncController } from './controllers/SyncController';
+import { MappingController } from './controllers/MappingController';
+import { DashboardController } from './controllers/DashboardController';
+import { WebhookController } from './controllers/WebhookController';
+
 // 자동 복구 작업
 import { AutoRecoveryJob } from './jobs/autoRecovery';
+
+// WebSocket
+import { initializeWebSocket } from './websocket';
 
 class Server {
   private app: express.Application;
@@ -102,22 +114,17 @@ class Server {
     this.app.use(morgan(config.env === 'production' ? 'combined' : 'dev', { stream }));
     this.app.use(requestLogger);
     
-    // Rate limiting (프로덕션 환경에서만)
+    // Rate limiting (production only)
     if (config.env === 'production') {
-      this.app.use('/api', rateLimiter);
+      this.app.use(config.apiPrefix, rateLimiter);
     }
-    
-    // 정적 파일 제공
-    this.app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
   }
 
   /**
    * 서비스 초기화
    */
   private async initializeServices() {
-    logger.info('Initializing services...');
-    
-    // Redis 클라이언트
+    // Redis 인스턴스
     this.redis = getRedisClient();
     
     // 네이버 서비스
@@ -130,22 +137,6 @@ class Server {
     const shopifyBulkService = new ShopifyBulkService();
     
     // 동기화 서비스
-    const mappingService = new MappingService(
-      naverProductService,
-      shopifyGraphQLService
-    );
-    
-    const inventorySyncService = new InventorySyncService(
-      naverProductService,
-      shopifyBulkService
-    );
-    
-    const priceSyncService = new PriceSyncService(
-      this.redis,
-      naverProductService,
-      shopifyGraphQLService
-    );
-    
     const syncService = new SyncService(
       naverProductService,
       naverOrderService,
@@ -153,40 +144,90 @@ class Server {
       this.redis
     );
     
+    const inventorySyncService = new InventorySyncService(
+      naverProductService,
+      shopifyBulkService
+    );
+    
+    const mappingService = new MappingService(
+      naverProductService,
+      shopifyGraphQLService
+    );
+    
+    const priceSyncService = new PriceSyncService(
+      this.redis,
+      naverProductService,
+      shopifyBulkService
+    );
+    
     const exchangeRateService = new ExchangeRateService(this.redis);
     
-    // 컨트롤러는 개별적으로 import하여 생성
-    const { ProductController } = await import('./controllers/ProductController');
-    const { InventoryController } = await import('./controllers/InventoryController');
-    const { SyncController } = await import('./controllers/SyncController');
-    const { MappingController } = await import('./controllers/MappingController');
-    const { DashboardController } = await import('./controllers/DashboardController');
-    const { AuthController } = await import('./controllers/AuthController');
-    const { WebhookController } = await import('./controllers/WebhookController');
+    // 컨트롤러 인스턴스 생성 - 선택적으로 생성
+    const controllers: any = {};
     
-    const productController = new ProductController(
-      naverProductService,
-      shopifyGraphQLService
-    );
-    
-    const inventoryController = new InventoryController(inventorySyncService);
-    const syncController = new SyncController(syncService, inventorySyncService);
-    const mappingController = new MappingController(
-      mappingService,
-      naverProductService,
-      shopifyGraphQLService
-    );
-    const dashboardController = new DashboardController();
-    const authController = new AuthController();
-    const webhookController = new WebhookController(inventorySyncService);
-    
-    // PriceController는 존재하지 않을 수 있으므로 조건부로 로드
-    let priceController = null;
+    // 필수 컨트롤러
     try {
-      const { PriceController } = await import('./controllers/PriceController');
-      priceController = new PriceController(priceSyncService);
-    } catch (error) {
-      logger.warn('PriceController not found, skipping...');
+      controllers.authController = new AuthController();
+    } catch (e) {
+      logger.warn('AuthController not available');
+    }
+    
+    try {
+      controllers.productController = new ProductController(naverProductService, shopifyGraphQLService);
+    } catch (e) {
+      logger.warn('ProductController not available');
+    }
+    
+    try {
+      controllers.inventoryController = new InventoryController(inventorySyncService);
+    } catch (e) {
+      logger.warn('InventoryController not available');
+    }
+    
+    try {
+      controllers.syncController = new SyncController(syncService);
+    } catch (e) {
+      logger.warn('SyncController not available');
+    }
+    
+    try {
+      controllers.mappingController = new MappingController(mappingService, naverProductService, shopifyGraphQLService);
+    } catch (e) {
+      logger.warn('MappingController not available');
+    }
+    
+    try {
+      controllers.dashboardController = new DashboardController();
+    } catch (e) {
+      logger.warn('DashboardController not available');
+    }
+    
+    try {
+      controllers.webhookController = new WebhookController();
+    } catch (e) {
+      logger.warn('WebhookController not available');
+    }
+    
+    // 선택적 컨트롤러 - 동적 import 시도
+    try {
+      const { PriceSyncController } = require('./controllers/PriceSyncController');
+      controllers.priceSyncController = new PriceSyncController(priceSyncService);
+    } catch (e) {
+      logger.warn('PriceSyncController not available');
+    }
+    
+    try {
+      const { PriceController } = require('./controllers/PriceController');
+      controllers.priceController = new PriceController();
+    } catch (e) {
+      logger.warn('PriceController not available');
+    }
+    
+    try {
+      const { ExchangeRateController } = require('./controllers/ExchangeRateController');
+      controllers.exchangeRateController = new ExchangeRateController(exchangeRateService);
+    } catch (e) {
+      logger.warn('ExchangeRateController not available');
     }
     
     // 자동 복구 작업 시작
@@ -201,16 +242,7 @@ class Server {
     this.setupCronJobs(syncService, exchangeRateService);
     
     return {
-      controllers: {
-        productController,
-        inventoryController,
-        syncController,
-        mappingController,
-        dashboardController,
-        authController,
-        webhookController,
-        priceController
-      },
+      controllers,
       services: {
         naverAuthService,
         naverProductService,
@@ -227,7 +259,7 @@ class Server {
   }
 
   /**
-   * 라우트 설정
+   * 라우트 설정 - 수정된 부분
    */
   private setupRoutes(controllers: any): void {
     // Health check
@@ -256,162 +288,173 @@ class Server {
         }
       });
     });
-    
-    // API 라우트 설정 - 기본 라우트만 설정
-    const apiRouter = express.Router();
-    
-    // 각 컨트롤러별 라우트 설정
-    apiRouter.get('/products', controllers.productController?.getMappedProducts || ((req, res) => res.json({ message: 'Products API' })));
-    apiRouter.get('/inventory/status', controllers.inventoryController?.getAllInventoryStatus || ((req, res) => res.json({ message: 'Inventory API' })));
-    apiRouter.post('/sync/full', controllers.syncController?.performFullSync || ((req, res) => res.json({ message: 'Sync API' })));
-    apiRouter.get('/mappings', controllers.mappingController?.getMappings || ((req, res) => res.json({ message: 'Mappings API' })));
-    apiRouter.get('/dashboard/stats', controllers.dashboardController?.getStats || ((req, res) => res.json({ message: 'Dashboard API' })));
-    apiRouter.post('/auth/login', controllers.authController?.login || ((req, res) => res.json({ message: 'Auth API' })));
-    apiRouter.post('/webhooks/shopify', controllers.webhookController?.handleShopifyWebhook || ((req, res) => res.json({ message: 'Webhook API' })));
-    
-    if (controllers.priceController) {
-      apiRouter.get('/prices', controllers.priceController.getPrices || ((req, res) => res.json({ message: 'Price API' })));
+
+    // ✅ Auth 라우트 (인증 불필요)
+    try {
+      const authRoutes = require('./routes/auth.routes').default;
+      this.app.use(`${config.apiPrefix}/auth`, authRoutes);
+      logger.info('✅ Auth routes registered');
+    } catch (error) {
+      logger.warn('Auth routes not available');
     }
-    
-    this.app.use('/api/v1', apiRouter);
-    
-    // 404 핸들러
+
+    // ✅ Webhook 라우트 (특별 인증)
+    try {
+      const webhookRoutes = require('./routes/webhook.routes').default;
+      this.app.use(`${config.apiPrefix}/webhooks`, webhookRoutes);
+      logger.info('✅ Webhook routes registered');
+    } catch (error) {
+      logger.warn('Webhook routes not available');
+    }
+
+    // ✅ Dashboard 라우트 - 수정된 메서드 이름으로 등록
+    try {
+      const { setupDashboardRoutes } = require('./routes/dashboard.routes');
+      const dashboardRouter = setupDashboardRoutes();
+      this.app.use(`${config.apiPrefix}/dashboard`, dashboardRouter);
+      logger.info('✅ Dashboard routes registered at /api/v1/dashboard');
+    } catch (error) {
+      logger.error('❌ Dashboard routes error:', error.message);
+    }
+
+    // ✅ API 라우트 - SKU 검색 포함
+    try {
+      const { setupApiRoutes } = require('./routes/api.routes');
+      const apiRouter = setupApiRoutes();
+      this.app.use(`${config.apiPrefix}`, apiRouter);
+      logger.info('✅ API routes registered');
+    } catch (error) {
+      logger.error('❌ API routes error:', error.message);
+    }
+
+    // ✅ Settings 라우트
+    try {
+      const setupSettingsRoutes = require('./routes/settings.routes').default;
+      if (typeof setupSettingsRoutes === 'function') {
+        this.app.use(`${config.apiPrefix}/settings`, setupSettingsRoutes());
+        logger.info('✅ Settings routes registered');
+      }
+    } catch (error) {
+      logger.warn('Settings routes not available');
+    }
+
+    // ✅ Price Sync 라우트
+    try {
+      const setupPriceSyncRoutes = require('./routes/priceSync.routes').default;
+      if (typeof setupPriceSyncRoutes === 'function') {
+        this.app.use(`${config.apiPrefix}/price-sync`, setupPriceSyncRoutes());
+        logger.info('✅ Price sync routes registered');
+      }
+    } catch (error) {
+      logger.warn('Price sync routes not available');
+    }
+
+    // ✅ Price 라우트 - 중요!
+    try {
+      const setupPriceRoutes = require('./routes/price.routes').default;
+      if (typeof setupPriceRoutes === 'function') {
+        this.app.use(`${config.apiPrefix}/prices`, setupPriceRoutes());
+        logger.info('✅ Price routes registered at /api/v1/prices');
+      }
+    } catch (error) {
+      logger.error('❌ Price routes error:', error.message);
+    }
+
+    // ✅ Exchange Rates 라우트 - 중요!
+    try {
+      const setupExchangeRatesRoutes = require('./routes/exchangeRates.routes').default;
+      if (typeof setupExchangeRatesRoutes === 'function') {
+        this.app.use(`${config.apiPrefix}/exchange-rates`, setupExchangeRatesRoutes());
+        logger.info('✅ Exchange rates routes registered at /api/v1/exchange-rates');
+      }
+    } catch (error) {
+      logger.error('❌ Exchange rates routes error:', error.message);
+    }
+
+    // 404 핸들러 - 모든 라우트 등록 후 마지막에 추가
     this.app.use((req, res) => {
+      logger.warn(`404 - Route not found: ${req.method} ${req.path}`);
       res.status(404).json({
         success: false,
         message: 'Resource not found',
-        path: req.path
+        path: req.path,
+        method: req.method,
+        timestamp: new Date().toISOString()
       });
     });
-    
-    // 에러 핸들러 (반드시 마지막에)
-    this.app.use(errorHandler);
-  }
 
-  /**
-   * WebSocket 설정
-   */
-  private setupWebSocket(): void {
-    this.io.on('connection', (socket) => {
-      logger.info(`New WebSocket connection: ${socket.id}`);
-      
-      socket.on('join', (room) => {
-        socket.join(room);
-        logger.info(`Socket ${socket.id} joined room: ${room}`);
-      });
-      
-      socket.on('sync-update', (data) => {
-        this.io.to('admin').emit('sync-status', data);
-      });
-      
-      socket.on('inventory-change', (data) => {
-        this.io.emit('inventory-updated', data);
-      });
-      
-      socket.on('price-change', (data) => {
-        this.io.emit('price-updated', data);
-      });
-      
-      socket.on('disconnect', () => {
-        logger.info(`Socket disconnected: ${socket.id}`);
-      });
-    });
+    // 에러 핸들러
+    this.app.use(errorHandler);
   }
 
   /**
    * 크론 작업 설정
    */
-  private setupCronJobs(syncService: any, exchangeRateService: any): void {
-    // 전체 동기화 (매일 새벽 3시)
-    const fullSyncTask = cron.schedule('0 3 * * *', async () => {
-      logger.info('Starting scheduled full sync...');
+  private setupCronJobs(syncService: SyncService, exchangeRateService: ExchangeRateService): void {
+    // 재고 동기화 (매 30분)
+    const inventorySyncJob = cron.schedule('*/30 * * * *', async () => {
+      logger.info('Starting scheduled inventory sync');
       try {
-        await syncService.performFullSync();
-        logger.info('Scheduled full sync completed');
+        await syncService.performFullSync({ skipPrices: true });
       } catch (error) {
-        logger.error('Scheduled full sync failed:', error);
+        logger.error('Scheduled inventory sync failed:', error);
       }
-    }, {
-      scheduled: true,
-      timezone: "Asia/Seoul"
     });
     
-    // 환율 업데이트 (6시간마다)
-    const exchangeRateTask = cron.schedule('0 */6 * * *', async () => {
-      logger.info('Updating exchange rates...');
+    // 가격 동기화 (매 1시간)
+    const priceSyncJob = cron.schedule('0 * * * *', async () => {
+      logger.info('Starting scheduled price sync');
+      try {
+        await syncService.performFullSync({ skipInventory: true });
+      } catch (error) {
+        logger.error('Scheduled price sync failed:', error);
+      }
+    });
+    
+    // 환율 업데이트 (매일 오전 9시)
+    const exchangeRateJob = cron.schedule('0 9 * * *', async () => {
+      logger.info('Starting scheduled exchange rate update');
       try {
         await exchangeRateService.updateExchangeRate();
-        logger.info('Exchange rates updated');
       } catch (error) {
-        logger.error('Exchange rate update failed:', error);
+        logger.error('Scheduled exchange rate update failed:', error);
       }
-    }, {
-      scheduled: true,
-      timezone: "Asia/Seoul"
     });
     
-    // 재고 확인 (1시간마다)
-    const inventoryCheckTask = cron.schedule('0 * * * *', async () => {
-      logger.info('Checking inventory levels...');
-      try {
-        const lowStockItems = await syncService.checkLowStock?.();
-        if (lowStockItems?.length > 0) {
-          this.io.emit('low-stock-alert', lowStockItems);
-        }
-      } catch (error) {
-        logger.error('Inventory check failed:', error);
-      }
-    }, {
-      scheduled: true,
-      timezone: "Asia/Seoul"
-    });
+    this.cronTasks = [inventorySyncJob, priceSyncJob, exchangeRateJob];
     
-    this.cronTasks = [fullSyncTask, exchangeRateTask, inventoryCheckTask];
+    // 크론 작업 시작
+    this.cronTasks.forEach(task => task.start());
     logger.info('Cron jobs started');
   }
 
   /**
-   * 데이터베이스 연결
+   * WebSocket 초기화
    */
-  private async connectDatabase(): Promise<void> {
-    try {
-      await connectDatabase();
-      logger.info('MongoDB connected successfully');
-      
-      mongoose.connection.on('error', (err) => {
-        logger.error('MongoDB connection error:', err);
-      });
-      
-      mongoose.connection.on('disconnected', () => {
-        logger.warn('MongoDB disconnected');
-      });
-      
-      mongoose.connection.on('reconnected', () => {
-        logger.info('MongoDB reconnected');
-      });
-    } catch (error) {
-      logger.error('MongoDB connection failed:', error);
-      throw error;
-    }
+  private setupWebSocket(): void {
+    initializeWebSocket(this.io);
+    logger.info('WebSocket server initialized');
   }
 
   /**
    * 서버 시작
    */
-  public async start(): Promise<void> {
+  async start(): Promise<void> {
     try {
       // 데이터베이스 연결
-      await this.connectDatabase();
+      await connectDatabase();
+      logger.info('MongoDB connected successfully');
       
       // Redis 초기화
       await initializeRedis();
-      logger.info('Redis initialized');
+      logger.info('Redis initialized successfully');
       
       // 미들웨어 설정
       this.setupMiddlewares();
       
       // 서비스 초기화
-      const { controllers } = await this.initializeServices();
+      const { controllers, services } = await this.initializeServices();
+      logger.info('Services initialized successfully');
       
       // 라우트 설정
       this.setupRoutes(controllers);
@@ -430,7 +473,7 @@ class Server {
         logger.info('========================================');
       });
       
-      // Graceful shutdown 설정
+      // Graceful shutdown 처리
       this.setupGracefulShutdown();
       
     } catch (error) {
@@ -444,19 +487,9 @@ class Server {
    */
   private setupGracefulShutdown(): void {
     const gracefulShutdown = async (signal: string) => {
-      logger.info(`${signal} received, starting graceful shutdown...`);
+      logger.info(`${signal} received, shutting down gracefully`);
       
       try {
-        // 새로운 연결 거부
-        this.httpServer.close(() => {
-          logger.info('HTTP server closed');
-        });
-        
-        // WebSocket 연결 종료
-        this.io.close(() => {
-          logger.info('WebSocket server closed');
-        });
-        
         // 크론 작업 중지
         this.cronTasks.forEach(task => task.stop());
         logger.info('Cron jobs stopped');
@@ -467,45 +500,51 @@ class Server {
           logger.info('Auto recovery job stopped');
         }
         
-        // Redis 연결 종료
-        await closeRedis();
-        logger.info('Redis connection closed');
+        // HTTP 서버 종료
+        this.httpServer.close(() => {
+          logger.info('HTTP server closed');
+        });
         
-        // MongoDB 연결 종료
+        // WebSocket 연결 종료
+        this.io.close(() => {
+          logger.info('WebSocket server closed');
+        });
+        
+        // 데이터베이스 연결 해제
         await disconnectDatabase();
-        logger.info('MongoDB connection closed');
+        logger.info('Database disconnected');
         
-        logger.info('Graceful shutdown completed');
+        // Redis 연결 해제
+        await closeRedis();
+        logger.info('Redis disconnected');
+        
+        logger.info('All connections closed successfully');
         process.exit(0);
       } catch (error) {
         logger.error('Error during graceful shutdown:', error);
         process.exit(1);
       }
     };
-    
-    // 시그널 핸들러
+
+    // 시그널 핸들러 등록
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-    
+
     // 예외 처리
     process.on('uncaughtException', (error) => {
       logger.error('Uncaught Exception:', error);
-      gracefulShutdown('UNCAUGHT_EXCEPTION');
+      process.exit(1);
     });
-    
+
     process.on('unhandledRejection', (reason, promise) => {
       logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      gracefulShutdown('UNHANDLED_REJECTION');
+      process.exit(1);
     });
   }
 }
 
 // 서버 인스턴스 생성 및 시작
 const server = new Server();
-server.start().catch((error) => {
-  logger.error('Server startup failed:', error);
-  process.exit(1);
-});
+server.start();
 
-// 서버 인스턴스 export (테스트용)
 export default server;

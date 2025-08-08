@@ -1,4 +1,4 @@
-// ===== 1. packages/backend/src/routes/api.routes.ts (완전한 버전) =====
+// packages/backend/src/routes/api.routes.ts
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares';
 
@@ -53,8 +53,15 @@ export function setupApiRoutes(): Router {
       shopifyGraphQLService
     );
 
-    // SKU 검색 라우트 (가장 중요!)
-    protectedRouter.get('/mappings/search-by-sku', mappingController.searchProductsBySku.bind(mappingController));
+    // ✅ SKU 검색 라우트 수정 - query 파라미터 사용
+    protectedRouter.get('/mappings/search-by-sku', (req, res, next) => {
+      // req.query.sku를 req.params.sku로 변환
+      const modifiedReq = {
+        ...req,
+        params: { sku: req.query.sku }
+      };
+      return mappingController.searchProductsBySku(modifiedReq, res, next);
+    });
     
     // 기본 매핑 라우트들
     protectedRouter.get('/mappings', mappingController.getMappings.bind(mappingController));
@@ -96,8 +103,6 @@ export function setupApiRoutes(): Router {
     protectedRouter.get('/products/:sku', productController.getProductBySku.bind(productController));
     protectedRouter.get('/products/search/naver', productController.searchNaverProducts.bind(productController));
     protectedRouter.get('/products/search/shopify', productController.searchShopifyProducts.bind(productController));
-    protectedRouter.post('/products/:sku/sync', productController.syncProductBySku.bind(productController));
-    protectedRouter.put('/products/:sku', productController.updateProduct.bind(productController));
   } catch (error) {
     console.log('Product routes setup error:', error.message);
   }
@@ -105,29 +110,22 @@ export function setupApiRoutes(): Router {
   // 재고 관련 라우트
   try {
     const { InventoryController } = require('../controllers');
-    const { NaverAuthService, NaverProductService } = require('../services/naver');
+    const { NaverProductService } = require('../services/naver');
     const { ShopifyBulkService } = require('../services/shopify');
     const { InventorySyncService } = require('../services/sync');
-    const { getRedisClient } = require('../config/redis');
-
-    const redis = getRedisClient();
-    const naverAuthService = new NaverAuthService(redis);
-    const naverProductService = new NaverProductService(naverAuthService);
-    const shopifyBulkService = new ShopifyBulkService();
 
     const inventorySyncService = new InventorySyncService(
-      naverProductService,
-      shopifyBulkService
+      new NaverProductService(),
+      new ShopifyBulkService()
     );
 
     const inventoryController = new InventoryController(inventorySyncService);
 
-    protectedRouter.get('/inventory/status', inventoryController.getAllInventoryStatus.bind(inventoryController));
     protectedRouter.get('/inventory/:sku/status', inventoryController.getInventoryStatus.bind(inventoryController));
     protectedRouter.get('/inventory/:sku/history', inventoryController.getInventoryHistory.bind(inventoryController));
     protectedRouter.post('/inventory/:sku/adjust', inventoryController.adjustInventory.bind(inventoryController));
-    protectedRouter.get('/inventory/low-stock', inventoryController.getLowStockItems.bind(inventoryController));
-    protectedRouter.post('/inventory/sync', inventoryController.syncAllInventory.bind(inventoryController));
+    protectedRouter.get('/inventory/low-stock', inventoryController.getLowStockProducts.bind(inventoryController));
+    protectedRouter.get('/inventory/status', inventoryController.getAllInventoryStatus.bind(inventoryController));
   } catch (error) {
     console.log('Inventory routes setup error:', error.message);
   }
@@ -135,47 +133,26 @@ export function setupApiRoutes(): Router {
   // 동기화 관련 라우트
   try {
     const { SyncController } = require('../controllers');
-    const { NaverAuthService, NaverProductService, NaverOrderService } = require('../services/naver');
-    const { ShopifyBulkService, ShopifyGraphQLService } = require('../services/shopify');
-    const { SyncService, InventorySyncService } = require('../services/sync');
+    const { SyncService } = require('../services/sync');
     const { getRedisClient } = require('../config/redis');
 
-    const redis = getRedisClient();
-    const naverAuthService = new NaverAuthService(redis);
-    const naverProductService = new NaverProductService(naverAuthService);
-    const naverOrderService = new NaverOrderService(naverAuthService);
-    const shopifyBulkService = new ShopifyBulkService();
-    const shopifyGraphQLService = new ShopifyGraphQLService();
+    const syncService = new SyncService(getRedisClient());
+    const syncController = new SyncController(syncService);
 
-    const syncService = new SyncService(
-      naverProductService,
-      naverOrderService,
-      shopifyBulkService,
-      shopifyGraphQLService,
-      redis
-    );
-
-    const inventorySyncService = new InventorySyncService(
-      naverProductService,
-      shopifyBulkService
-    );
-
-    const syncController = new SyncController(syncService, inventorySyncService);
-
-    protectedRouter.post('/sync/full', syncController.syncAll.bind(syncController));
-    protectedRouter.post('/sync/inventory', syncController.syncInventory.bind(syncController));
-    protectedRouter.post('/sync/orders', syncController.syncOrders.bind(syncController));
+    protectedRouter.post('/sync/full', syncController.performFullSync.bind(syncController));
     protectedRouter.post('/sync/sku/:sku', syncController.syncSingleSku.bind(syncController));
     protectedRouter.get('/sync/status', syncController.getSyncStatus.bind(syncController));
-    protectedRouter.get('/sync/history', syncController.getSyncHistory.bind(syncController));
     protectedRouter.get('/sync/settings', syncController.getSyncSettings.bind(syncController));
     protectedRouter.put('/sync/settings', syncController.updateSyncSettings.bind(syncController));
   } catch (error) {
     console.log('Sync routes setup error:', error.message);
   }
 
-  // Protected routes를 메인 라우터에 추가
+  // 모든 보호된 라우트를 메인 라우터에 추가
   router.use('/', protectedRouter);
 
   return router;
 }
+
+// 기본 export (호환성)
+export default setupApiRoutes();
