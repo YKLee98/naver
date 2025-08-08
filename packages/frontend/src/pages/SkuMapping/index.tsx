@@ -1,6 +1,7 @@
-// packages/frontend/src/pages/SkuMapping/index.tsx
-import React, { useEffect, useState } from 'react';
+// ===== 1. packages/frontend/src/pages/SkuMapping/index.tsx (완전한 엔터프라이즈급 구현) =====
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
+  Container,
   Box,
   Paper,
   Typography,
@@ -33,6 +34,17 @@ import {
   Menu,
   ListItemIcon,
   ListItemText,
+  CircularProgress,
+  LinearProgress,
+  Skeleton,
+  Badge,
+  Grid,
+  Card,
+  CardContent,
+  Divider,
+  Stack,
+  Snackbar,
+  SnackbarContent,
 } from '@mui/material';
 import {
   Add,
@@ -50,26 +62,61 @@ import {
   Refresh,
   Check,
   Close,
+  Info,
+  CloudUpload,
+  Visibility,
+  VisibilityOff,
+  FilterList,
+  Settings,
+  Speed,
+  Inventory,
+  AttachMoney,
+  Link as LinkIcon,
+  BrokenImage,
 } from '@mui/icons-material';
 import { useAppDispatch, useAppSelector } from '@/hooks';
 import { mappingService } from '@/services/api/mapping.service';
 import { useNotification } from '@/hooks/useNotification';
+import { useDebounce } from '@/hooks/useDebounce';
 import AddMappingDialog from './AddMappingDialog';
 import BulkUploadDialog from './BulkUploadDialog';
 import AutoDiscoverDialog from './AutoDiscoverDialog';
+import MappingDetailsDialog from './MappingDetailsDialog';
+import { formatDateTime, formatCurrency } from '@/utils/formatters';
 
 interface MappingData {
   _id: string;
   sku: string;
   naverProductId: string;
   shopifyProductId: string;
+  shopifyVariantId: string;
   productName: string;
+  vendor: string;
   priceMargin: number;
   isActive: boolean;
-  status: string;
-  syncStatus?: string;
-  lastSyncAt: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'ERROR';
+  syncStatus: 'synced' | 'pending' | 'error';
+  lastSyncedAt?: string;
+  syncError?: string;
+  metadata?: {
+    autoDiscovered?: boolean;
+    confidence?: number;
+    lastTransaction?: {
+      date: string;
+      type: string;
+    };
+  };
+  createdAt: string;
   updatedAt: string;
+}
+
+interface MappingStats {
+  total: number;
+  active: number;
+  inactive: number;
+  error: number;
+  pending: number;
+  syncNeeded: number;
 }
 
 const SkuMapping: React.FC = () => {
@@ -78,6 +125,7 @@ const SkuMapping: React.FC = () => {
   
   // State
   const [mappings, setMappings] = useState<MappingData[]>([]);
+  const [stats, setStats] = useState<MappingStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMappings, setSelectedMappings] = useState<string[]>([]);
@@ -85,8 +133,12 @@ const SkuMapping: React.FC = () => {
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [syncStatusFilter, setSyncStatusFilter] = useState('all');
+  const [vendorFilter, setVendorFilter] = useState('all');
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedMapping, setSelectedMapping] = useState<MappingData | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
   
   // Dialogs
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -94,398 +146,456 @@ const SkuMapping: React.FC = () => {
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [autoDiscoverOpen, setAutoDiscoverOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+
+  // Debounced search
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   // 매핑 목록 로드
-  const loadMappings = async () => {
+  const loadMappings = useCallback(async () => {
     setLoading(true);
     try {
       const response = await mappingService.getMappings({
         page: page + 1,
         limit: rowsPerPage,
-        search: searchTerm,
+        search: debouncedSearchTerm,
         status: statusFilter === 'all' ? undefined : statusFilter,
+        syncStatus: syncStatusFilter === 'all' ? undefined : syncStatusFilter,
+        vendor: vendorFilter === 'all' ? undefined : vendorFilter,
+        sortBy: 'updatedAt',
+        order: 'desc',
       });
-      
-      // 백엔드의 MappingController를 보면 response.data.data 구조입니다
-      if (response.data && response.data.data) {
-        setMappings(response.data.data.mappings || []);
-        setTotalCount(response.data.data.pagination?.total || 0);
-      } else {
-        setMappings([]);
-        setTotalCount(0);
+
+      if (response.data.success) {
+        setMappings(response.data.data.mappings);
+        setTotalCount(response.data.data.pagination.total);
+        setStats(response.data.data.stats);
       }
-    } catch (error) {
-      console.error('Error loading mappings:', error);
+    } catch (error: any) {
+      console.error('Failed to load mappings:', error);
       showNotification('매핑 목록을 불러오는데 실패했습니다.', 'error');
-      setMappings([]);
-      setTotalCount(0);
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, rowsPerPage, debouncedSearchTerm, statusFilter, syncStatusFilter, vendorFilter]);
 
   // 초기 로드 및 필터 변경 시 재로드
   useEffect(() => {
     loadMappings();
-  }, [page, rowsPerPage, statusFilter]);
+  }, [loadMappings]);
 
-  // 검색어 디바운싱
+  // 자동 새로고침
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (page === 0) {
+    if (autoRefresh) {
+      const interval = setInterval(() => {
         loadMappings();
-      } else {
-        setPage(0);
-      }
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // 전체 선택/해제
-  const handleSelectAll = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.checked) {
-      const newSelected = mappings.map((mapping) => mapping._id);
-      setSelectedMappings(newSelected);
-    } else {
-      setSelectedMappings([]);
+      }, 30000); // 30초마다
+      return () => clearInterval(interval);
     }
-  };
+  }, [autoRefresh, loadMappings]);
 
-  // 개별 선택
-  const handleSelectOne = (id: string) => {
-    const selectedIndex = selectedMappings.indexOf(id);
-    let newSelected: string[] = [];
-
-    if (selectedIndex === -1) {
-      newSelected = newSelected.concat(selectedMappings, id);
-    } else if (selectedIndex === 0) {
-      newSelected = newSelected.concat(selectedMappings.slice(1));
-    } else if (selectedIndex === selectedMappings.length - 1) {
-      newSelected = newSelected.concat(selectedMappings.slice(0, -1));
-    } else if (selectedIndex > 0) {
-      newSelected = newSelected.concat(
-        selectedMappings.slice(0, selectedIndex),
-        selectedMappings.slice(selectedIndex + 1)
-      );
-    }
-
-    setSelectedMappings(newSelected);
-  };
-
-  // 메뉴 열기/닫기
-  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, mapping: MappingData) => {
-    setAnchorEl(event.currentTarget);
-    setSelectedMapping(mapping);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
+  // 새 매핑 추가
+  const handleAddMapping = () => {
     setSelectedMapping(null);
+    setAddDialogOpen(true);
   };
 
   // 매핑 수정
-  const handleEdit = (mapping?: MappingData) => {
-    if (mapping) {
-      setSelectedMapping(mapping);
-      setEditDialogOpen(true);
-    }
-    handleMenuClose();
+  const handleEditMapping = (mapping: MappingData) => {
+    setSelectedMapping(mapping);
+    setEditDialogOpen(true);
   };
 
   // 매핑 삭제
-  const handleDelete = async (mapping?: MappingData) => {
-    if (!mapping) return;
-    
-    setSelectedMapping(mapping);
-    setDeleteConfirmOpen(true);
-    handleMenuClose();
-  };
-
-  const confirmDelete = async () => {
-    if (!selectedMapping) return;
-
+  const handleDeleteMapping = async (mapping: MappingData) => {
     try {
-      await mappingService.deleteMapping(selectedMapping._id);
+      await mappingService.deleteMapping(mapping._id);
       showNotification('매핑이 삭제되었습니다.', 'success');
       loadMappings();
     } catch (error) {
       showNotification('매핑 삭제에 실패했습니다.', 'error');
-    } finally {
-      setDeleteConfirmOpen(false);
-      setSelectedMapping(null);
     }
   };
 
   // 일괄 삭제
   const handleBulkDelete = async () => {
     if (selectedMappings.length === 0) {
-      showNotification('선택된 매핑이 없습니다.', 'warning');
-      return;
-    }
-
-    if (window.confirm(`${selectedMappings.length}개의 매핑을 삭제하시겠습니까?`)) {
-      try {
-        await mappingService.bulkDelete(selectedMappings);
-        showNotification(`${selectedMappings.length}개의 매핑이 삭제되었습니다.`, 'success');
-        setSelectedMappings([]);
-        loadMappings();
-      } catch (error) {
-        showNotification('일괄 삭제에 실패했습니다.', 'error');
-      }
-    }
-  };
-
-  // 일괄 활성화/비활성화
-  const handleBulkToggle = async (isActive: boolean) => {
-    if (selectedMappings.length === 0) {
-      showNotification('선택된 매핑이 없습니다.', 'warning');
+      showNotification('삭제할 매핑을 선택해주세요.', 'warning');
       return;
     }
 
     try {
-      await mappingService.toggleMappings(selectedMappings, isActive);
-      showNotification(
-        `${selectedMappings.length}개의 매핑이 ${isActive ? '활성화' : '비활성화'}되었습니다.`,
-        'success'
-      );
+      await mappingService.bulkDelete(selectedMappings);
+      showNotification(`${selectedMappings.length}개 매핑이 삭제되었습니다.`, 'success');
       setSelectedMappings([]);
       loadMappings();
     } catch (error) {
-      showNotification('상태 변경에 실패했습니다.', 'error');
+      showNotification('일괄 삭제에 실패했습니다.', 'error');
     }
   };
 
   // 매핑 검증
-  const handleValidate = async (mapping: MappingData) => {
+  const handleValidateMapping = async (mapping: MappingData) => {
     try {
       const response = await mappingService.validateMapping(mapping._id);
-      const validation = response.data.data;
-      
-      if (validation.isValid) {
-        showNotification('매핑이 유효합니다.', 'success');
-      } else {
-        showNotification(
-          `매핑 검증 실패: ${validation.errors.join(', ')}`,
-          'error'
-        );
+      if (response.data.success) {
+        const validation = response.data.data;
+        if (validation.isValid) {
+          showNotification('매핑이 유효합니다.', 'success');
+        } else {
+          showNotification(`매핑 검증 실패: ${validation.errors.join(', ')}`, 'error');
+        }
       }
-      
       loadMappings();
     } catch (error) {
       showNotification('매핑 검증에 실패했습니다.', 'error');
     }
   };
 
-  // 엑셀 템플릿 다운로드
-  const handleDownloadTemplate = async () => {
+  // 동기화 실행
+  const handleSyncMapping = async (mapping: MappingData) => {
     try {
-      const response = await mappingService.downloadTemplate();
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'sku-mapping-template.xlsx');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      await mappingService.syncMapping(mapping._id);
+      showNotification('동기화가 시작되었습니다.', 'info');
+      setTimeout(() => loadMappings(), 2000);
     } catch (error) {
-      showNotification('템플릿 다운로드에 실패했습니다.', 'error');
+      showNotification('동기화 실행에 실패했습니다.', 'error');
     }
   };
 
-  // 상태 칩 렌더링
-  const renderStatusChip = (status?: string) => {
-    if (!status) return null;
-    
-    const config: Record<string, { color: any; icon: React.ReactElement; label: string }> = {
-      synced: { color: 'success', icon: <CheckCircle fontSize="small" />, label: '동기화됨' },
-      ACTIVE: { color: 'success', icon: <CheckCircle fontSize="small" />, label: '활성' },
-      pending: { color: 'warning', icon: <Warning fontSize="small" />, label: '대기중' },
-      PENDING: { color: 'warning', icon: <Warning fontSize="small" />, label: '대기중' },
-      error: { color: 'error', icon: <Error fontSize="small" />, label: '오류' },
-      ERROR: { color: 'error', icon: <Error fontSize="small" />, label: '오류' },
-    };
+  // 일괄 동기화
+  const handleBulkSync = async () => {
+    if (selectedMappings.length === 0) {
+      showNotification('동기화할 매핑을 선택해주세요.', 'warning');
+      return;
+    }
 
-    const { color, icon, label } = config[status] || {
-      color: 'default',
-      icon: null,
-      label: status,
-    };
+    try {
+      await mappingService.bulkSync(selectedMappings);
+      showNotification(`${selectedMappings.length}개 매핑 동기화가 시작되었습니다.`, 'info');
+      setSelectedMappings([]);
+      setTimeout(() => loadMappings(), 2000);
+    } catch (error) {
+      showNotification('일괄 동기화에 실패했습니다.', 'error');
+    }
+  };
 
-    return (
-      <Chip
-        size="small"
-        color={color}
-        icon={icon}
-        label={label}
-      />
-    );
+  // 엑셀 다운로드
+  const handleExcelDownload = async () => {
+    try {
+      const response = await mappingService.exportMappings({
+        format: 'excel',
+        filters: {
+          status: statusFilter === 'all' ? undefined : statusFilter,
+          syncStatus: syncStatusFilter === 'all' ? undefined : syncStatusFilter,
+        }
+      });
+      
+      // Blob 다운로드 처리
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `mappings_${new Date().getTime()}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      
+      showNotification('엑셀 파일이 다운로드되었습니다.', 'success');
+    } catch (error) {
+      showNotification('엑셀 다운로드에 실패했습니다.', 'error');
+    }
+  };
+
+  // 상태별 색상
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'ACTIVE': return 'success';
+      case 'INACTIVE': return 'default';
+      case 'ERROR': return 'error';
+      default: return 'default';
+    }
+  };
+
+  const getSyncStatusColor = (status: string) => {
+    switch (status) {
+      case 'synced': return 'success';
+      case 'pending': return 'warning';
+      case 'error': return 'error';
+      default: return 'default';
+    }
   };
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        SKU 매핑 관리
-      </Typography>
+    <Container maxWidth={false}>
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          SKU 매핑 관리
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          네이버와 Shopify 상품 간의 SKU 매핑을 관리합니다. SKU를 입력하면 자동으로 양쪽 플랫폼에서 상품을 검색합니다.
+        </Typography>
+      </Box>
 
-      {/* 알림 메시지 */}
-      {selectedMappings.length > 0 && (
-        <Alert
-          severity="info"
-          action={
-            <Box>
-              <Button
-                size="small"
-                onClick={() => handleBulkToggle(true)}
-              >
-                활성화
-              </Button>
-              <Button
-                size="small"
-                onClick={() => handleBulkToggle(false)}
-              >
-                비활성화
-              </Button>
-              <Button
-                size="small"
-                color="error"
-                onClick={handleBulkDelete}
-              >
-                삭제
-              </Button>
-            </Box>
-          }
-          sx={{ mb: 2 }}
-        >
-          {selectedMappings.length}개의 매핑이 선택되었습니다.
-        </Alert>
+      {/* 통계 카드 */}
+      {stats && (
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid item xs={12} sm={6} md={2}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom variant="caption">
+                  전체 매핑
+                </Typography>
+                <Typography variant="h5">
+                  {stats.total.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom variant="caption">
+                  활성 매핑
+                </Typography>
+                <Typography variant="h5" color="success.main">
+                  {stats.active.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom variant="caption">
+                  비활성 매핑
+                </Typography>
+                <Typography variant="h5" color="text.secondary">
+                  {stats.inactive.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom variant="caption">
+                  오류 매핑
+                </Typography>
+                <Typography variant="h5" color="error.main">
+                  {stats.error.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom variant="caption">
+                  대기 중
+                </Typography>
+                <Typography variant="h5" color="warning.main">
+                  {stats.pending.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom variant="caption">
+                  동기화 필요
+                </Typography>
+                <Typography variant="h5" color="info.main">
+                  {stats.syncNeeded.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
       )}
 
-      {/* 필터 및 액션 */}
+      {/* 툴바 */}
       <Paper sx={{ p: 2, mb: 2 }}>
-        <Box display="flex" gap={2} flexWrap="wrap" alignItems="center" justifyContent="space-between">
-          <Box display="flex" gap={2} flexWrap="wrap" alignItems="center">
-            <TextField
-              size="small"
-              placeholder="SKU, 상품명으로 검색"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ minWidth: 250 }}
-            />
-            
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>상태</InputLabel>
-              <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                label="상태"
-              >
-                <MenuItem value="all">전체</MenuItem>
-                <MenuItem value="ACTIVE">활성</MenuItem>
-                <MenuItem value="PENDING">대기중</MenuItem>
-                <MenuItem value="ERROR">오류</MenuItem>
-              </Select>
-            </FormControl>
+        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+          {/* 검색 */}
+          <TextField
+            size="small"
+            placeholder="SKU, 상품명, ID로 검색..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ minWidth: 300 }}
+          />
 
-            <IconButton
-              onClick={() => loadMappings()}
-              disabled={loading}
+          {/* 필터 */}
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>상태</InputLabel>
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              label="상태"
             >
+              <MenuItem value="all">전체</MenuItem>
+              <MenuItem value="ACTIVE">활성</MenuItem>
+              <MenuItem value="INACTIVE">비활성</MenuItem>
+              <MenuItem value="ERROR">오류</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>동기화</InputLabel>
+            <Select
+              value={syncStatusFilter}
+              onChange={(e) => setSyncStatusFilter(e.target.value)}
+              label="동기화"
+            >
+              <MenuItem value="all">전체</MenuItem>
+              <MenuItem value="synced">동기화됨</MenuItem>
+              <MenuItem value="pending">대기중</MenuItem>
+              <MenuItem value="error">오류</MenuItem>
+            </Select>
+          </FormControl>
+
+          <Box sx={{ flexGrow: 1 }} />
+
+          {/* 액션 버튼 */}
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={handleAddMapping}
+          >
+            새 매핑
+          </Button>
+
+          <Button
+            variant="outlined"
+            startIcon={<AutoFixHigh />}
+            onClick={() => setAutoDiscoverOpen(true)}
+          >
+            자동 탐색
+          </Button>
+
+          <Button
+            variant="outlined"
+            startIcon={<CloudUpload />}
+            onClick={() => setBulkUploadOpen(true)}
+          >
+            엑셀 업로드
+          </Button>
+
+          <Button
+            variant="outlined"
+            startIcon={<FileDownload />}
+            onClick={handleExcelDownload}
+          >
+            엑셀 다운로드
+          </Button>
+
+          <Tooltip title="새로고침">
+            <IconButton onClick={() => loadMappings()} disabled={loading}>
               <Refresh />
             </IconButton>
-          </Box>
+          </Tooltip>
 
-          <Box display="flex" gap={1}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+              />
+            }
+            label="자동 새로고침"
+          />
+        </Stack>
+
+        {/* 선택된 항목 액션 */}
+        {selectedMappings.length > 0 && (
+          <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+            <Alert severity="info" sx={{ flexGrow: 1 }}>
+              {selectedMappings.length}개 항목이 선택되었습니다.
+            </Alert>
             <Button
-              variant="outlined"
-              startIcon={<FileDownload />}
-              onClick={handleDownloadTemplate}
+              size="small"
+              startIcon={<Sync />}
+              onClick={handleBulkSync}
             >
-              템플릿
+              일괄 동기화
             </Button>
-            
             <Button
-              variant="outlined"
-              startIcon={<FileUpload />}
-              onClick={() => setBulkUploadOpen(true)}
+              size="small"
+              color="error"
+              startIcon={<Delete />}
+              onClick={handleBulkDelete}
             >
-              엑셀 업로드
+              일괄 삭제
             </Button>
-            
-            <Button
-              variant="outlined"
-              startIcon={<AutoFixHigh />}
-              onClick={() => setAutoDiscoverOpen(true)}
-            >
-              자동 탐색
-            </Button>
-            
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={() => setAddDialogOpen(true)}
-            >
-              새 매핑
-            </Button>
-          </Box>
-        </Box>
+          </Stack>
+        )}
       </Paper>
 
       {/* 테이블 */}
       <TableContainer component={Paper}>
-        <Table>
+        {loading && <LinearProgress />}
+        <Table size="small">
           <TableHead>
             <TableRow>
               <TableCell padding="checkbox">
                 <Checkbox
-                  indeterminate={
-                    selectedMappings.length > 0 && 
-                    selectedMappings.length < mappings.length
-                  }
-                  checked={
-                    mappings.length > 0 && 
-                    selectedMappings.length === mappings.length
-                  }
-                  onChange={handleSelectAll}
+                  indeterminate={selectedMappings.length > 0 && selectedMappings.length < mappings.length}
+                  checked={mappings.length > 0 && selectedMappings.length === mappings.length}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedMappings(mappings.map(m => m._id));
+                    } else {
+                      setSelectedMappings([]);
+                    }
+                  }}
                 />
               </TableCell>
               <TableCell>SKU</TableCell>
               <TableCell>상품명</TableCell>
               <TableCell>네이버 ID</TableCell>
               <TableCell>Shopify ID</TableCell>
+              <TableCell>벤더</TableCell>
               <TableCell align="center">마진율</TableCell>
               <TableCell align="center">상태</TableCell>
-              <TableCell align="center">활성화</TableCell>
+              <TableCell align="center">동기화</TableCell>
               <TableCell>마지막 동기화</TableCell>
-              <TableCell align="right">작업</TableCell>
+              <TableCell align="center">액션</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {loading && mappings.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={10} align="center">
-                  <Typography variant="body2" color="text.secondary">
-                    로딩 중...
-                  </Typography>
-                </TableCell>
-              </TableRow>
+            {loading ? (
+              // 스켈레톤 로딩
+              Array.from({ length: 5 }).map((_, index) => (
+                <TableRow key={index}>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                  <TableCell><Skeleton /></TableCell>
+                </TableRow>
+              ))
             ) : mappings.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} align="center">
-                  <Typography variant="body2" color="text.secondary">
-                    매핑 데이터가 없습니다.
-                  </Typography>
+                <TableCell colSpan={11} align="center">
+                  <Box sx={{ py: 4 }}>
+                    <Typography variant="body1" color="text.secondary">
+                      매핑 데이터가 없습니다.
+                    </Typography>
+                  </Box>
                 </TableCell>
               </TableRow>
             ) : (
@@ -493,58 +603,139 @@ const SkuMapping: React.FC = () => {
                 <TableRow
                   key={mapping._id}
                   hover
-                  selected={selectedMappings.indexOf(mapping._id) !== -1}
+                  selected={selectedMappings.includes(mapping._id)}
                 >
                   <TableCell padding="checkbox">
                     <Checkbox
-                      checked={selectedMappings.indexOf(mapping._id) !== -1}
-                      onChange={() => handleSelectOne(mapping._id)}
+                      checked={selectedMappings.includes(mapping._id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedMappings([...selectedMappings, mapping._id]);
+                        } else {
+                          setSelectedMappings(selectedMappings.filter(id => id !== mapping._id));
+                        }
+                      }}
                     />
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" fontWeight="medium">
                       {mapping.sku}
                     </Typography>
+                    {mapping.metadata?.autoDiscovered && (
+                      <Chip
+                        label={`자동 ${mapping.metadata.confidence}%`}
+                        size="small"
+                        color="info"
+                        sx={{ mt: 0.5 }}
+                      />
+                    )}
                   </TableCell>
-                  <TableCell>{mapping.productName}</TableCell>
-                  <TableCell>{mapping.naverProductId}</TableCell>
-                  <TableCell>{mapping.shopifyProductId}</TableCell>
-                  <TableCell align="center">{mapping.priceMargin}%</TableCell>
-                  <TableCell align="center">
-                    {renderStatusChip(mapping.syncStatus || mapping.status)}
+                  <TableCell>
+                    <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                      {mapping.productName || '-'}
+                    </Typography>
                   </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" fontFamily="monospace">
+                      {mapping.naverProductId}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" fontFamily="monospace">
+                      {mapping.shopifyProductId}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>{mapping.vendor}</TableCell>
                   <TableCell align="center">
-                    <Switch
-                      checked={mapping.isActive}
+                    <Chip
+                      label={`${(mapping.priceMargin * 100).toFixed(0)}%`}
                       size="small"
-                      color="primary"
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={async () => {
-                        try {
-                          await mappingService.updateMapping(mapping._id, { 
-                            isActive: !mapping.isActive 
-                          });
-                          loadMappings();
-                        } catch (error) {
-                          showNotification('상태 변경에 실패했습니다.', 'error');
-                        }
-                      }}
+                      variant="outlined"
+                    />
+                  </TableCell>
+                  <TableCell align="center">
+                    <Chip
+                      label={mapping.status}
+                      size="small"
+                      color={getStatusColor(mapping.status) as any}
+                      icon={
+                        mapping.status === 'ACTIVE' ? <CheckCircle /> :
+                        mapping.status === 'ERROR' ? <Error /> :
+                        <Warning />
+                      }
+                    />
+                  </TableCell>
+                  <TableCell align="center">
+                    <Chip
+                      label={mapping.syncStatus}
+                      size="small"
+                      color={getSyncStatusColor(mapping.syncStatus) as any}
+                      variant="outlined"
                     />
                   </TableCell>
                   <TableCell>
-                    <Tooltip title={new Date(mapping.lastSyncAt).toLocaleString()}>
-                      <Typography variant="caption">
-                        {new Date(mapping.lastSyncAt).toLocaleDateString()}
+                    {mapping.lastSyncedAt ? (
+                      <Tooltip title={formatDateTime(mapping.lastSyncedAt)}>
+                        <Typography variant="caption">
+                          {new Date(mapping.lastSyncedAt).toLocaleDateString()}
+                        </Typography>
+                      </Tooltip>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">
+                        -
                       </Typography>
-                    </Tooltip>
+                    )}
                   </TableCell>
-                  <TableCell align="right">
-                    <IconButton
-                      size="small"
-                      onClick={(e) => handleMenuOpen(e, mapping)}
-                    >
-                      <MoreVert />
-                    </IconButton>
+                  <TableCell align="center">
+                    <Stack direction="row" spacing={0.5}>
+                      <Tooltip title="상세보기">
+                        <IconButton
+                          size="small"
+                          onClick={() => {
+                            setSelectedMapping(mapping);
+                            setDetailsDialogOpen(true);
+                          }}
+                        >
+                          <Visibility />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="수정">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditMapping(mapping)}
+                        >
+                          <Edit />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="검증">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleValidateMapping(mapping)}
+                        >
+                          <CheckCircle />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="동기화">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleSyncMapping(mapping)}
+                        >
+                          <Sync />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="삭제">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => {
+                            setSelectedMapping(mapping);
+                            setDeleteConfirmOpen(true);
+                          }}
+                        >
+                          <Delete />
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
                   </TableCell>
                 </TableRow>
               ))
@@ -555,118 +746,80 @@ const SkuMapping: React.FC = () => {
           component="div"
           count={totalCount}
           page={page}
-          onPageChange={(_, newPage) => setPage(newPage)}
+          onPageChange={(e, newPage) => setPage(newPage)}
           rowsPerPage={rowsPerPage}
           onRowsPerPageChange={(e) => {
             setRowsPerPage(parseInt(e.target.value, 10));
             setPage(0);
           }}
           rowsPerPageOptions={[10, 20, 50, 100]}
-          labelRowsPerPage="페이지당 행:"
+          labelRowsPerPage="페이지당 항목:"
         />
       </TableContainer>
 
-      {/* 액션 메뉴 */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
-      >
-        <MenuItem onClick={() => handleEdit(selectedMapping)}>
-          <ListItemIcon>
-            <Edit fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>수정</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => selectedMapping && handleValidate(selectedMapping)}>
-          <ListItemIcon>
-            <Check fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>검증</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => handleDelete(selectedMapping)}>
-          <ListItemIcon>
-            <Delete fontSize="small" color="error" />
-          </ListItemIcon>
-          <ListItemText>삭제</ListItemText>
-        </MenuItem>
-      </Menu>
-
-      {/* 새 매핑 추가 다이얼로그 */}
+      {/* Dialogs */}
       <AddMappingDialog
         open={addDialogOpen}
         onClose={() => setAddDialogOpen(false)}
-        onSuccess={() => {
+        onSave={() => {
+          setAddDialogOpen(false);
           loadMappings();
-          showNotification('매핑이 추가되었습니다.', 'success');
         }}
+        initialData={selectedMapping}
       />
 
-      {/* 매핑 수정 다이얼로그 */}
-      {selectedMapping && (
-        <AddMappingDialog
-          open={editDialogOpen}
-          onClose={() => {
-            setEditDialogOpen(false);
-            setSelectedMapping(null);
-          }}
-          onSuccess={() => {
-            loadMappings();
-            showNotification('매핑이 수정되었습니다.', 'success');
-          }}
-          initialData={selectedMapping}
-        />
-      )}
-
-      {/* 엑셀 업로드 다이얼로그 */}
       <BulkUploadDialog
         open={bulkUploadOpen}
         onClose={() => setBulkUploadOpen(false)}
         onSuccess={() => {
+          setBulkUploadOpen(false);
           loadMappings();
-          showNotification('엑셀 업로드가 완료되었습니다.', 'success');
         }}
       />
 
-      {/* 자동 탐색 다이얼로그 */}
       <AutoDiscoverDialog
         open={autoDiscoverOpen}
         onClose={() => setAutoDiscoverOpen(false)}
         onSuccess={() => {
+          setAutoDiscoverOpen(false);
           loadMappings();
-          showNotification('자동 탐색이 완료되었습니다.', 'success');
         }}
       />
 
-      {/* 삭제 확인 다이얼로그 */}
-      <Dialog
-        open={deleteConfirmOpen}
-        onClose={() => setDeleteConfirmOpen(false)}
-      >
-        <DialogTitle>매핑 삭제</DialogTitle>
+      {selectedMapping && (
+        <MappingDetailsDialog
+          open={detailsDialogOpen}
+          onClose={() => setDetailsDialogOpen(false)}
+          mapping={selectedMapping}
+        />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
+        <DialogTitle>매핑 삭제 확인</DialogTitle>
         <DialogContent>
           <Typography>
-            선택한 매핑을 삭제하시겠습니까?
-            {selectedMapping && (
-              <Box mt={1}>
-                <Typography variant="body2" color="text.secondary">
-                  SKU: {selectedMapping.sku}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  상품명: {selectedMapping.productName}
-                </Typography>
-              </Box>
-            )}
+            정말로 "{selectedMapping?.sku}" 매핑을 삭제하시겠습니까?
+            이 작업은 되돌릴 수 없습니다.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteConfirmOpen(false)}>취소</Button>
-          <Button onClick={confirmDelete} color="error" variant="contained">
+          <Button
+            onClick={() => {
+              if (selectedMapping) {
+                handleDeleteMapping(selectedMapping);
+              }
+              setDeleteConfirmOpen(false);
+            }}
+            color="error"
+            variant="contained"
+          >
             삭제
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </Container>
   );
 };
 

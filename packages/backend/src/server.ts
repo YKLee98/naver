@@ -1,217 +1,205 @@
 // packages/backend/src/server.ts
-import express, { Application, Request, Response, NextFunction } from 'express';
+import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
 import compression from 'compression';
-import dotenv from 'dotenv';
-import path from 'path';
-import http from 'http';
-import { Server } from 'socket.io';
-import { connectDB } from './config/database';
-import { initializeRedis } from './config/redis';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import mongoose from 'mongoose';
+import { initializeRedis, closeRedis } from './config/redis';
 import { setupRoutes } from './routes';
 import { errorHandler } from './middlewares/error.middleware';
+import { requestLogger } from './middlewares/logger.middleware';
+import { config } from './config';
 import { logger } from './utils/logger';
-import { AppError } from './utils/errors';
+import path from 'path';
 
 // 환경 변수 로드
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+import * as dotenv from 'dotenv';
 dotenv.config();
 
-// Express 앱 초기화
-const app: Application = express();
-const server = http.createServer(app);
+const app = express();
+const httpServer = createServer(app);
 
-// 포트 설정
-const PORT = process.env.PORT || 3000;
-const WS_PORT = process.env.WS_PORT || 3001;
-
-// WebSocket 설정
-const io = new Server(server, {
+// WebSocket 서버 설정
+const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5173'],
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
+    origin: process.env.CORS_ORIGIN || '*',
+    credentials: true,
+  },
+  path: '/socket.io',
+  transports: ['websocket', 'polling'],
 });
 
 // 미들웨어 설정
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' }
-}));
-app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5173'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false,
 }));
 app.use(compression());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  credentials: true,
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(requestLogger);
 
-// 로깅 미들웨어
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev'));
-}
+// 정적 파일 제공
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// 간단한 요청 로깅
-app.use((req: Request, res: Response, next: NextFunction) => {
-  logger.info(`${req.method} ${req.path}`, {
-    ip: req.ip,
-    userAgent: req.get('user-agent'),
-    body: req.body,
-    query: req.query,
-    params: req.params
-  });
-  next();
-});
-
-// 기본 헬스 체크
-app.get('/health', (req: Request, res: Response) => {
+// Health check endpoint
+app.get('/health', (req, res) => {
   res.json({
-    status: 'ok',
+    status: 'healthy',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    environment: config.env,
   });
 });
 
 // API 라우트 설정
-const apiPrefix = process.env.API_PREFIX || '/api/v1';
-const routes = setupRoutes();
-app.use(apiPrefix, routes);
+const apiRouter = setupRoutes(app);
+app.use('/api/v1', apiRouter);
 
-// 404 처리
-app.use((req: Request, res: Response) => {
-  logger.warn(`Route not found: ${req.method} ${req.path}`);
-  res.status(404).json({
-    success: false,
-    error: {
-      code: 'ROUTE_NOT_FOUND',
-      message: `Route ${req.path} not found`
-    }
-  });
-});
-
-// 에러 핸들러
+// 에러 핸들러 (반드시 마지막에 위치)
 app.use(errorHandler);
 
-// WebSocket 이벤트 핸들러
-io.on('connection', (socket) => {
-  logger.info('New WebSocket connection:', socket.id);
-
-  socket.on('join', (room) => {
-    socket.join(room);
-    logger.info(`Socket ${socket.id} joined room: ${room}`);
-  });
-
-  socket.on('leave', (room) => {
-    socket.leave(room);
-    logger.info(`Socket ${socket.id} left room: ${room}`);
-  });
-
-  socket.on('disconnect', () => {
-    logger.info('Socket disconnected:', socket.id);
-  });
-});
+// MongoDB 연결 함수
+async function connectDatabase() {
+  try {
+    const mongoUri = config.mongodb?.uri || process.env.MONGODB_URI || 'mongodb://localhost:27017/ERP_NAVER';
+    
+    await mongoose.connect(mongoUri, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    } as any);
+    
+    logger.info('MongoDB connected successfully');
+    logger.info(`MongoDB connected to ${mongoUri}`);
+    
+    // 연결 이벤트 리스너
+    mongoose.connection.on('error', (err) => {
+      logger.error('MongoDB connection error:', err);
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+      logger.warn('MongoDB disconnected');
+    });
+    
+    mongoose.connection.on('reconnected', () => {
+      logger.info('MongoDB reconnected');
+    });
+    
+  } catch (error) {
+    logger.error('MongoDB connection failed:', error);
+    throw error;
+  }
+}
 
 // 서버 시작
 async function startServer() {
   try {
     // MongoDB 연결
-    await connectDB();
+    await connectDatabase();
     logger.info('MongoDB connected');
-
-    // Redis 초기화
-    await initializeRedis();
-    logger.info('Redis initialized');
-
-    // 스케줄 작업 초기화 (프로덕션 환경에서만)
-    if (process.env.NODE_ENV === 'production') {
-      try {
-        const { initializeScheduledJobs } = require('./jobs');
-        initializeScheduledJobs();
-        logger.info('Scheduled jobs initialized');
-      } catch (error) {
-        logger.warn('Scheduled jobs not available');
-      }
+    
+    // Redis 연결 (실제 Redis 사용)
+    try {
+      await initializeRedis();
+      logger.info('Redis initialized successfully');
+    } catch (redisError) {
+      logger.error('Redis initialization failed:', redisError);
+      // Redis 연결 실패해도 서버는 계속 실행 (MockRedis로 대체됨)
+      logger.warn('⚠️  Running with MockRedis - some features may be limited');
     }
-
-    // Express 서버 시작
-    app.listen(PORT, () => {
-      logger.info(`🚀 Server is running on port ${PORT}`);
-      logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
-      logger.info(`📍 API Endpoint: http://localhost:${PORT}${apiPrefix}`);
-      logger.info(`💡 Health Check: http://localhost:${PORT}/health`);
-      logger.info(`📝 Dashboard Stats: http://localhost:${PORT}${apiPrefix}/dashboard/stats`);
-      logger.info(`🔐 Login Endpoint: http://localhost:${PORT}${apiPrefix}/auth/login`);
+    
+    // HTTP 서버 시작
+    const port = parseInt(process.env.PORT || '3000', 10);
+    httpServer.listen(port, () => {
+      logger.info(`🚀 Server is running on port ${port}`);
+      logger.info(`🌍 Environment: ${config.env}`);
+      logger.info(`📍 API Endpoint: http://localhost:${port}/api/v1`);
+      logger.info(`💡 Health Check: http://localhost:${port}/health`);
+      logger.info(`📝 Dashboard Stats: http://localhost:${port}/api/v1/dashboard/stats`);
+      logger.info(`🔐 Login Endpoint: http://localhost:${port}/api/v1/auth/login`);
     });
-
-    // WebSocket 서버 시작 (별도 포트)
-    const wsServer = http.createServer();
-    const wsIo = new Server(wsServer, {
+    
+    // WebSocket 서버 시작
+    const wsPort = parseInt(process.env.WS_PORT || '3001', 10);
+    const wsServer = createServer();
+    const wsIo = new SocketIOServer(wsServer, {
       cors: {
-        origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5173'],
-        methods: ['GET', 'POST'],
-        credentials: true
-      }
+        origin: process.env.CORS_ORIGIN || '*',
+        credentials: true,
+      },
     });
-
+    
+    // WebSocket 핸들러 설정
     wsIo.on('connection', (socket) => {
-      logger.info('New WebSocket connection on dedicated port:', socket.id);
+      logger.info('New WebSocket connection:', socket.id);
       
       socket.on('join', (room) => {
         socket.join(room);
         logger.info(`Socket ${socket.id} joined room: ${room}`);
       });
 
+      socket.on('sync-update', (data) => {
+        wsIo.to('admin').emit('sync-status', data);
+      });
+
       socket.on('disconnect', () => {
         logger.info('Socket disconnected:', socket.id);
       });
     });
-
-    wsServer.listen(WS_PORT, () => {
-      logger.info(`🔌 WebSocket server is running on port ${WS_PORT}`);
+    
+    wsServer.listen(wsPort, () => {
+      logger.info(`🔌 WebSocket server is running on port ${wsPort}`);
     });
-
-    // Export for use in other modules
-    (global as any).io = wsIo;
-
+    
+    // Graceful shutdown
+    process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
+    
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);
   }
 }
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
-    logger.info('HTTP server closed');
+async function gracefulShutdown() {
+  logger.info('Graceful shutdown initiated...');
+  
+  try {
+    // 새로운 연결 거부
+    httpServer.close(() => {
+      logger.info('HTTP server closed');
+    });
+    
+    // WebSocket 연결 종료
+    io.close(() => {
+      logger.info('WebSocket server closed');
+    });
+    
+    // Redis 연결 종료
+    try {
+      await closeRedis();
+      logger.info('Redis connection closed');
+    } catch (error) {
+      logger.warn('Could not close Redis connection:', error);
+    }
+    
+    // MongoDB 연결 종료
+    await mongoose.connection.close();
+    logger.info('MongoDB connection closed');
+    
+    logger.info('Graceful shutdown complete');
     process.exit(0);
-  });
-});
+  } catch (error) {
+    logger.error('Error during graceful shutdown:', error);
+    process.exit(1);
+  }
+}
 
-process.on('SIGINT', async () => {
-  logger.info('SIGINT signal received: closing HTTP server');
-  server.close(() => {
-    logger.info('HTTP server closed');
-    process.exit(0);
-  });
-});
-
-// 처리되지 않은 Promise rejection 핸들링
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// 처리되지 않은 예외 핸들링
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
-  process.exit(1);
-});
-
-// 서버 시작
+// 시작
 startServer();

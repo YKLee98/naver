@@ -1,46 +1,99 @@
-// packages/frontend/src/hooks/useNotification.ts
-import { useSnackbar, VariantType } from 'notistack';
+// ===== 3. packages/frontend/src/hooks/useNotification.tsx =====
+import { useSnackbar, VariantType, OptionsObject } from 'notistack';
+import { useCallback } from 'react';
 
+interface NotificationOptions extends Omit<OptionsObject, 'variant'> {
+  persist?: boolean;
+}
+
+/**
+ * 알림 메시지 훅
+ */
 export const useNotification = () => {
   const { enqueueSnackbar, closeSnackbar } = useSnackbar();
 
-  const showNotification = (
-    message: string,
-    variant: VariantType = 'default',
-    options?: {
-      persist?: boolean;
-      preventDuplicate?: boolean;
-    }
-  ) => {
-    return enqueueSnackbar(message, {
-      variant,
-      autoHideDuration: options?.persist ? null : 3000,
-      preventDuplicate: options?.preventDuplicate ?? true,
-      anchorOrigin: {
-        vertical: 'bottom',
-        horizontal: 'right',
-      },
-    });
-  };
+  /**
+   * 알림 표시
+   */
+  const showNotification = useCallback(
+    (
+      message: string,
+      variant: VariantType = 'info',
+      options?: NotificationOptions
+    ) => {
+      const { persist, ...otherOptions } = options || {};
+      
+      return enqueueSnackbar(message, {
+        variant,
+        autoHideDuration: persist ? null : 5000,
+        preventDuplicate: true,
+        anchorOrigin: {
+          vertical: 'bottom',
+          horizontal: 'right',
+        },
+        ...otherOptions,
+      });
+    },
+    [enqueueSnackbar]
+  );
 
-  const hideNotification = (key?: string | number) => {
-    if (key) {
+  /**
+   * 성공 알림
+   */
+  const showSuccess = useCallback(
+    (message: string, options?: NotificationOptions) => {
+      return showNotification(message, 'success', options);
+    },
+    [showNotification]
+  );
+
+  /**
+   * 오류 알림
+   */
+  const showError = useCallback(
+    (message: string, options?: NotificationOptions) => {
+      return showNotification(message, 'error', options);
+    },
+    [showNotification]
+  );
+
+  /**
+   * 경고 알림
+   */
+  const showWarning = useCallback(
+    (message: string, options?: NotificationOptions) => {
+      return showNotification(message, 'warning', options);
+    },
+    [showNotification]
+  );
+
+  /**
+   * 정보 알림
+   */
+  const showInfo = useCallback(
+    (message: string, options?: NotificationOptions) => {
+      return showNotification(message, 'info', options);
+    },
+    [showNotification]
+  );
+
+  /**
+   * 알림 닫기
+   */
+  const hideNotification = useCallback(
+    (key?: string | number) => {
       closeSnackbar(key);
-    } else {
-      closeSnackbar();
-    }
-  };
+    },
+    [closeSnackbar]
+  );
 
   return {
     showNotification,
+    showSuccess,
+    showError,
+    showWarning,
+    showInfo,
     hideNotification,
-    showSuccess: (message: string, options?: any) => 
-      showNotification(message, 'success', options),
-    showError: (message: string, options?: any) => 
-      showNotification(message, 'error', options),
-    showWarning: (message: string, options?: any) => 
-      showNotification(message, 'warning', options),
-    showInfo: (message: string, options?: any) => 
-      showNotification(message, 'info', options),
   };
 };
+

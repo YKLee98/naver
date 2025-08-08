@@ -1,70 +1,118 @@
-// packages/frontend/src/utils/validators.ts
+// ===== 1. packages/backend/src/utils/validators.ts =====
+/**
+ * SKU 유효성 검사 (유연한 규칙)
+ * @param sku SKU 문자열
+ * @returns 유효한 SKU인지 여부
+ */
+export function validateSKU(sku: string): boolean {
+  if (!sku || typeof sku !== 'string') return false;
+  
+  // 기본적인 검증만 수행
+  // - 최소 1자 이상
+  // - 최대 100자 이하
+  // - 공백만으로 이루어지지 않음
+  const trimmedSku = sku.trim();
+  
+  if (trimmedSku.length < 1 || trimmedSku.length > 100) {
+    return false;
+  }
+  
+  // 거의 모든 문자 허용 (영문, 숫자, 한글, 특수문자 등)
+  // 단, 제어 문자나 줄바꿈 문자는 제외
+  const invalidCharsRegex = /[\x00-\x1F\x7F\r\n\t]/;
+  if (invalidCharsRegex.test(trimmedSku)) {
+    return false;
+  }
+  
+  return true;
+}
 
 /**
- * SKU 유효성 검사
+ * 네이버 상품 ID 유효성 검사
+ * @param id 네이버 상품 ID
+ * @returns 유효한 ID인지 여부
  */
-export const validateSKU = (sku: string): boolean => {
-  if (!sku) return false;
+export function validateNaverProductId(id: string): boolean {
+  if (!id || typeof id !== 'string') return false;
   
-  // SKU 패턴: 영문, 숫자, 하이픈(-), 언더바(_)만 허용
-  const skuPattern = /^[A-Z0-9_-]+$/i;
-  return skuPattern.test(sku);
-};
+  // 네이버 상품 ID는 숫자 문자열
+  const idRegex = /^\d+$/;
+  return idRegex.test(id);
+}
+
+/**
+ * Shopify 상품 ID 유효성 검사
+ * @param id Shopify 상품 ID
+ * @returns 유효한 ID인지 여부
+ */
+export function validateShopifyProductId(id: string): boolean {
+  if (!id || typeof id !== 'string') return false;
+  
+  // Shopify 상품 ID 형식: gid://shopify/Product/숫자 또는 숫자만
+  const gidRegex = /^gid:\/\/shopify\/Product\/\d+$/;
+  const numericRegex = /^\d+$/;
+  
+  return gidRegex.test(id) || numericRegex.test(id);
+}
+
+/**
+ * Shopify Variant ID 유효성 검사
+ * @param id Shopify Variant ID
+ * @returns 유효한 ID인지 여부
+ */
+export function validateShopifyVariantId(id: string): boolean {
+  if (!id || typeof id !== 'string') return false;
+  
+  // Shopify Variant ID 형식: gid://shopify/ProductVariant/숫자 또는 숫자만
+  const gidRegex = /^gid:\/\/shopify\/ProductVariant\/\d+$/;
+  const numericRegex = /^\d+$/;
+  
+  return gidRegex.test(id) || numericRegex.test(id);
+}
 
 /**
  * 이메일 유효성 검사
+ * @param email 이메일 주소
+ * @returns 유효한 이메일인지 여부
  */
-export const validateEmail = (email: string): boolean => {
-  if (!email) return false;
+export function validateEmail(email: string): boolean {
+  if (!email || typeof email !== 'string') return false;
   
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailPattern.test(email);
-};
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
 
 /**
- * 전화번호 유효성 검사
+ * 가격 마진 유효성 검사
+ * @param margin 마진율 (0.0 ~ 1.0 또는 0 ~ 100)
+ * @returns 유효한 마진율인지 여부
  */
-export const validatePhone = (phone: string): boolean => {
-  if (!phone) return false;
+export function validatePriceMargin(margin: number): boolean {
+  if (typeof margin !== 'number' || isNaN(margin)) return false;
   
-  // 한국 전화번호 패턴
-  const phonePattern = /^(010|011|016|017|018|019)-?\d{3,4}-?\d{4}$/;
-  return phonePattern.test(phone.replace(/\s/g, ''));
-};
+  // 0.0 ~ 1.0 범위 (소수) 또는 0 ~ 100 범위 (퍼센트)
+  return (margin >= 0 && margin <= 1) || (margin >= 0 && margin <= 100);
+}
 
 /**
- * 숫자 범위 검증
+ * 재고 수량 유효성 검사
+ * @param quantity 재고 수량
+ * @returns 유효한 수량인지 여부
  */
-export const validateNumberRange = (value: number, min: number, max: number): boolean => {
-  return !isNaN(value) && value >= min && value <= max;
-};
-
-/**
- * 양수 검증
- */
-export const validatePositiveNumber = (value: number): boolean => {
-  return !isNaN(value) && value > 0;
-};
-
-/**
- * 0 이상의 정수 검증
- */
-export const validateNonNegativeInteger = (value: number): boolean => {
-  return !isNaN(value) && value >= 0 && Number.isInteger(value);
-};
-
-/**
- * 퍼센트 값 검증 (0-100)
- */
-export const validatePercent = (value: number): boolean => {
-  return validateNumberRange(value, 0, 100);
-};
+export function validateQuantity(quantity: number): boolean {
+  if (typeof quantity !== 'number' || isNaN(quantity)) return false;
+  
+  // 음수가 아닌 정수
+  return quantity >= 0 && Number.isInteger(quantity);
+}
 
 /**
  * URL 유효성 검사
+ * @param url URL 문자열
+ * @returns 유효한 URL인지 여부
  */
-export const validateUrl = (url: string): boolean => {
-  if (!url) return false;
+export function validateURL(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
   
   try {
     new URL(url);
@@ -72,154 +120,55 @@ export const validateUrl = (url: string): boolean => {
   } catch {
     return false;
   }
-};
+}
 
 /**
  * 날짜 유효성 검사
+ * @param date 날짜 문자열 또는 Date 객체
+ * @returns 유효한 날짜인지 여부
  */
-export const validateDate = (date: string | Date): boolean => {
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
-  return !isNaN(dateObj.getTime());
-};
-
-/**
- * 날짜 범위 검증
- */
-export const validateDateRange = (startDate: Date, endDate: Date): boolean => {
-  return validateDate(startDate) && validateDate(endDate) && startDate <= endDate;
-};
-
-/**
- * 파일 확장자 검증
- */
-export const validateFileExtension = (filename: string, allowedExtensions: string[]): boolean => {
-  if (!filename) return false;
+export function validateDate(date: string | Date): boolean {
+  if (!date) return false;
   
-  const extension = filename.split('.').pop()?.toLowerCase();
-  return allowedExtensions.includes(extension || '');
-};
+  const d = date instanceof Date ? date : new Date(date);
+  return !isNaN(d.getTime());
+}
 
 /**
- * 파일 크기 검증 (바이트 단위)
+ * 전화번호 유효성 검사 (한국)
+ * @param phone 전화번호
+ * @returns 유효한 전화번호인지 여부
  */
-export const validateFileSize = (size: number, maxSize: number): boolean => {
-  return size > 0 && size <= maxSize;
-};
-
-/**
- * 상품 ID 검증 (네이버/Shopify)
- */
-export const validateProductId = (id: string): boolean => {
-  if (!id) return false;
+export function validatePhoneNumber(phone: string): boolean {
+  if (!phone || typeof phone !== 'string') return false;
   
-  // 네이버: 숫자, Shopify: gid://shopify/Product/숫자 또는 숫자
-  const naverPattern = /^\d+$/;
-  const shopifyPattern = /^(gid:\/\/shopify\/Product\/)?\d+$/;
-  
-  return naverPattern.test(id) || shopifyPattern.test(id);
-};
+  // 한국 전화번호 형식 (휴대폰, 일반 전화)
+  const phoneRegex = /^(01[0-9]{1}|02|0[3-9]{1}[0-9]{1})-?[0-9]{3,4}-?[0-9]{4}$/;
+  return phoneRegex.test(phone.replace(/\s/g, ''));
+}
 
 /**
- * 마진율 검증
+ * 벤더명 유효성 검사
+ * @param vendor 벤더명
+ * @returns 유효한 벤더명인지 여부
  */
-export const validateMargin = (margin: number): boolean => {
-  // 마진율은 -50% ~ 200% 사이로 제한
-  return validateNumberRange(margin, -50, 200);
-};
+export function validateVendor(vendor: string): boolean {
+  if (!vendor || typeof vendor !== 'string') return false;
+  
+  // 영문, 숫자, 한글, 공백, 하이픈, 언더스코어 허용
+  // 최소 1자, 최대 100자
+  const vendorRegex = /^[A-Za-z0-9가-힣\s_-]{1,100}$/;
+  return vendorRegex.test(vendor);
+}
 
 /**
- * 재고 수량 검증
+ * 배치 크기 유효성 검사
+ * @param size 배치 크기
+ * @returns 유효한 배치 크기인지 여부
  */
-export const validateStock = (stock: number): boolean => {
-  return validateNonNegativeInteger(stock) && stock <= 999999;
-};
-
-/**
- * 비밀번호 강도 검증
- */
-export const validatePasswordStrength = (password: string): {
-  isValid: boolean;
-  errors: string[];
-} => {
-  const errors: string[] = [];
+export function validateBatchSize(size: number): boolean {
+  if (typeof size !== 'number' || isNaN(size)) return false;
   
-  if (password.length < 8) {
-    errors.push('비밀번호는 8자 이상이어야 합니다');
-  }
-  
-  if (!/[A-Z]/.test(password)) {
-    errors.push('대문자를 포함해야 합니다');
-  }
-  
-  if (!/[a-z]/.test(password)) {
-    errors.push('소문자를 포함해야 합니다');
-  }
-  
-  if (!/[0-9]/.test(password)) {
-    errors.push('숫자를 포함해야 합니다');
-  }
-  
-  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-    errors.push('특수문자를 포함해야 합니다');
-  }
-  
-  return {
-    isValid: errors.length === 0,
-    errors,
-  };
-};
-
-/**
- * 검색어 검증 및 정제
- */
-export const sanitizeSearchTerm = (term: string): string => {
-  if (!term) return '';
-  
-  // 특수문자 제거 (일부 허용)
-  return term.replace(/[^a-zA-Z0-9가-힣\s\-_]/g, '').trim();
-};
-
-/**
- * 배치 작업 크기 검증
- */
-export const validateBatchSize = (size: number): boolean => {
-  // 배치 작업은 1-1000개로 제한
-  return validateNumberRange(size, 1, 1000);
-};
-
-/**
- * API 키 형식 검증
- */
-export const validateApiKey = (key: string): boolean => {
-  if (!key) return false;
-  
-  // 일반적인 API 키 패턴 (32-128자의 영숫자)
-  return /^[a-zA-Z0-9]{32,128}$/.test(key);
-};
-
-/**
- * 시간대 검증
- */
-export const validateTimezone = (timezone: string): boolean => {
-  try {
-    Intl.DateTimeFormat(undefined, { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * 언어 코드 검증 (ISO 639-1)
- */
-export const validateLanguageCode = (code: string): boolean => {
-  return /^[a-z]{2}(-[A-Z]{2})?$/.test(code);
-};
-
-/**
- * 통화 코드 검증 (ISO 4217)
- */
-export const validateCurrencyCode = (code: string): boolean => {
-  const validCurrencies = ['KRW', 'USD', 'EUR', 'JPY', 'CNY', 'GBP'];
-  return validCurrencies.includes(code);
-};
+  // 1 ~ 1000 사이의 정수
+  return size >= 1 && size <= 1000 && Number.isInteger(size);
+}

@@ -1,12 +1,10 @@
 // packages/backend/src/config/redis.ts
-
 import Redis from 'ioredis';
 import { logger } from '../utils/logger';
 
-let redisClient: Redis | null = null;
-let isRedisConnected = false;
+let redisClient: Redis | any = null;
 
-// Mock Redis 클라이언트 (Redis가 없을 때 사용)
+// MockRedis 클래스 (Redis 연결 실패 시 사용)
 class MockRedis {
   private store: Map<string, any> = new Map();
   private ttls: Map<string, number> = new Map();
@@ -16,11 +14,14 @@ class MockRedis {
     return this.store.get(key) || null;
   }
 
-  async set(key: string, value: string, mode?: string, duration?: number): Promise<'OK'> {
+  async set(key: string, value: string): Promise<'OK'> {
     this.store.set(key, value);
-    if (mode === 'EX' && duration) {
-      this.ttls.set(key, Date.now() + (duration * 1000));
-    }
+    return 'OK';
+  }
+
+  async setex(key: string, seconds: number, value: string): Promise<'OK'> {
+    this.store.set(key, value);
+    this.ttls.set(key, Date.now() + (seconds * 1000));
     return 'OK';
   }
 
@@ -51,22 +52,14 @@ class MockRedis {
     return remaining > 0 ? remaining : -2;
   }
 
-  async keys(pattern: string): Promise<string[]> {
-    const keys = Array.from(this.store.keys());
-    if (pattern === '*') return keys;
-    
-    const regex = new RegExp(pattern.replace('*', '.*'));
-    return keys.filter(key => regex.test(key));
+  async ping(): Promise<'PONG'> {
+    return 'PONG';
   }
 
   async flushall(): Promise<'OK'> {
     this.store.clear();
     this.ttls.clear();
     return 'OK';
-  }
-
-  async ping(): Promise<'PONG'> {
-    return 'PONG';
   }
 
   private checkTTL(key: string): void {
@@ -77,121 +70,126 @@ class MockRedis {
     }
   }
 
-  on(event: string, callback: Function): void {
-    // Mock event handling
-    if (event === 'connect') {
-      setTimeout(() => callback(), 0);
-    }
-  }
-
-  disconnect(): void {
-    // Mock disconnect
-  }
-
   quit(): Promise<'OK'> {
     return Promise.resolve('OK');
   }
 }
 
+/**
+ * Redis 초기화 - 실제 Redis 연결 시도 후 실패 시 MockRedis 사용
+ */
 export async function initializeRedis(): Promise<Redis | MockRedis> {
   if (redisClient) {
     return redisClient;
   }
 
-  const redisConfig = {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-    password: process.env.REDIS_PASSWORD || undefined,
-    retryStrategy: (times: number) => {
-      const delay = Math.min(times * 50, 2000);
-      return delay;
-    },
-    maxRetriesPerRequest: 3,
-    enableReadyCheck: true,
-    lazyConnect: false,
-  };
-
   try {
-    // Try to connect to real Redis
-    const client = new Redis(redisConfig);
-    
-    // Set up event handlers
-    client.on('connect', () => {
-      logger.info('Redis client connected');
-      isRedisConnected = true;
+    // 실제 Redis 연결 시도
+    const client = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      password: process.env.REDIS_PASSWORD,
+      db: parseInt(process.env.REDIS_DB || '0', 10),
+      retryStrategy: (times: number) => {
+        if (times > 3) {
+          logger.warn('Redis connection failed after 3 attempts');
+          return null; // 연결 포기
+        }
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+      },
+      maxRetriesPerRequest: 3,
+      enableReadyCheck: true,
+      connectTimeout: 5000,
+      lazyConnect: false,
     });
 
-    client.on('error', (err) => {
-      logger.error('Redis client error:', err);
-      isRedisConnected = false;
+    // 연결 이벤트 핸들러
+    client.on('connect', () => {
+      logger.info('Redis client connected');
     });
 
     client.on('ready', () => {
       logger.info('Redis client ready');
-      isRedisConnected = true;
     });
 
-    // Test connection with timeout
-    await Promise.race([
-      client.ping(),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
-      )
-    ]);
+    client.on('error', (err) => {
+      logger.error('Redis client error:', err);
+    });
+
+    // 연결 테스트
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Redis connection timeout'));
+      }, 5000);
+
+      client.ping((err, result) => {
+        clearTimeout(timeout);
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      });
+    });
 
     redisClient = client;
-    isRedisConnected = true;
     logger.info('Redis initialized successfully');
     return client;
 
   } catch (error) {
     logger.warn('Failed to connect to Redis, using in-memory cache instead:', error);
     
-    // Use mock Redis if real Redis is not available
-    const mockClient = new MockRedis() as any;
+    // MockRedis 사용
+    const mockClient = new MockRedis();
     redisClient = mockClient;
-    isRedisConnected = true; // Mock is always "connected"
-    
     logger.info('Using in-memory cache (MockRedis) for development');
     return mockClient;
   }
 }
 
+/**
+ * Redis 클라이언트 가져오기
+ */
 export function getRedisClient(): Redis | MockRedis {
   if (!redisClient) {
-    // Return a mock client if Redis is not initialized
     logger.warn('Redis not initialized, creating mock client');
-    const mockClient = new MockRedis() as any;
+    const mockClient = new MockRedis();
     redisClient = mockClient;
-    isRedisConnected = true;
     return mockClient;
   }
   return redisClient;
 }
 
-export function isRedisHealthy(): boolean {
-  return isRedisConnected;
-}
-
+/**
+ * Redis 연결 종료
+ */
 export async function closeRedis(): Promise<void> {
-  if (redisClient && redisClient instanceof Redis) {
-    await redisClient.quit();
+  if (redisClient) {
+    if (redisClient instanceof Redis) {
+      await redisClient.quit();
+    }
     redisClient = null;
-    isRedisConnected = false;
     logger.info('Redis connection closed');
   }
 }
 
-// Auto-initialize in development mode
-if (process.env.NODE_ENV === 'development') {
-  initializeRedis().catch(err => {
-    logger.error('Failed to auto-initialize Redis:', err);
-  });
+/**
+ * Redis 연결 상태 확인
+ */
+export function isRedisConnected(): boolean {
+  if (!redisClient) {
+    return false;
+  }
+  if (redisClient instanceof Redis) {
+    return redisClient.status === 'ready';
+  }
+  return true; // MockRedis는 항상 연결됨
 }
 
 export default {
   initializeRedis,
   getRedisClient,
-  isRedisHealthy,
   closeRedis,
+  isRedisConnected,
 };

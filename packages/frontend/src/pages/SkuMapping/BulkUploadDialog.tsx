@@ -1,4 +1,4 @@
-// packages/frontend/src/pages/SkuMapping/BulkUploadDialog.tsx
+// ===== 2. packages/frontend/src/pages/SkuMapping/BulkUploadDialog.tsx =====
 import React, { useState } from 'react';
 import {
   Dialog,
@@ -10,23 +10,23 @@ import {
   Typography,
   Alert,
   LinearProgress,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
+  Stack,
+  Link,
+  Table,
+  TableBody,
+  TableRow,
+  TableCell,
   Chip,
-  Divider,
   IconButton,
 } from '@mui/material';
 import {
   CloudUpload,
+  FileDownload,
   CheckCircle,
   Error,
   Warning,
-  FileDownload,
   Close,
 } from '@mui/icons-material';
-import { useDropzone } from 'react-dropzone';
 import { mappingService } from '@/services/api/mapping.service';
 import { useNotification } from '@/hooks/useNotification';
 
@@ -39,7 +39,7 @@ interface BulkUploadDialogProps {
 interface UploadResult {
   total: number;
   success: Array<{ row: number; sku: string }>;
-  errors: Array<{ row: number; sku: string; error: string }>;
+  failed: Array<{ row: number; sku: string; error: string }>;
   skipped: Array<{ row: number; sku: string; reason: string }>;
 }
 
@@ -53,47 +53,72 @@ const BulkUploadDialog: React.FC<BulkUploadDialogProps> = ({
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: {
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-      'application/vnd.ms-excel': ['.xls'],
-    },
-    maxFiles: 1,
-    onDrop: (acceptedFiles) => {
-      if (acceptedFiles.length > 0) {
-        setFile(acceptedFiles[0]);
-        setUploadResult(null);
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (selectedFile) {
+      if (selectedFile.type !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' &&
+          selectedFile.type !== 'application/vnd.ms-excel') {
+        showNotification('엑셀 파일만 업로드 가능합니다.', 'error');
+        return;
       }
-    },
-  });
+      setFile(selectedFile);
+      setUploadResult(null);
+    }
+  };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file) {
+      showNotification('파일을 선택해주세요.', 'warning');
+      return;
+    }
 
     setUploading(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await mappingService.bulkUpload(formData);
-      setUploadResult(response.data);
-
-      if (response.data.success.length > 0) {
+      const response = await mappingService.bulkUploadMappings(formData);
+      
+      if (response.data.success) {
+        setUploadResult(response.data.data);
         showNotification(
-          `${response.data.success.length}개 매핑이 추가되었습니다.`,
+          `업로드 완료: ${response.data.data.success.length}개 성공`,
           'success'
         );
+        
+        if (response.data.data.success.length > 0) {
+          setTimeout(() => {
+            onSuccess();
+          }, 2000);
+        }
       }
-
-      if (response.data.errors.length === 0 && response.data.success.length > 0) {
-        setTimeout(() => {
-          onSuccess();
-        }, 2000);
-      }
-    } catch (error) {
-      showNotification('파일 업로드에 실패했습니다.', 'error');
+    } catch (error: any) {
+      console.error('Upload failed:', error);
+      showNotification(
+        error.response?.data?.message || '업로드에 실패했습니다.',
+        'error'
+      );
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await mappingService.downloadTemplate();
+      
+      // Blob 다운로드 처리
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'sku_mapping_template.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      
+      showNotification('템플릿이 다운로드되었습니다.', 'success');
+    } catch (error) {
+      showNotification('템플릿 다운로드에 실패했습니다.', 'error');
     }
   };
 
@@ -103,237 +128,172 @@ const BulkUploadDialog: React.FC<BulkUploadDialogProps> = ({
     onClose();
   };
 
-  const handleDownloadTemplate = async () => {
-    try {
-      const response = await mappingService.downloadTemplate();
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'sku-mapping-template.xlsx');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } catch (error) {
-      showNotification('템플릿 다운로드에 실패했습니다.', 'error');
-    }
-  };
-
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
       <DialogTitle>
-        엑셀 대량 업로드
-        <IconButton
-          aria-label="close"
-          onClick={handleClose}
-          sx={{ position: 'absolute', right: 8, top: 8 }}
-        >
-          <Close />
-        </IconButton>
+        <Box display="flex" alignItems="center" justifyContent="space-between">
+          <Typography variant="h6">엑셀 대량 업로드</Typography>
+          <IconButton onClick={handleClose} size="small">
+            <Close />
+          </IconButton>
+        </Box>
       </DialogTitle>
 
-      <DialogContent>
-        {/* 안내 메시지 */}
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <Typography variant="body2" gutterBottom>
-            엑셀 파일을 통해 여러 SKU 매핑을 한 번에 추가할 수 있습니다.
-          </Typography>
-          <Button
-            size="small"
-            startIcon={<FileDownload />}
-            onClick={handleDownloadTemplate}
-            sx={{ mt: 1 }}
-          >
-            템플릿 다운로드
-          </Button>
-        </Alert>
+      <DialogContent dividers>
+        <Stack spacing={3}>
+          {/* 안내 메시지 */}
+          <Alert severity="info">
+            <Typography variant="subtitle2" gutterBottom>
+              업로드 방법
+            </Typography>
+            <ol style={{ margin: 0, paddingLeft: 20 }}>
+              <li>템플릿 파일을 다운로드합니다.</li>
+              <li>엑셀 파일에 SKU 매핑 정보를 입력합니다.</li>
+              <li>작성한 파일을 업로드합니다.</li>
+            </ol>
+          </Alert>
 
-        {/* 파일 업로드 영역 */}
-        {!uploadResult && (
-          <Box
-            {...getRootProps()}
-            sx={{
-              border: '2px dashed',
-              borderColor: isDragActive ? 'primary.main' : 'grey.300',
-              borderRadius: 2,
-              p: 4,
-              textAlign: 'center',
-              cursor: 'pointer',
-              backgroundColor: isDragActive ? 'action.hover' : 'background.default',
-              transition: 'all 0.2s',
-              '&:hover': {
-                borderColor: 'primary.main',
-                backgroundColor: 'action.hover',
-              },
-            }}
-          >
-            <input {...getInputProps()} />
-            <CloudUpload sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              {isDragActive
-                ? '파일을 놓으세요'
-                : '클릭하거나 파일을 드래그하세요'}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Excel 파일만 지원됩니다 (.xlsx, .xls)
-            </Typography>
+          {/* 템플릿 다운로드 */}
+          <Box>
+            <Button
+              variant="outlined"
+              startIcon={<FileDownload />}
+              onClick={handleDownloadTemplate}
+              fullWidth
+            >
+              템플릿 다운로드
+            </Button>
           </Box>
-        )}
 
-        {/* 선택된 파일 정보 */}
-        {file && !uploadResult && (
-          <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
-            <Typography variant="body2">
-              선택된 파일: <strong>{file.name}</strong>
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              크기: {(file.size / 1024).toFixed(2)} KB
-            </Typography>
+          {/* 파일 선택 */}
+          <Box>
+            <input
+              accept=".xlsx,.xls"
+              style={{ display: 'none' }}
+              id="bulk-upload-file"
+              type="file"
+              onChange={handleFileSelect}
+            />
+            <label htmlFor="bulk-upload-file">
+              <Button
+                variant="contained"
+                component="span"
+                startIcon={<CloudUpload />}
+                fullWidth
+                disabled={uploading}
+              >
+                파일 선택
+              </Button>
+            </label>
+            {file && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                선택된 파일: {file.name}
+              </Typography>
+            )}
           </Box>
-        )}
 
-        {/* 업로드 진행 상태 */}
-        {uploading && (
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="body2" gutterBottom>
-              업로드 중...
-            </Typography>
-            <LinearProgress />
-          </Box>
-        )}
-
-        {/* 업로드 결과 */}
-        {uploadResult && (
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              업로드 결과
-            </Typography>
-
-            {/* 요약 */}
-            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-              <Chip
-                label={`전체: ${uploadResult.total}`}
-                variant="outlined"
-              />
-              <Chip
-                label={`성공: ${uploadResult.success.length}`}
-                color="success"
-                variant="outlined"
-              />
-              <Chip
-                label={`오류: ${uploadResult.errors.length}`}
-                color="error"
-                variant="outlined"
-              />
-              <Chip
-                label={`건너뜀: ${uploadResult.skipped.length}`}
-                color="warning"
-                variant="outlined"
-              />
+          {/* 업로드 진행 상태 */}
+          {uploading && (
+            <Box>
+              <Typography variant="body2" gutterBottom>
+                업로드 중...
+              </Typography>
+              <LinearProgress />
             </Box>
+          )}
 
-            <Divider sx={{ my: 2 }} />
+          {/* 업로드 결과 */}
+          {uploadResult && (
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                업로드 결과
+              </Typography>
+              
+              <Stack spacing={2}>
+                <Alert severity="info">
+                  전체: {uploadResult.total}개
+                </Alert>
 
-            {/* 성공 목록 */}
-            {uploadResult.success.length > 0 && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  성공 ({uploadResult.success.length})
-                </Typography>
-                <List dense>
-                  {uploadResult.success.slice(0, 5).map((item) => (
-                    <ListItem key={item.row}>
-                      <ListItemIcon>
-                        <CheckCircle color="success" fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={`행 ${item.row}: ${item.sku}`}
-                        primaryTypographyProps={{ variant: 'body2' }}
-                      />
-                    </ListItem>
-                  ))}
-                  {uploadResult.success.length > 5 && (
-                    <ListItem>
-                      <ListItemText
-                        primary={`... 외 ${uploadResult.success.length - 5}개`}
-                        primaryTypographyProps={{
-                          variant: 'body2',
-                          color: 'text.secondary',
-                        }}
-                      />
-                    </ListItem>
-                  )}
-                </List>
-              </Box>
-            )}
+                {uploadResult.success.length > 0 && (
+                  <Alert severity="success">
+                    성공: {uploadResult.success.length}개
+                    <Box sx={{ mt: 1 }}>
+                      {uploadResult.success.slice(0, 5).map((item) => (
+                        <Chip
+                          key={item.sku}
+                          label={`Row ${item.row}: ${item.sku}`}
+                          size="small"
+                          color="success"
+                          sx={{ mr: 1, mb: 0.5 }}
+                        />
+                      ))}
+                      {uploadResult.success.length > 5 && (
+                        <Typography variant="caption">
+                          외 {uploadResult.success.length - 5}개...
+                        </Typography>
+                      )}
+                    </Box>
+                  </Alert>
+                )}
 
-            {/* 오류 목록 */}
-            {uploadResult.errors.length > 0 && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom color="error">
-                  오류 ({uploadResult.errors.length})
-                </Typography>
-                <List dense>
-                  {uploadResult.errors.map((item) => (
-                    <ListItem key={item.row}>
-                      <ListItemIcon>
-                        <Error color="error" fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={`행 ${item.row}: ${item.sku || 'Unknown'}`}
-                        secondary={item.error}
-                        primaryTypographyProps={{ variant: 'body2' }}
-                        secondaryTypographyProps={{ variant: 'caption' }}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            )}
+                {uploadResult.failed.length > 0 && (
+                  <Alert severity="error">
+                    실패: {uploadResult.failed.length}개
+                    <Table size="small" sx={{ mt: 1 }}>
+                      <TableBody>
+                        {uploadResult.failed.slice(0, 5).map((item) => (
+                          <TableRow key={item.sku}>
+                            <TableCell>Row {item.row}</TableCell>
+                            <TableCell>{item.sku}</TableCell>
+                            <TableCell>{item.error}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    {uploadResult.failed.length > 5 && (
+                      <Typography variant="caption">
+                        외 {uploadResult.failed.length - 5}개...
+                      </Typography>
+                    )}
+                  </Alert>
+                )}
 
-            {/* 건너뜀 목록 */}
-            {uploadResult.skipped.length > 0 && (
-              <Box>
-                <Typography variant="subtitle2" gutterBottom color="warning.main">
-                  건너뜀 ({uploadResult.skipped.length})
-                </Typography>
-                <List dense>
-                  {uploadResult.skipped.map((item) => (
-                    <ListItem key={item.row}>
-                      <ListItemIcon>
-                        <Warning color="warning" fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={`행 ${item.row}: ${item.sku}`}
-                        secondary={item.reason}
-                        primaryTypographyProps={{ variant: 'body2' }}
-                        secondaryTypographyProps={{ variant: 'caption' }}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            )}
-          </Box>
-        )}
+                {uploadResult.skipped.length > 0 && (
+                  <Alert severity="warning">
+                    건너뜀: {uploadResult.skipped.length}개
+                    <Table size="small" sx={{ mt: 1 }}>
+                      <TableBody>
+                        {uploadResult.skipped.slice(0, 5).map((item) => (
+                          <TableRow key={item.sku}>
+                            <TableCell>Row {item.row}</TableCell>
+                            <TableCell>{item.sku}</TableCell>
+                            <TableCell>{item.reason}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    {uploadResult.skipped.length > 5 && (
+                      <Typography variant="caption">
+                        외 {uploadResult.skipped.length - 5}개...
+                      </Typography>
+                    )}
+                  </Alert>
+                )}
+              </Stack>
+            </Box>
+          )}
+        </Stack>
       </DialogContent>
 
       <DialogActions>
         <Button onClick={handleClose}>닫기</Button>
-        {file && !uploadResult && (
-          <Button
-            onClick={handleUpload}
-            variant="contained"
-            disabled={uploading}
-            startIcon={<CloudUpload />}
-          >
-            업로드
-          </Button>
-        )}
-        {uploadResult && uploadResult.errors.length === 0 && (
-          <Button onClick={onSuccess} variant="contained" color="primary">
-            완료
-          </Button>
-        )}
+        <Button
+          onClick={handleUpload}
+          variant="contained"
+          disabled={!file || uploading}
+        >
+          업로드
+        </Button>
       </DialogActions>
     </Dialog>
   );

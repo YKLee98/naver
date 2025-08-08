@@ -1,173 +1,180 @@
-// packages/frontend/src/utils/formatters.ts
-import { format, formatDistanceToNow } from 'date-fns';
-import { ko } from 'date-fns/locale';
+// ===== 1. packages/frontend/src/utils/formatters.ts =====
+/**
+ * 날짜/시간 포맷팅
+ */
+export const formatDateTime = (date: string | Date | null | undefined): string => {
+  if (!date) return '-';
+  
+  try {
+    const d = new Date(date);
+    
+    // Invalid Date 체크
+    if (isNaN(d.getTime())) {
+      return '-';
+    }
+    
+    return d.toLocaleString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch (error) {
+    console.error('Date formatting error:', error);
+    return '-';
+  }
+};
 
 /**
- * 숫자 포맷팅 (천 단위 구분)
+ * 날짜만 포맷팅
  */
-export const formatNumber = (value: number | string): string => {
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return '0';
+export const formatDate = (date: string | Date | null | undefined): string => {
+  if (!date) return '-';
   
-  return new Intl.NumberFormat('ko-KR').format(num);
+  try {
+    const d = new Date(date);
+    
+    if (isNaN(d.getTime())) {
+      return '-';
+    }
+    
+    return d.toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch (error) {
+    console.error('Date formatting error:', error);
+    return '-';
+  }
+};
+
+/**
+ * 상대 시간 포맷팅 (예: 5분 전, 2시간 전)
+ */
+export const formatRelativeTime = (date: string | Date | null | undefined): string => {
+  if (!date) return '-';
+  
+  try {
+    const d = new Date(date);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) {
+      return `${days}일 전`;
+    } else if (hours > 0) {
+      return `${hours}시간 전`;
+    } else if (minutes > 0) {
+      return `${minutes}분 전`;
+    } else {
+      return '방금 전';
+    }
+  } catch (error) {
+    return '-';
+  }
 };
 
 /**
  * 통화 포맷팅
  */
-export const formatCurrency = (value: number | string, currency: 'KRW' | 'USD' = 'KRW'): string => {
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return currency === 'KRW' ? '₩0' : '$0';
+export const formatCurrency = (
+  amount: number | string | null | undefined,
+  currency: 'KRW' | 'USD' = 'KRW'
+): string => {
+  if (amount === null || amount === undefined) return '-';
   
-  return new Intl.NumberFormat('ko-KR', {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: currency === 'KRW' ? 0 : 2,
-    maximumFractionDigits: currency === 'KRW' ? 0 : 2,
-  }).format(num);
+  try {
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    
+    if (isNaN(numAmount)) {
+      return '-';
+    }
+    
+    return new Intl.NumberFormat('ko-KR', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: currency === 'KRW' ? 0 : 2,
+      maximumFractionDigits: currency === 'KRW' ? 0 : 2,
+    }).format(numAmount);
+  } catch (error) {
+    console.error('Currency formatting error:', error);
+    return '-';
+  }
 };
 
 /**
- * 날짜 포맷팅
+ * 숫자 포맷팅 (천단위 콤마)
  */
-export const formatDate = (date: string | Date, formatString: string = 'yyyy-MM-dd'): string => {
-  if (!date) return '-';
+export const formatNumber = (
+  value: number | string | null | undefined,
+  decimals: number = 0
+): string => {
+  if (value === null || value === undefined) return '-';
   
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(dateObj.getTime())) return '-';
-  
-  return format(dateObj, formatString, { locale: ko });
-};
-
-/**
- * 날짜/시간 포맷팅
- */
-export const formatDateTime = (date: string | Date, formatString: string = 'yyyy-MM-dd HH:mm:ss'): string => {
-  if (!date) return '-';
-  
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(dateObj.getTime())) return '-';
-  
-  return format(dateObj, formatString, { locale: ko });
-};
-
-/**
- * 상대 시간 포맷팅 (예: 3분 전, 2시간 전)
- */
-export const formatRelativeTime = (date: string | Date): string => {
-  if (!date) return '-';
-  
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(dateObj.getTime())) return '-';
-  
-  return formatDistanceToNow(dateObj, { addSuffix: true, locale: ko });
+  try {
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    
+    if (isNaN(numValue)) {
+      return '-';
+    }
+    
+    return new Intl.NumberFormat('ko-KR', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(numValue);
+  } catch (error) {
+    console.error('Number formatting error:', error);
+    return '-';
+  }
 };
 
 /**
  * 퍼센트 포맷팅
  */
-export const formatPercent = (value: number, decimals: number = 1): string => {
-  if (isNaN(value)) return '0%';
+export const formatPercent = (
+  value: number | string | null | undefined,
+  decimals: number = 0
+): string => {
+  if (value === null || value === undefined) return '-';
   
-  return `${value.toFixed(decimals)}%`;
+  try {
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    
+    if (isNaN(numValue)) {
+      return '-';
+    }
+    
+    return `${numValue.toFixed(decimals)}%`;
+  } catch (error) {
+    console.error('Percent formatting error:', error);
+    return '-';
+  }
 };
 
 /**
- * 바이트 크기 포맷팅
+ * 파일 크기 포맷팅
  */
-export const formatBytes = (bytes: number, decimals: number = 2): string => {
-  if (bytes === 0) return '0 Bytes';
+export const formatFileSize = (bytes: number): string => {
+  if (!bytes || bytes === 0) return '0 Bytes';
   
   const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-  
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 };
 
 /**
- * SKU 포맷팅
+ * SKU 포맷팅 (대문자 변환)
  */
-export const formatSku = (sku: string): string => {
+export const formatSKU = (sku: string | null | undefined): string => {
   if (!sku) return '-';
-  return sku.toUpperCase();
-};
-
-/**
- * 상태 라벨 변환
- */
-export const formatStatus = (status: string): string => {
-  const statusMap: Record<string, string> = {
-    'active': '활성',
-    'inactive': '비활성',
-    'pending': '대기중',
-    'success': '성공',
-    'error': '오류',
-    'warning': '경고',
-    'normal': '정상',
-    'synced': '동기화됨',
-    'not_synced': '미동기화',
-  };
-  
-  return statusMap[status.toLowerCase()] || status;
-};
-
-/**
- * 플랫폼 이름 변환
- */
-export const formatPlatform = (platform: string): string => {
-  const platformMap: Record<string, string> = {
-    'naver': '네이버',
-    'shopify': 'Shopify',
-    'both': '양쪽',
-  };
-  
-  return platformMap[platform.toLowerCase()] || platform;
-};
-
-/**
- * 전화번호 포맷팅
- */
-export const formatPhone = (phone: string): string => {
-  if (!phone) return '-';
-  
-  const cleaned = phone.replace(/\D/g, '');
-  const match = cleaned.match(/^(\d{3})(\d{3,4})(\d{4})$/);
-  
-  if (match) {
-    return `${match[1]}-${match[2]}-${match[3]}`;
-  }
-  
-  return phone;
-};
-
-/**
- * 가격 차이 계산 및 포맷팅
- */
-export const formatPriceDifference = (price1: number, price2: number): string => {
-  const diff = price1 - price2;
-  const percent = price2 !== 0 ? (diff / price2) * 100 : 0;
-  
-  const sign = diff > 0 ? '+' : '';
-  return `${sign}${formatCurrency(diff)} (${sign}${formatPercent(percent)})`;
-};
-
-/**
- * 재고 상태 텍스트
- */
-export const getStockStatusText = (stock: number, threshold: number = 10): string => {
-  if (stock === 0) return '품절';
-  if (stock < threshold) return '재고 부족';
-  return '정상';
-};
-
-/**
- * 재고 상태 색상
- */
-export const getStockStatusColor = (stock: number, threshold: number = 10): string => {
-  if (stock === 0) return 'error';
-  if (stock < threshold) return 'warning';
-  return 'success';
+  return sku.toUpperCase().trim();
 };
