@@ -1,74 +1,29 @@
 // packages/backend/src/controllers/index.ts
 
 /**
- * Controllers Index with Safe Export Pattern
- * Uses try-catch to handle missing controllers gracefully
+ * Controllers Index with ES Module Pattern
+ * Uses conditional exports for optional controllers
  */
 
-// Core Controllers - Always available
-export { AuthController } from './AuthController';
-export { ProductController } from './ProductController';
-export { InventoryController } from './InventoryController';
-export { SyncController } from './SyncController';
-export { WebhookController } from './WebhookController';
-export { MappingController } from './MappingController';
-export { DashboardController } from './DashboardController';
+// Core Controllers - These should always exist
+export { AuthController } from './AuthController.js';
+export { ProductController } from './ProductController.js';
+export { InventoryController } from './InventoryController.js';
+export { SyncController } from './SyncController.js';
+export { WebhookController } from './WebhookController.js';
+export { MappingController } from './MappingController.js';
+export { DashboardController } from './DashboardController.js';
 
-// Extended Controllers - May not be available
-try {
-  export { PriceSyncController } from './PriceSyncController';
-} catch (e) {
-  console.warn('PriceSyncController not available');
-}
+// Optional Controllers - Export with fallback
+// These will be conditionally imported in routes
+export { PriceSyncController } from './PriceSyncController.js';
+export { ExchangeRateController } from './ExchangeRateController.js';
+export { PriceController } from './PriceController.js';
+export { HealthController } from './HealthController.js';
+export { AnalyticsController } from './AnalyticsController.js';
+export { SettingsController } from './SettingsController.js';
+export { NotificationController } from './NotificationController.js';
+export { ReportController } from './ReportController.js';
 
-try {
-  export { ExchangeRateController } from './ExchangeRateController';
-} catch (e) {
-  console.warn('ExchangeRateController not available');
-}
-
-try {
-  export { PriceController } from './PriceController';
-} catch (e) {
-  console.warn('PriceController not available');
-}
-
-try {
-  export { HealthController } from './HealthController';
-} catch (e) {
-  console.warn('HealthController not available');
-}
-
-try {
-  export { AnalyticsController } from './AnalyticsController';
-} catch (e) {
-  console.warn('AnalyticsController not available');
-}
-
-try {
-  export { SettingsController } from './SettingsController';
-} catch (e) {
-  console.warn('SettingsController not available');
-}
-
-try {
-  export { NotificationController } from './NotificationController';
-} catch (e) {
-  console.warn('NotificationController not available');
-}
-
-try {
-  export { ReportController } from './ReportController';
-} catch (e) {
-  console.warn('ReportController not available');
-}
-
-// Export type definitions for TypeScript support
-export type * from './types';
-
-// Re-export controller interfaces if they exist
-try {
-  export type { IController, IAuthController, IProductController } from './interfaces';
-} catch (e) {
-  // Interfaces might not exist, that's okay
-}
+// Export type definitions
+export * from './interfaces.js';

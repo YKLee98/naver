@@ -1,8 +1,8 @@
-// packages/backend/src/routes/auth.routes.ts
+// ===== 2. packages/backend/src/routes/auth.routes.ts =====
 import { Router } from 'express';
-import { AuthController } from '../controllers/AuthController';
-import { authMiddleware } from '../middlewares/auth.middleware';
-import { validateRequest } from '../middlewares/validation.middleware';
+import { AuthController } from '../controllers/AuthController.js';
+import { authMiddleware } from '../middlewares/auth.middleware.js';
+import { validateRequest } from '../middlewares/validation.middleware.js';
 import { body } from 'express-validator';
 
 const router = Router();

@@ -1,19 +1,19 @@
 // packages/backend/src/routes/webhook.routes.ts
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import { logger } from '../utils/logger';
+import Bull from 'bull';
+import { v4 as uuidv4 } from 'uuid';
+import { logger } from '../utils/logger.js';
 import { 
   ProductMapping, 
   WebhookLog, 
   InventoryTransaction,
   SyncActivity
-} from '../models';
-import { NaverProductService, NaverOrderService } from '../services/naver';
-import { ShopifyBulkService } from '../services/shopify';
-import { getRedisClient } from '../config/redis';
-import { config } from '../config';
-import Bull from 'bull';
-import { v4 as uuidv4 } from 'uuid';
+} from '../models/index.js';
+import { NaverProductService, NaverOrderService, NaverAuthService } from '../services/naver/index.js';
+import { ShopifyBulkService } from '../services/shopify/index.js';
+import { getRedisClient } from '../config/redis.js';
+import { config } from '../config/index.js';
 
 const router = Router();
 

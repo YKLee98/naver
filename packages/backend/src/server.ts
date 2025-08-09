@@ -10,55 +10,31 @@ import { Server as SocketIOServer } from 'socket.io';
 import mongoose from 'mongoose';
 import path from 'path';
 import * as cron from 'node-cron';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// ES 모듈에서 __dirname 대체
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Configuration and utilities
-import { logger, stream } from './utils/logger';
-import { config } from './config';
+import { logger, stream } from './utils/logger.js';
+import { config } from './config/index.js';
 
 // Database and Redis
-import { connectDatabase, disconnectDatabase, isDatabaseConnected } from './config/database';
-import { initializeRedis, getRedisClient, closeRedis, isRedisConnected } from './config/redis';
+import { connectDatabase, disconnectDatabase, isDatabaseConnected } from './config/database.js';
+import { initializeRedis, getRedisClient, closeRedis, isRedisConnected } from './config/redis.js';
 
 // Middleware
-import { errorHandler } from './middlewares/error.middleware';
-import { requestLogger } from './middlewares/logger.middleware';
-import { authMiddleware } from './middlewares/auth.middleware';
-import { rateLimiter } from './middlewares/rateLimit.middleware';
-
-// Services
-import {
-  NaverAuthService,
-  NaverProductService,
-  NaverOrderService
-} from './services/naver';
-import {
-  ShopifyGraphQLService,
-  ShopifyBulkService
-} from './services/shopify';
-import {
-  SyncService,
-  InventorySyncService,
-  MappingService,
-  PriceSyncService
-} from './services/sync';
-import { ExchangeRateService } from './services/exchangeRate';
-
-// Controllers
-import { AuthController } from './controllers/AuthController';
-import { ProductController } from './controllers/ProductController';
-import { InventoryController } from './controllers/InventoryController';
-import { SyncController } from './controllers/SyncController';
-import { MappingController } from './controllers/MappingController';
-import { DashboardController } from './controllers/DashboardController';
-import { WebhookController } from './controllers/WebhookController';
-import { PriceSyncController } from './controllers/PriceSyncController';
-import { ExchangeRateController } from './controllers/ExchangeRateController';
+import { errorHandler } from './middlewares/error.middleware.js';
+import { requestLogger } from './middlewares/logger.middleware.js';
+import { rateLimiter } from './middlewares/rateLimit.middleware.js';
 
 // Jobs
-import { AutoRecoveryJob } from './jobs/autoRecovery';
+import { AutoRecoveryJob } from './jobs/autoRecovery.js';
 
 // WebSocket
-import { initializeWebSocket } from './websocket';
+import { setupWebSocket as initializeWebSocket } from './websocket.js';
 
 /**
  * Enterprise-grade Server Class
@@ -204,6 +180,12 @@ class Server {
       // Get Redis client
       this.redis = getRedisClient();
 
+      // Dynamic imports for services
+      const { NaverAuthService, NaverProductService, NaverOrderService } = await import('./services/naver/index.js');
+      const { ShopifyGraphQLService, ShopifyBulkService } = await import('./services/shopify/index.js');
+      const { SyncService, InventorySyncService, MappingService, PriceSyncService } = await import('./services/sync/index.js');
+      const { ExchangeRateService } = await import('./services/exchangeRate/index.js');
+
       // Initialize core services
       const naverAuthService = new NaverAuthService(this.redis);
       const naverProductService = new NaverProductService(naverAuthService);
@@ -239,9 +221,9 @@ class Server {
       );
 
       const priceSyncService = new PriceSyncService(
+        this.redis,
         naverProductService,
-        shopifyGraphQLService,
-        exchangeRateService
+        shopifyGraphQLService
       );
 
       // Store sync services
@@ -250,30 +232,83 @@ class Server {
       this.services.set('mapping', mappingService);
       this.services.set('priceSync', priceSyncService);
 
-      // Initialize controllers
-      const authController = new AuthController();
-      const productController = new ProductController(
-        naverProductService,
-        shopifyGraphQLService
-      );
-      const inventoryController = new InventoryController(inventorySyncService);
-      const syncController = new SyncController(syncService);
-      const mappingController = new MappingController(mappingService);
-      const dashboardController = new DashboardController();
-      const webhookController = new WebhookController(inventorySyncService);
-      const priceSyncController = new PriceSyncController(priceSyncService);
-      const exchangeRateController = new ExchangeRateController(exchangeRateService);
+      // Dynamic imports for controllers - handle missing controllers gracefully
+      const controllers: any = {};
+      
+      try {
+        const { AuthController } = await import('./controllers/AuthController.js');
+        controllers.authController = new AuthController();
+        this.controllers.set('auth', controllers.authController);
+      } catch (error) {
+        logger.warn('AuthController not available');
+      }
 
-      // Store controllers
-      this.controllers.set('auth', authController);
-      this.controllers.set('product', productController);
-      this.controllers.set('inventory', inventoryController);
-      this.controllers.set('sync', syncController);
-      this.controllers.set('mapping', mappingController);
-      this.controllers.set('dashboard', dashboardController);
-      this.controllers.set('webhook', webhookController);
-      this.controllers.set('priceSync', priceSyncController);
-      this.controllers.set('exchangeRate', exchangeRateController);
+      try {
+        const { ProductController } = await import('./controllers/ProductController.js');
+        controllers.productController = new ProductController(
+          naverProductService,
+          shopifyGraphQLService
+        );
+        this.controllers.set('product', controllers.productController);
+      } catch (error) {
+        logger.warn('ProductController not available');
+      }
+
+      try {
+        const { InventoryController } = await import('./controllers/InventoryController.js');
+        controllers.inventoryController = new InventoryController(inventorySyncService);
+        this.controllers.set('inventory', controllers.inventoryController);
+      } catch (error) {
+        logger.warn('InventoryController not available');
+      }
+
+      try {
+        const { SyncController } = await import('./controllers/SyncController.js');
+        controllers.syncController = new SyncController(syncService);
+        this.controllers.set('sync', controllers.syncController);
+      } catch (error) {
+        logger.warn('SyncController not available');
+      }
+
+      try {
+        const { MappingController } = await import('./controllers/MappingController.js');
+        controllers.mappingController = new MappingController(mappingService);
+        this.controllers.set('mapping', controllers.mappingController);
+      } catch (error) {
+        logger.warn('MappingController not available');
+      }
+
+      try {
+        const { DashboardController } = await import('./controllers/DashboardController.js');
+        controllers.dashboardController = new DashboardController();
+        this.controllers.set('dashboard', controllers.dashboardController);
+      } catch (error) {
+        logger.warn('DashboardController not available');
+      }
+
+      try {
+        const { WebhookController } = await import('./controllers/WebhookController.js');
+        controllers.webhookController = new WebhookController(inventorySyncService);
+        this.controllers.set('webhook', controllers.webhookController);
+      } catch (error) {
+        logger.warn('WebhookController not available');
+      }
+
+      try {
+        const { PriceSyncController } = await import('./controllers/PriceSyncController.js');
+        controllers.priceSyncController = new PriceSyncController(priceSyncService);
+        this.controllers.set('priceSync', controllers.priceSyncController);
+      } catch (error) {
+        logger.warn('PriceSyncController not available');
+      }
+
+      try {
+        const { ExchangeRateController } = await import('./controllers/ExchangeRateController.js');
+        controllers.exchangeRateController = new ExchangeRateController(exchangeRateService);
+        this.controllers.set('exchangeRate', controllers.exchangeRateController);
+      } catch (error) {
+        logger.warn('ExchangeRateController not available');
+      }
 
       // Initialize auto recovery job
       this.autoRecoveryJob = new AutoRecoveryJob(
@@ -292,17 +327,7 @@ class Server {
       );
 
       return {
-        controllers: {
-          authController,
-          productController,
-          inventoryController,
-          syncController,
-          mappingController,
-          dashboardController,
-          webhookController,
-          priceSyncController,
-          exchangeRateController
-        },
+        controllers,
         services: {
           naverAuthService,
           naverProductService,
@@ -325,76 +350,102 @@ class Server {
   /**
    * Setup API routes with proper error handling
    */
-  private setupRoutes(controllers: any): void {
+  private async setupRoutes(controllers: any): Promise<void> {
     const apiPrefix = config.api.prefix || '/api/v1';
 
     try {
       // Auth routes (no auth middleware)
-      const authRouter = require('./routes/auth.routes').default;
-      this.app.use(`${apiPrefix}/auth`, authRouter);
-      logger.info('✅ Auth routes registered');
+      try {
+        const authModule = await import('./routes/auth.routes.js');
+        const authRouter = authModule.default;
+        this.app.use(`${apiPrefix}/auth`, authRouter);
+        logger.info('✅ Auth routes registered');
+      } catch (error: any) {
+        logger.error('❌ Auth routes error:', error.message);
+      }
 
       // Webhook routes (special auth)
-      const webhookRouter = require('./routes/webhook.routes').default;
-      this.app.use(`${apiPrefix}/webhooks`, webhookRouter);
-      logger.info('✅ Webhook routes registered');
+      try {
+        const webhookModule = await import('./routes/webhook.routes.js');
+        const webhookRouter = webhookModule.default;
+        this.app.use(`${apiPrefix}/webhooks`, webhookRouter);
+        logger.info('✅ Webhook routes registered');
+      } catch (error: any) {
+        logger.error('❌ Webhook routes error:', error.message);
+      }
+
+      // Setup API routes with async initialization
+      try {
+        const apiModule = await import('./routes/api.routes.js');
+        const setupApiRoutes = apiModule.setupApiRoutes;
+        if (typeof setupApiRoutes === 'function') {
+          const apiRouter = await setupApiRoutes();
+          this.app.use(apiPrefix, apiRouter);
+          logger.info('✅ API routes registered');
+        }
+      } catch (error: any) {
+        logger.error('❌ API routes setup error:', error.message);
+      }
 
       // Dashboard routes
       try {
-        const { setupDashboardRoutes } = require('./routes/dashboard.routes');
-        const dashboardRouter = setupDashboardRoutes();
-        this.app.use(`${apiPrefix}/dashboard`, dashboardRouter);
-        logger.info('✅ Dashboard routes registered');
+        const dashboardModule = await import('./routes/dashboard.routes.js');
+        const setupDashboardRoutes = dashboardModule.setupDashboardRoutes;
+        if (typeof setupDashboardRoutes === 'function') {
+          const dashboardRouter = await setupDashboardRoutes();
+          this.app.use(`${apiPrefix}/dashboard`, dashboardRouter);
+          logger.info('✅ Dashboard routes registered');
+        }
       } catch (error: any) {
         logger.error('❌ Dashboard routes error:', error.message);
       }
 
-      // API routes (with auth)
-      try {
-        const { setupApiRoutes } = require('./routes/api.routes');
-        const apiRouter = setupApiRoutes();
-        this.app.use(apiPrefix, apiRouter);
-        logger.info('✅ API routes registered');
-      } catch (error: any) {
-        logger.error('API routes setup error:', error.message);
-      }
-
       // Settings routes
       try {
-        const settingsRouter = require('./routes/settings.routes').default;
-        if (settingsRouter) {
-          this.app.use(`${apiPrefix}/settings`, settingsRouter);
+        const settingsModule = await import('./routes/settings.routes.js');
+        const setupSettingsRoutes = settingsModule.setupSettingsRoutes || settingsModule.default;
+        if (typeof setupSettingsRoutes === 'function') {
+          this.app.use(`${apiPrefix}/settings`, setupSettingsRoutes());
           logger.info('✅ Settings routes registered');
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.warn('Settings routes not available');
       }
 
       // Price sync routes
       try {
-        const priceSyncRouter = require('./routes/priceSync.routes').default;
-        this.app.use(`${apiPrefix}/price-sync`, priceSyncRouter());
-        logger.info('✅ Price sync routes registered');
+        const priceSyncModule = await import('./routes/priceSync.routes.js');
+        const setupPriceSyncRoutes = priceSyncModule.default;
+        if (typeof setupPriceSyncRoutes === 'function') {
+          this.app.use(`${apiPrefix}/price-sync`, setupPriceSyncRoutes());
+          logger.info('✅ Price sync routes registered');
+        }
       } catch (error: any) {
-        logger.error('Price sync routes error:', error.message);
+        logger.error('❌ Price sync routes error:', error.message);
       }
 
       // Price routes
       try {
-        const priceRouter = require('./routes/price.routes').default;
-        this.app.use(`${apiPrefix}/prices`, priceRouter());
-        logger.info('✅ Price routes registered at /api/v1/prices');
+        const priceModule = await import('./routes/price.routes.js');
+        const setupPriceRoutes = priceModule.default;
+        if (typeof setupPriceRoutes === 'function') {
+          this.app.use(`${apiPrefix}/prices`, setupPriceRoutes());
+          logger.info('✅ Price routes registered at /api/v1/prices');
+        }
       } catch (error: any) {
-        logger.error('Price routes error:', error.message);
+        logger.error('❌ Price routes error:', error.message);
       }
 
       // Exchange rate routes
       try {
-        const exchangeRateRouter = require('./routes/exchangeRate.routes').default;
-        this.app.use(`${apiPrefix}/exchange-rates`, exchangeRateRouter());
-        logger.info('✅ Exchange rates routes registered at /api/v1/exchange-rates');
+        const exchangeRateModule = await import('./routes/exchangeRates.routes.js');
+        const setupExchangeRatesRoutes = exchangeRateModule.default;
+        if (typeof setupExchangeRatesRoutes === 'function') {
+          this.app.use(`${apiPrefix}/exchange-rates`, setupExchangeRatesRoutes());
+          logger.info('✅ Exchange rates routes registered at /api/v1/exchange-rates');
+        }
       } catch (error: any) {
-        logger.error('Exchange rate routes error:', error.message);
+        logger.error('❌ Exchange rate routes error:', error.message);
       }
 
       // 404 handler
@@ -420,9 +471,9 @@ class Server {
    * Setup scheduled tasks with proper error handling
    */
   private setupScheduledTasks(
-    inventorySyncService: InventorySyncService,
-    priceSyncService: PriceSyncService,
-    exchangeRateService: ExchangeRateService
+    inventorySyncService: any,
+    priceSyncService: any,
+    exchangeRateService: any
   ): void {
     // Inventory sync - every 30 minutes
     const inventorySyncJob = cron.schedule('*/30 * * * *', async () => {
@@ -474,7 +525,9 @@ class Server {
    */
   private setupWebSocket(): void {
     try {
+      logger.info('Setting up WebSocket server...');
       initializeWebSocket(this.io);
+      logger.info('WebSocket server setup complete');
       logger.info('WebSocket server initialized');
     } catch (error) {
       logger.error('Failed to initialize WebSocket:', error);
@@ -597,8 +650,8 @@ class Server {
       const { controllers, services } = await this.initializeServices();
       logger.info('Services initialized successfully');
 
-      // Setup routes
-      this.setupRoutes(controllers);
+      // Setup routes - await for async route setup
+      await this.setupRoutes(controllers);
 
       // Setup WebSocket
       this.setupWebSocket();

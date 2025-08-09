@@ -1,8 +1,8 @@
-// packages/backend/src/routes/dashboard.routes.ts
+// ===== 3. packages/backend/src/routes/dashboard.routes.ts =====
 import { Router } from 'express';
-import { authMiddleware } from '../middlewares';
-import { DashboardController } from '../controllers';
-import { logger } from '../utils/logger';
+import { authMiddleware } from '../middlewares/index.js';
+import { DashboardController } from '../controllers/index.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Setup dashboard routes with proper error handling

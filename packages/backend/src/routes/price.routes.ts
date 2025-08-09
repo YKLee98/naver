@@ -1,8 +1,7 @@
-
-// ===== 4. packages/backend/src/routes/price.routes.ts =====
+// ===== 9. packages/backend/src/routes/price.routes.ts =====
 import { Router } from 'express';
-import { authMiddleware } from '../middlewares';
-import { PriceController } from '../controllers/PriceController';
+import { authMiddleware } from '../middlewares/index.js';
+import { PriceController } from '../controllers/PriceController.js';
 
 export default function setupPriceRoutes(): Router {
   const router = Router();

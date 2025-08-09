@@ -2,6 +2,12 @@
 import winston from 'winston';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// ES 모듈에서 __dirname 대체
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // 로그 디렉토리 생성
 const logDir = path.join(__dirname, '../../logs');
@@ -105,6 +111,14 @@ if (process.env.NODE_ENV === 'development') {
   }));
 }
 
+// Morgan을 위한 stream 객체
+export const stream = {
+  write: (message: string) => {
+    // Morgan이 전달하는 메시지에서 줄바꿈 제거
+    logger.info(message.trim());
+  }
+};
+
 // 안전한 로깅 헬퍼 함수
 export function logSafe(level: string, message: string, meta?: any) {
   try {
@@ -120,4 +134,5 @@ export function logSafe(level: string, message: string, meta?: any) {
   }
 }
 
+// default export 추가 (호환성)
 export default logger;

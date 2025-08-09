@@ -700,5 +700,5 @@ class DashboardControllerClass {
 }
 
 // CommonJS export
-export const DashboardController = DashboardControllerClass;
-module.exports = { DashboardController: DashboardControllerClass };
+
+export { DashboardControllerClass as DashboardController };

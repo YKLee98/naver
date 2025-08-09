@@ -1,25 +1,20 @@
-// ===== 13. packages/backend/src/routes/settings.routes.ts =====
-import { Router } from 'express';
-import { authMiddleware, adminMiddleware } from '../middlewares/index.js';
+// ===== 3. packages/backend/src/controllers/SettingsController.ts =====
+import { Request, Response, NextFunction } from 'express';
 import { Settings } from '../models/index.js';
 import { logger } from '../utils/logger.js';
 
-// 라우터 설정을 함수로 export하여 지연 초기화
-export function setupSettingsRoutes(): Router {
-  const router = Router();
-
-  // 인증 미들웨어 적용
-  router.use(authMiddleware);
-
-  // 설정 조회
-  router.get('/', async (req, res, next) => {
+export class SettingsController {
+  /**
+   * Get current settings
+   */
+  async getSettings(req: Request, res: Response, next: NextFunction) {
     try {
       const settings = await Settings.findOne().lean();
       
       if (!settings) {
-        // 기본 설정 생성
+        // Create default settings
         const defaultSettings = await Settings.create({
-          syncInterval: 60, // 60분
+          syncInterval: 60, // 60 minutes
           autoSync: false,
           lowStockThreshold: 10,
           exchangeRateMode: 'api',
@@ -43,14 +38,16 @@ export function setupSettingsRoutes(): Router {
     } catch (error) {
       next(error);
     }
-  });
+  }
 
-  // 설정 업데이트 (관리자 전용)
-  router.put('/', adminMiddleware, async (req, res, next) => {
+  /**
+   * Update settings
+   */
+  async updateSettings(req: Request, res: Response, next: NextFunction) {
     try {
       const updates = req.body;
       
-      // 유효성 검사
+      // Validate settings
       if (updates.syncInterval && updates.syncInterval < 5) {
         return res.status(400).json({
           success: false,
@@ -88,10 +85,40 @@ export function setupSettingsRoutes(): Router {
     } catch (error) {
       next(error);
     }
-  });
+  }
 
-  return router;
+  /**
+   * Reset settings to default
+   */
+  async resetSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      const defaultSettings = {
+        syncInterval: 60,
+        autoSync: false,
+        lowStockThreshold: 10,
+        exchangeRateMode: 'api',
+        customExchangeRate: 1300,
+        defaultMargin: 15,
+        notificationEmail: '',
+        webhookUrl: '',
+        timezone: 'Asia/Seoul'
+      };
+
+      const settings = await Settings.findOneAndUpdate(
+        {},
+        { $set: defaultSettings },
+        { new: true, upsert: true }
+      );
+
+      logger.info('Settings reset to default');
+
+      res.json({
+        success: true,
+        data: settings,
+        message: '설정이 기본값으로 초기화되었습니다.'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
-
-// 기본 export도 제공 (임시)
-export default setupSettingsRoutes();

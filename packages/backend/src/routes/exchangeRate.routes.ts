@@ -1,11 +1,10 @@
-// ===== 6. packages/backend/src/routes/exchangeRate.routes.ts =====
-// 이 파일은 exchangeRates.routes.ts와 동일한 기능을 제공하되, 
-// /exchange-rate 경로용으로 사용됩니다.
+
+// ===== 4. packages/backend/src/routes/exchangeRate.routes.ts =====
 import { Router } from 'express';
-import { authMiddleware } from '../middlewares';
-import { ExchangeRateController } from '../controllers/ExchangeRateController';
-import { ExchangeRateService } from '../services/exchangeRate/ExchangeRateService';
-import { getRedisClient } from '../config/redis';
+import { authMiddleware } from '../middlewares/index.js';
+import { ExchangeRateController } from '../controllers/ExchangeRateController.js';
+import { ExchangeRateService } from '../services/exchangeRate/ExchangeRateService.js';
+import { getRedisClient } from '../config/redis.js';
 
 export default function setupExchangeRateRoutes(): Router {
   const router = Router();

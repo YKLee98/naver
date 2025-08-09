@@ -1,12 +1,12 @@
-// packages/backend/src/routes/priceSync.routes.ts
+// ===== 10. packages/backend/src/routes/priceSync.routes.ts =====
 import { Router } from 'express';
-import { authMiddleware, adminMiddleware } from '../middlewares';
-import { PriceSyncController } from '../controllers/PriceSyncController';
-import { PriceSyncService } from '../services/sync';
-import { NaverAuthService, NaverProductService } from '../services/naver';
-import { ShopifyGraphQLService } from '../services/shopify';
-import { getRedisClient } from '../config/redis';
-import { validateRequest } from '../middlewares/validation.middleware';
+import { authMiddleware, adminMiddleware } from '../middlewares/index.js';
+import { PriceSyncController } from '../controllers/PriceSyncController.js';
+import { PriceSyncService } from '../services/sync/index.js';
+import { NaverAuthService, NaverProductService } from '../services/naver/index.js';
+import { ShopifyGraphQLService } from '../services/shopify/index.js';
+import { getRedisClient } from '../config/redis.js';
+import { validateRequest } from '../middlewares/validation.middleware.js';
 import { body, query, param } from 'express-validator';
 
 const router = Router();

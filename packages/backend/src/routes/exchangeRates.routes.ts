@@ -1,10 +1,10 @@
 // ===== 5. packages/backend/src/routes/exchangeRates.routes.ts =====
 import { Router } from 'express';
-import { authMiddleware, adminMiddleware } from '../middlewares';
-import { ExchangeRateController } from '../controllers/ExchangeRateController';
-import { ExchangeRateService } from '../services/exchangeRate/ExchangeRateService';
-import { getRedisClient } from '../config/redis';
-import { validateRequest } from '../middlewares/validation.middleware';
+import { authMiddleware, adminMiddleware } from '../middlewares/index.js';
+import { ExchangeRateController } from '../controllers/ExchangeRateController.js';
+import { ExchangeRateService } from '../services/exchangeRate/ExchangeRateService.js';
+import { getRedisClient } from '../config/redis.js';
+import { validateRequest } from '../middlewares/validation.middleware.js';
 import { body } from 'express-validator';
 
 export default function setupExchangeRatesRoutes(): Router {

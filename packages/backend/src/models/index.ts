@@ -10,3 +10,6 @@ export { PriceSyncRule } from './PriceSyncRule';
 export { SystemLog } from './SystemLog';
 export { Settings } from './Settings';
 export { OrderSyncStatus } from './OrderSyncStatus';
+export { SyncHistory } from './SyncHistory'; // 추가
+export { SyncActivity } from './SyncActivity';
+export { WebhookLog } from './WebhookLog';

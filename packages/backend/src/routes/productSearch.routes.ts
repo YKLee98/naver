@@ -1,8 +1,8 @@
-// packages/backend/src/routes/productSearch.routes.ts
+// ===== 12. packages/backend/src/routes/productSearch.routes.ts =====
 import { Router } from 'express';
-import { ProductSearchController } from '../controllers/ProductSearchController';
-import { authMiddleware } from '../middlewares/auth.middleware';
-import { validateRequest } from '../middlewares/validation.middleware';
+import { ProductSearchController } from '../controllers/ProductSearchController.js';
+import { authMiddleware } from '../middlewares/auth.middleware.js';
+import { validateRequest } from '../middlewares/validation.middleware.js';
 import { query } from 'express-validator';
 import { Redis } from 'ioredis';
 

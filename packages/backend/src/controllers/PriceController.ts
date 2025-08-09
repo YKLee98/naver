@@ -2,7 +2,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { PriceHistory, ExchangeRate, ProductMapping } from '../models';
 import { asyncHandler } from '../utils/asyncHandler';
-import { AppError } from '../middlewares/error.middleware';
+import { AppError } from '../utils/errors';
 import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 

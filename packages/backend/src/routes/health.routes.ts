@@ -1,7 +1,7 @@
-// packages/backend/src/routes/health.routes.ts
+// ===== 6. packages/backend/src/routes/health.routes.ts =====
 import { Router, Request, Response } from 'express';
-import { getRedisClient } from '../config/redis';
-import { logger } from '../utils/logger';
+import { getRedisClient } from '../config/redis.js';
+import { logger } from '../utils/logger.js';
 import mongoose from 'mongoose';
 
 const router = Router();

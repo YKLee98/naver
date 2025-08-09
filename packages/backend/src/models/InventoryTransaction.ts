@@ -1,7 +1,7 @@
 // packages/backend/src/models/InventoryTransaction.ts
 import { Schema, model, Document } from 'mongoose';
 
-export interface IInventoryTransaction extends Document {
+export interface InventoryTransaction extends Document {
   sku: string;
   platform: 'naver' | 'shopify';
   transactionType: 'sale' | 'restock' | 'adjustment' | 'sync';

@@ -1,8 +1,8 @@
-// packages/backend/src/routes/inventoryAdjust.routes.ts
+// ===== 8. packages/backend/src/routes/inventoryAdjust.routes.ts =====
 import { Router } from 'express';
-import { InventoryAdjustController } from '../controllers/InventoryAdjustController';
-import { authMiddleware } from '../middlewares/auth.middleware';
-import { validateRequest } from '../middlewares/validation.middleware';
+import { InventoryAdjustController } from '../controllers/InventoryAdjustController.js';
+import { authMiddleware } from '../middlewares/auth.middleware.js';
+import { validateRequest } from '../middlewares/validation.middleware.js';
 import { body } from 'express-validator';
 import { Redis } from 'ioredis';
 
@@ -36,5 +36,3 @@ export function createInventoryAdjustRouter(redis: Redis): Router {
 
   return router;
 }
-
-// 기본 export 제거 - 팩토리 함수만 export

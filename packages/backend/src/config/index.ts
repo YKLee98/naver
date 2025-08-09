@@ -1,9 +1,14 @@
 // packages/backend/src/config/index.ts
 import * as dotenv from 'dotenv';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 // .env 파일 로드 (프로젝트 루트에서)
 dotenv.config({ path: resolve(__dirname, '../../.env') });
+
 
 // 환경 변수 값 가져오기 헬퍼 함수
 function getEnvValue(key: string, defaultValue?: string): string {
