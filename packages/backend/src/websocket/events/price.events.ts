@@ -1,145 +1,338 @@
 // packages/backend/src/websocket/events/price.events.ts
 import { Server, Socket } from 'socket.io';
 import { logger } from '../../utils/logger';
-import { PriceSyncService } from '../../services/sync';
-import { getRedisClient } from '../../config/redis';
 
+/**
+ * Register price-related WebSocket event handlers
+ */
 export function registerPriceEvents(io: Server, socket: Socket): void {
-  // 가격 동기화 진행 상황 구독
-  socket.on('price:subscribe', async (data: { room?: string }) => {
-    const room = data.room || 'price:updates';
-    socket.join(room);
-    logger.info(`Socket ${socket.id} joined price room: ${room}`);
-  });
-
-  // 가격 동기화 진행 상황 구독 해제
-  socket.on('price:unsubscribe', async (data: { room?: string }) => {
-    const room = data.room || 'price:updates';
-    socket.leave(room);
-    logger.info(`Socket ${socket.id} left price room: ${room}`);
-  });
-
-  // 실시간 가격 업데이트 요청
-  socket.on('price:check', async (data: { skus: string[] }) => {
+  // Get price status
+  socket.on('price:status', async (data: { sku?: string }, callback) => {
     try {
-      const redis = getRedisClient();
-      
-      // Redis에서 캐시된 가격 정보 조회
-      const priceData = await Promise.all(
-        data.skus.map(async (sku) => {
-          const cacheKey = `price:${sku}`;
-          const cached = await redis.get(cacheKey);
-          
-          if (cached) {
-            return JSON.parse(cached);
-          }
-          
-          return {
-            sku,
-            status: 'not_cached',
-            message: 'Price data not available in cache'
-          };
-        })
-      );
+      // TODO: Get actual price status from price service
+      const status = {
+        sku: data.sku,
+        naverPrice: 45000,
+        shopifyPrice: 38.08,
+        exchangeRate: 1300,
+        margin: 0.1,
+        lastUpdated: new Date().toISOString()
+      };
 
-      socket.emit('price:check:response', {
-        success: true,
-        data: priceData
-      });
-    } catch (error) {
-      logger.error('Error checking prices:', error);
-      socket.emit('price:check:response', {
-        success: false,
-        error: 'Failed to check prices'
-      });
+      if (typeof callback === 'function') {
+        callback({ success: true, status });
+      }
+    } catch (error: any) {
+      logger.error('Error getting price status', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
     }
   });
 
-  // 가격 동기화 시작 알림
-  socket.on('price:sync:start', async (data: { jobId: string; skus: string[] }) => {
-    io.to('price:updates').emit('price:sync:started', {
-      jobId: data.jobId,
-      skus: data.skus,
-      timestamp: new Date()
-    });
-  });
-
-  // 가격 동기화 진행 상황 업데이트
-  socket.on('price:sync:progress', async (data: { 
-    jobId: string; 
-    progress: number; 
-    currentSku?: string;
-    message?: string;
-  }) => {
-    io.to('price:updates').emit('price:sync:progress', {
-      jobId: data.jobId,
-      progress: data.progress,
-      currentSku: data.currentSku,
-      message: data.message,
-      timestamp: new Date()
-    });
-  });
-
-  // 가격 동기화 완료 알림
-  socket.on('price:sync:complete', async (data: { 
-    jobId: string; 
-    success: boolean;
-    results?: any;
-    error?: string;
-  }) => {
-    io.to('price:updates').emit('price:sync:completed', {
-      jobId: data.jobId,
-      success: data.success,
-      results: data.results,
-      error: data.error,
-      timestamp: new Date()
-    });
-  });
-
-  // 환율 업데이트 알림
-  socket.on('exchange:rate:updated', async (data: { 
-    rate: number;
-    source: string;
-    timestamp: Date;
-  }) => {
-    io.emit('exchange:rate:update', {
-      rate: data.rate,
-      source: data.source,
-      timestamp: data.timestamp
-    });
-  });
-}
-
-// 가격 업데이트 이벤트 발송 헬퍼 함수
-export function emitPriceUpdate(io: Server, data: {
-  sku: string;
-  naverPrice?: number;
-  shopifyPrice?: number;
-  margin?: number;
-  exchangeRate?: number;
-  status: 'success' | 'error' | 'warning';
-  message?: string;
-}): void {
-  io.to('price:updates').emit('price:updated', {
-    ...data,
-    timestamp: new Date()
-  });
-}
-
-// 대량 가격 업데이트 이벤트 발송 헬퍼 함수
-export function emitBulkPriceUpdate(io: Server, data: {
-  jobId: string;
-  totalCount: number;
-  successCount: number;
-  failureCount: number;
-  results: Array<{
+  // Update price
+  socket.on('price:update', async (data: {
     sku: string;
-    status: 'success' | 'error';
-    message?: string;
-  }>;
-}): void {
-  io.to('price:updates').emit('price:bulk:updated', {
-    ...data,
-    timestamp: new Date()
+    naverPrice?: number;
+    shopifyPrice?: number;
+    margin?: number;
+    reason?: string;
+  }, callback) => {
+    try {
+      logger.info(`Price update requested by ${socket.id}`, data);
+      
+      // Broadcast price update to all clients
+      io.emit('price:updated', {
+        ...data,
+        updatedBy: socket.id,
+        timestamp: Date.now()
+      });
+
+      if (typeof callback === 'function') {
+        callback({ success: true });
+      }
+    } catch (error: any) {
+      logger.error('Error updating price', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
   });
+
+  // Subscribe to price updates for specific SKU
+  socket.on('price:subscribe:sku', async (data: { sku: string }, callback) => {
+    try {
+      const room = `price:sku:${data.sku}`;
+      await socket.join(room);
+      logger.info(`Socket ${socket.id} subscribed to price updates for SKU ${data.sku}`);
+
+      if (typeof callback === 'function') {
+        callback({ success: true, room });
+      }
+    } catch (error: any) {
+      logger.error('Error subscribing to SKU price', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
+  });
+
+  // Unsubscribe from price updates
+  socket.on('price:unsubscribe:sku', async (data: { sku: string }, callback) => {
+    try {
+      const room = `price:sku:${data.sku}`;
+      await socket.leave(room);
+      logger.info(`Socket ${socket.id} unsubscribed from price updates for SKU ${data.sku}`);
+
+      if (typeof callback === 'function') {
+        callback({ success: true });
+      }
+    } catch (error: any) {
+      logger.error('Error unsubscribing from SKU price', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
+  });
+
+  // Get exchange rate
+  socket.on('price:exchange-rate', async (callback) => {
+    try {
+      // TODO: Get actual exchange rate from service
+      const rate = {
+        baseCurrency: 'KRW',
+        targetCurrency: 'USD',
+        rate: 1300,
+        lastUpdated: new Date().toISOString(),
+        source: 'exchangerate-api'
+      };
+
+      if (typeof callback === 'function') {
+        callback({ success: true, rate });
+      }
+    } catch (error: any) {
+      logger.error('Error getting exchange rate', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
+  });
+}
+
+/**
+ * Emit price update event
+ */
+export function emitPriceUpdate(
+  io: Server,
+  data: {
+    sku: string;
+    productName?: string;
+    previousNaverPrice: number;
+    newNaverPrice: number;
+    previousShopifyPrice: number;
+    newShopifyPrice: number;
+    exchangeRate: number;
+    margin: number;
+    reason?: string;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    naverPriceChange: data.newNaverPrice - data.previousNaverPrice,
+    shopifyPriceChange: data.newShopifyPrice - data.previousShopifyPrice,
+    naverPriceChangePercent: ((data.newNaverPrice - data.previousNaverPrice) / data.previousNaverPrice) * 100,
+    shopifyPriceChangePercent: ((data.newShopifyPrice - data.previousShopifyPrice) / data.previousShopifyPrice) * 100
+  };
+
+  // Emit to all clients
+  io.emit('price:changed', event);
+
+  // Emit to SKU-specific room
+  io.to(`price:sku:${data.sku}`).emit('price:sku:changed', event);
+
+  logger.info('Emit price update', event);
+}
+
+/**
+ * Emit bulk price update event
+ */
+export function emitBulkPriceUpdate(
+  io: Server,
+  data: {
+    items: Array<{
+      sku: string;
+      previousPrice: number;
+      newPrice: number;
+      platform: 'naver' | 'shopify';
+    }>;
+    reason?: string;
+    totalUpdated: number;
+    totalFailed: number;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now()
+  };
+
+  // Emit to all clients
+  io.emit('price:bulk:updated', event);
+
+  // Emit to individual SKU rooms
+  data.items.forEach(item => {
+    io.to(`price:sku:${item.sku}`).emit('price:sku:changed', {
+      ...item,
+      timestamp: Date.now(),
+      reason: data.reason,
+      priceChange: item.newPrice - item.previousPrice,
+      priceChangePercent: ((item.newPrice - item.previousPrice) / item.previousPrice) * 100
+    });
+  });
+
+  logger.info('Emit bulk price update', {
+    totalUpdated: data.totalUpdated,
+    totalFailed: data.totalFailed
+  });
+}
+
+/**
+ * Broadcast price alert
+ */
+export function broadcastPriceAlert(
+  io: Server,
+  data: {
+    sku: string;
+    productName: string;
+    alertType: 'PRICE_INCREASE' | 'PRICE_DECREASE' | 'MARGIN_LOW' | 'PRICE_MISMATCH';
+    severity: 'info' | 'warning' | 'critical';
+    details: {
+      currentPrice?: number;
+      expectedPrice?: number;
+      difference?: number;
+      percentChange?: number;
+      margin?: number;
+      threshold?: number;
+    };
+    message: string;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    id: `price-alert-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  };
+
+  // Emit price alert to all clients
+  io.emit('price:alert', event);
+
+  // Emit to SKU-specific room
+  io.to(`price:sku:${data.sku}`).emit('price:sku:alert', event);
+
+  // Also emit as general alert
+  io.emit(`alert:${data.severity}`, {
+    type: 'price',
+    ...event
+  });
+
+  logger.warn('Broadcast price alert', event);
+}
+
+/**
+ * Broadcast exchange rate update
+ */
+export function broadcastExchangeRateUpdate(
+  io: Server,
+  data: {
+    baseCurrency: string;
+    targetCurrency: string;
+    previousRate: number;
+    newRate: number;
+    changePercent: number;
+    source: string;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    change: data.newRate - data.previousRate
+  };
+
+  // Emit to all clients
+  io.emit('price:exchange-rate:updated', event);
+
+  // If significant change, emit alert
+  if (Math.abs(data.changePercent) > 2) {
+    io.emit('alert:info', {
+      type: 'exchange_rate',
+      severity: Math.abs(data.changePercent) > 5 ? 'warning' : 'info',
+      message: `Exchange rate changed by ${data.changePercent.toFixed(2)}%`,
+      ...event
+    });
+  }
+
+  logger.info('Broadcast exchange rate update', event);
+}
+
+/**
+ * Broadcast price sync status
+ */
+export function broadcastPriceSyncStatus(
+  io: Server,
+  data: {
+    status: 'started' | 'in_progress' | 'completed' | 'failed';
+    itemsProcessed?: number;
+    totalItems?: number;
+    errors?: string[];
+    message?: string;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    progress: data.totalItems ? (data.itemsProcessed || 0) / data.totalItems * 100 : 0
+  };
+
+  // Emit to all clients
+  io.emit('price:sync:status', event);
+
+  logger.debug('Broadcast price sync status', event);
+}
+
+/**
+ * Broadcast margin alert
+ */
+export function broadcastMarginAlert(
+  io: Server,
+  data: {
+    sku: string;
+    productName: string;
+    currentMargin: number;
+    targetMargin: number;
+    naverPrice: number;
+    shopifyPrice: number;
+    exchangeRate: number;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    marginDifference: data.currentMargin - data.targetMargin,
+    alert: data.currentMargin < data.targetMargin ? 'MARGIN_BELOW_TARGET' : 'MARGIN_ABOVE_TARGET',
+    severity: data.currentMargin < 0 ? 'critical' : data.currentMargin < data.targetMargin * 0.5 ? 'warning' : 'info'
+  };
+
+  // Emit to all clients
+  io.emit('price:margin:alert', event);
+
+  // Emit to SKU-specific room
+  io.to(`price:sku:${data.sku}`).emit('price:sku:margin:alert', event);
+
+  // Also emit as general alert
+  io.emit(`alert:${event.severity}`, {
+    type: 'margin',
+    ...event
+  });
+
+  logger.warn('Broadcast margin alert', event);
 }

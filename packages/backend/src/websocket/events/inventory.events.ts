@@ -1,84 +1,317 @@
-// packages/backend/src/websocket/events/sync.events.ts
+// packages/backend/src/websocket/events/inventory.events.ts
 import { Server, Socket } from 'socket.io';
 import { logger } from '../../utils/logger';
-import { SyncJob } from '../../models';
 
-export function registerSyncEvents(io: Server, socket: Socket): void {
-  // 동기화 진행 상황 구독
-  socket.on('sync:subscribe', async (data: { jobId?: string }) => {
-    if (data.jobId) {
-      socket.join(`sync:${data.jobId}`);
-      logger.info(`Socket ${socket.id} subscribed to sync job: ${data.jobId}`);
-      
-      // 현재 동기화 상태 전송
-      try {
-        const job = await SyncJob.findById(data.jobId);
-        if (job) {
-          socket.emit('sync:status', {
-            jobId: job._id,
-            status: job.status,
-            progress: job.progress,
-            startedAt: job.startedAt,
-            completedAt: job.completedAt,
-          });
-        }
-      } catch (error) {
-        logger.error('Error fetching sync job:', error);
-      }
-    } else {
-      socket.join('sync:updates');
-      logger.info(`Socket ${socket.id} subscribed to all sync updates`);
-    }
-  });
-
-  // 동기화 진행 상황 구독 해제
-  socket.on('sync:unsubscribe', async (data: { jobId?: string }) => {
-    if (data.jobId) {
-      socket.leave(`sync:${data.jobId}`);
-    } else {
-      socket.leave('sync:updates');
-    }
-  });
-
-  // 동기화 상태 조회
-  socket.on('sync:status', async (data: { jobId: string }) => {
+/**
+ * Register inventory-related WebSocket event handlers
+ */
+export function registerInventoryEvents(io: Server, socket: Socket): void {
+  // Get inventory status
+  socket.on('inventory:status', async (data: { sku?: string }, callback) => {
     try {
-      const job = await SyncJob.findById(data.jobId);
-      socket.emit('sync:status:response', {
-        success: true,
-        data: job,
+      // TODO: Get actual inventory status from inventory service
+      const status = {
+        sku: data.sku,
+        naverQuantity: 100,
+        shopifyQuantity: 100,
+        lastUpdated: new Date().toISOString(),
+        inSync: true
+      };
+
+      if (typeof callback === 'function') {
+        callback({ success: true, status });
+      }
+    } catch (error: any) {
+      logger.error('Error getting inventory status', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
+  });
+
+  // Adjust inventory
+  socket.on('inventory:adjust', async (data: {
+    sku: string;
+    platform: 'naver' | 'shopify' | 'both';
+    quantity: number;
+    reason: string;
+  }, callback) => {
+    try {
+      logger.info(`Inventory adjustment requested by ${socket.id}`, data);
+      
+      // Broadcast adjustment to all clients
+      io.emit('inventory:adjusted', {
+        ...data,
+        adjustedBy: socket.id,
+        timestamp: Date.now()
       });
-    } catch (error) {
-      socket.emit('sync:status:response', {
-        success: false,
-        error: 'Failed to fetch sync status',
-      });
+
+      if (typeof callback === 'function') {
+        callback({ success: true });
+      }
+    } catch (error: any) {
+      logger.error('Error adjusting inventory', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
+  });
+
+  // Subscribe to inventory updates for specific SKU
+  socket.on('inventory:subscribe:sku', async (data: { sku: string }, callback) => {
+    try {
+      const room = `inventory:sku:${data.sku}`;
+      await socket.join(room);
+      logger.info(`Socket ${socket.id} subscribed to inventory updates for SKU ${data.sku}`);
+
+      if (typeof callback === 'function') {
+        callback({ success: true, room });
+      }
+    } catch (error: any) {
+      logger.error('Error subscribing to SKU inventory', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
+  });
+
+  // Unsubscribe from inventory updates
+  socket.on('inventory:unsubscribe:sku', async (data: { sku: string }, callback) => {
+    try {
+      const room = `inventory:sku:${data.sku}`;
+      await socket.leave(room);
+      logger.info(`Socket ${socket.id} unsubscribed from inventory updates for SKU ${data.sku}`);
+
+      if (typeof callback === 'function') {
+        callback({ success: true });
+      }
+    } catch (error: any) {
+      logger.error('Error unsubscribing from SKU inventory', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
+    }
+  });
+
+  // Get low stock items
+  socket.on('inventory:low-stock', async (data: { threshold?: number }, callback) => {
+    try {
+      // TODO: Get actual low stock items from inventory service
+      const lowStockItems = [
+        { sku: 'SKU001', quantity: 5, threshold: 10 },
+        { sku: 'SKU002', quantity: 3, threshold: 10 }
+      ];
+
+      if (typeof callback === 'function') {
+        callback({ success: true, items: lowStockItems });
+      }
+    } catch (error: any) {
+      logger.error('Error getting low stock items', error);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: error.message });
+      }
     }
   });
 }
 
-// 동기화 진행 상황 업데이트 브로드캐스트
-export function broadcastSyncProgress(io: Server, data: {
-  jobId: string;
-  status: string;
-  progress: number;
-  currentItem?: string;
-  message?: string;
-}): void {
-  // 특정 작업 구독자에게 전송
-  io.to(`sync:${data.jobId}`).emit('sync:progress', data);
-  
-  // 전체 구독자에게도 전송
-  io.to('sync:updates').emit('sync:progress', data);
+/**
+ * Broadcast inventory update to all connected clients
+ */
+export function broadcastInventoryUpdate(
+  io: Server,
+  data: {
+    sku: string;
+    platform: 'naver' | 'shopify' | 'both';
+    previousQuantity: number;
+    newQuantity: number;
+    reason?: string;
+    transactionType?: string;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    difference: data.newQuantity - data.previousQuantity
+  };
+
+  // Emit to all clients
+  io.emit('inventory:updated', event);
+
+  // Emit to SKU-specific room
+  io.to(`inventory:sku:${data.sku}`).emit('inventory:sku:updated', event);
+
+  logger.info('Broadcast inventory update', event);
 }
 
-// 동기화 완료 알림
-export function broadcastSyncComplete(io: Server, data: {
-  jobId: string;
-  status: 'completed' | 'failed';
-  results?: any;
-  error?: string;
-}): void {
-  io.to(`sync:${data.jobId}`).emit('sync:complete', data);
-  io.to('sync:updates').emit('sync:complete', data);
+/**
+ * Broadcast out of stock alert
+ */
+export function broadcastOutOfStock(
+  io: Server,
+  data: {
+    sku: string;
+    productName: string;
+    platform: 'naver' | 'shopify' | 'both';
+    lastQuantity: number;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    alert: 'OUT_OF_STOCK'
+  };
+
+  // Emit critical alert to all clients
+  io.emit('inventory:out-of-stock', event);
+
+  // Emit to SKU-specific room
+  io.to(`inventory:sku:${data.sku}`).emit('inventory:sku:out-of-stock', event);
+
+  // Also emit as general alert
+  io.emit('alert:critical', {
+    type: 'inventory',
+    severity: 'critical',
+    ...event
+  });
+
+  logger.warn('Broadcast out of stock alert', event);
+}
+
+/**
+ * Broadcast low stock warning
+ */
+export function broadcastLowStock(
+  io: Server,
+  data: {
+    sku: string;
+    productName: string;
+    platform: 'naver' | 'shopify' | 'both';
+    currentQuantity: number;
+    threshold: number;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    alert: 'LOW_STOCK'
+  };
+
+  // Emit warning to all clients
+  io.emit('inventory:low-stock', event);
+
+  // Emit to SKU-specific room
+  io.to(`inventory:sku:${data.sku}`).emit('inventory:sku:low-stock', event);
+
+  // Also emit as general alert
+  io.emit('alert:warning', {
+    type: 'inventory',
+    severity: 'warning',
+    ...event
+  });
+
+  logger.warn('Broadcast low stock warning', event);
+}
+
+/**
+ * Broadcast inventory sync status
+ */
+export function broadcastInventorySyncStatus(
+  io: Server,
+  data: {
+    sku?: string;
+    status: 'syncing' | 'synced' | 'error';
+    message?: string;
+    details?: any;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now()
+  };
+
+  if (data.sku) {
+    // SKU-specific sync status
+    io.to(`inventory:sku:${data.sku}`).emit('inventory:sync:status', event);
+  } else {
+    // General inventory sync status
+    io.emit('inventory:sync:status', event);
+  }
+
+  logger.debug('Broadcast inventory sync status', event);
+}
+
+/**
+ * Broadcast inventory discrepancy alert
+ */
+export function broadcastInventoryDiscrepancy(
+  io: Server,
+  data: {
+    sku: string;
+    productName: string;
+    naverQuantity: number;
+    shopifyQuantity: number;
+    difference: number;
+    threshold: number;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now(),
+    alert: 'INVENTORY_DISCREPANCY',
+    severity: Math.abs(data.difference) > data.threshold * 2 ? 'critical' : 'warning'
+  };
+
+  // Emit to all clients
+  io.emit('inventory:discrepancy', event);
+
+  // Emit to SKU-specific room
+  io.to(`inventory:sku:${data.sku}`).emit('inventory:sku:discrepancy', event);
+
+  // Also emit as general alert
+  io.emit(`alert:${event.severity}`, {
+    type: 'inventory_discrepancy',
+    ...event
+  });
+
+  logger.warn('Broadcast inventory discrepancy', event);
+}
+
+/**
+ * Broadcast bulk inventory update
+ */
+export function broadcastBulkInventoryUpdate(
+  io: Server,
+  data: {
+    items: Array<{
+      sku: string;
+      previousQuantity: number;
+      newQuantity: number;
+      platform: string;
+    }>;
+    reason?: string;
+    totalUpdated: number;
+    totalFailed: number;
+  }
+): void {
+  const event = {
+    ...data,
+    timestamp: Date.now()
+  };
+
+  // Emit to all clients
+  io.emit('inventory:bulk:updated', event);
+
+  // Emit to individual SKU rooms
+  data.items.forEach(item => {
+    io.to(`inventory:sku:${item.sku}`).emit('inventory:sku:updated', {
+      ...item,
+      timestamp: Date.now(),
+      reason: data.reason
+    });
+  });
+
+  logger.info('Broadcast bulk inventory update', {
+    totalUpdated: data.totalUpdated,
+    totalFailed: data.totalFailed
+  });
 }
