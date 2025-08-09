@@ -35,23 +35,31 @@ export async function setupApiRoutes(): Promise<Router> {
       );
       const mappingController = new MappingController(mappingService);
 
-      // Bind methods to maintain context
+      // 중요: 더 구체적인 라우트를 먼저 등록해야 함!
+      // Static routes first (더 구체적인 경로)
+      protectedRouter.get('/mappings/export', mappingController.exportMappings.bind(mappingController));
+      protectedRouter.get('/mappings/stats', mappingController.getMappingStats.bind(mappingController));
+      protectedRouter.get('/mappings/search-by-sku', mappingController.searchProductsBySku.bind(mappingController));
+      protectedRouter.get('/mappings/search/:sku', mappingController.searchProductsBySku.bind(mappingController));
+      protectedRouter.get('/mappings/sku/:sku', mappingController.getMappingBySku.bind(mappingController));
+      
+      // Then routes with parameters
+      protectedRouter.post('/mappings/auto-discover', mappingController.autoDiscoverMappings.bind(mappingController));
+      protectedRouter.post('/mappings/bulk', mappingController.bulkUploadMappings.bind(mappingController));
+      protectedRouter.post('/mappings/import', mappingController.importMappings.bind(mappingController));
+      protectedRouter.post('/mappings/validate', mappingController.validateMappingData.bind(mappingController));
+      
+      // General CRUD routes
+      protectedRouter.get('/mappings', mappingController.getAllMappings.bind(mappingController));
       protectedRouter.post('/mappings', mappingController.createMapping.bind(mappingController));
+      
+      // ID-based routes last (가장 일반적인 패턴)
+      protectedRouter.get('/mappings/:id', mappingController.getMappingById.bind(mappingController));
       protectedRouter.put('/mappings/:id', mappingController.updateMapping.bind(mappingController));
       protectedRouter.delete('/mappings/:id', mappingController.deleteMapping.bind(mappingController));
-      protectedRouter.get('/mappings', mappingController.getAllMappings.bind(mappingController));
-      protectedRouter.get('/mappings/:id', mappingController.getMappingById.bind(mappingController));
-      protectedRouter.get('/mappings/sku/:sku', mappingController.getMappingBySku.bind(mappingController));
-      protectedRouter.get('/mappings/search/:sku', mappingController.searchProductsBySku.bind(mappingController));
-      protectedRouter.get('/mappings/search-by-sku', mappingController.searchProductsBySku.bind(mappingController));
-      protectedRouter.post('/mappings/auto-discover', mappingController.autoDiscoverMappings.bind(mappingController));
       protectedRouter.post('/mappings/:id/validate', mappingController.validateMapping.bind(mappingController));
       protectedRouter.post('/mappings/:id/retry', mappingController.retryPendingMapping.bind(mappingController));
       protectedRouter.post('/mappings/:id/sync', mappingController.syncMapping.bind(mappingController));
-      protectedRouter.post('/mappings/bulk', mappingController.bulkUploadMappings.bind(mappingController));
-      protectedRouter.get('/mappings/export', mappingController.exportMappings.bind(mappingController));
-      protectedRouter.post('/mappings/import', mappingController.importMappings.bind(mappingController));
-      protectedRouter.get('/mappings/stats', mappingController.getMappingStats.bind(mappingController));
       
       logger.info('✅ Mapping routes initialized');
     } else {
@@ -80,12 +88,17 @@ export async function setupApiRoutes(): Promise<Router> {
         shopifyGraphQLService
       );
 
-      protectedRouter.get('/products', productController.getMappedProducts.bind(productController));
-      protectedRouter.get('/products/:sku', productController.getProductBySku.bind(productController));
+      // Static routes first
       protectedRouter.get('/products/search/naver', productController.searchNaverProducts.bind(productController));
       protectedRouter.get('/products/search/shopify', productController.searchShopifyProducts.bind(productController));
-      protectedRouter.post('/products/sync/:sku', productController.syncProduct.bind(productController));
+      
+      // General routes
+      protectedRouter.get('/products', productController.getMappedProducts.bind(productController));
       protectedRouter.post('/products/bulk-sync', productController.bulkSyncProducts.bind(productController));
+      
+      // Parameter routes last
+      protectedRouter.get('/products/:sku', productController.getProductBySku.bind(productController));
+      protectedRouter.post('/products/sync/:sku', productController.syncProduct.bind(productController));
       
       logger.info('✅ Product routes initialized');
     } else {
@@ -117,14 +130,17 @@ export async function setupApiRoutes(): Promise<Router> {
 
       const inventoryController = new InventoryController(inventorySyncService);
 
+      // Static routes first
       protectedRouter.get('/inventory/status', inventoryController.getAllInventoryStatus.bind(inventoryController));
+      protectedRouter.get('/inventory/low-stock', inventoryController.getLowStockProducts.bind(inventoryController));
+      protectedRouter.get('/inventory/out-of-stock', inventoryController.getOutOfStockProducts.bind(inventoryController));
+      protectedRouter.get('/inventory/discrepancies', inventoryController.getInventoryDiscrepancies.bind(inventoryController));
+      protectedRouter.post('/inventory/bulk-adjust', inventoryController.bulkAdjustInventory.bind(inventoryController));
+      
+      // Parameter routes last
       protectedRouter.get('/inventory/:sku/status', inventoryController.getInventoryStatus.bind(inventoryController));
       protectedRouter.get('/inventory/:sku/history', inventoryController.getInventoryHistory.bind(inventoryController));
       protectedRouter.post('/inventory/:sku/adjust', inventoryController.adjustInventory.bind(inventoryController));
-      protectedRouter.get('/inventory/low-stock', inventoryController.getLowStockProducts.bind(inventoryController));
-      protectedRouter.get('/inventory/out-of-stock', inventoryController.getOutOfStockProducts.bind(inventoryController));
-      protectedRouter.post('/inventory/bulk-adjust', inventoryController.bulkAdjustInventory.bind(inventoryController));
-      protectedRouter.get('/inventory/discrepancies', inventoryController.getInventoryDiscrepancies.bind(inventoryController));
       
       logger.info('✅ Inventory routes initialized');
     } else {
@@ -159,12 +175,15 @@ export async function setupApiRoutes(): Promise<Router> {
 
       const syncController = new SyncController(syncService);
 
+      // Static routes first
       protectedRouter.post('/sync/full', syncController.performFullSync.bind(syncController));
-      protectedRouter.post('/sync/sku/:sku', syncController.syncSingleSku.bind(syncController));
       protectedRouter.get('/sync/status', syncController.getSyncStatus.bind(syncController));
       protectedRouter.get('/sync/settings', syncController.getSyncSettings.bind(syncController));
       protectedRouter.put('/sync/settings', syncController.updateSyncSettings.bind(syncController));
       protectedRouter.get('/sync/history', syncController.getSyncHistory.bind(syncController));
+      
+      // Parameter routes last
+      protectedRouter.post('/sync/sku/:sku', syncController.syncSingleSku.bind(syncController));
       protectedRouter.post('/sync/retry/:jobId', syncController.retrySyncJob.bind(syncController));
       protectedRouter.post('/sync/cancel/:jobId', syncController.cancelSyncJob.bind(syncController));
       
@@ -184,12 +203,15 @@ export async function setupApiRoutes(): Promise<Router> {
     if (DashboardController) {
       const dashboardController = new DashboardController();
 
+      // Static routes first
       protectedRouter.get('/dashboard/statistics', dashboardController.getStatistics.bind(dashboardController));
       protectedRouter.get('/dashboard/activities', dashboardController.getRecentActivities.bind(dashboardController));
       protectedRouter.get('/dashboard/charts/price', dashboardController.getPriceChartData.bind(dashboardController));
       protectedRouter.get('/dashboard/charts/inventory', dashboardController.getInventoryChartData.bind(dashboardController));
       protectedRouter.get('/dashboard/charts/sync', dashboardController.getSyncChartData.bind(dashboardController));
       protectedRouter.get('/dashboard/alerts', dashboardController.getAlerts.bind(dashboardController));
+      
+      // Parameter routes last
       protectedRouter.post('/dashboard/alerts/:id/dismiss', dashboardController.dismissAlert.bind(dashboardController));
       
       logger.info('✅ Dashboard routes initialized');
