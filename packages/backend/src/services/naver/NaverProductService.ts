@@ -35,6 +35,7 @@ export class NaverProductService {
 
   constructor(authService: NaverAuthService) {
     this.authService = authService;
+    // baseURL을 /external까지 포함하도록 설정
     this.baseUrl = process.env.NAVER_API_URL || 'https://api.commerce.naver.com/external';
     
     this.axiosInstance = axios.create({
@@ -63,7 +64,7 @@ export class NaverProductService {
       async (error) => {
         if (error.response?.status === 401) {
           // Token expired, try to refresh
-          await this.authService.refreshAccessToken();
+          await this.authService.clearTokenCache();
           
           // Retry the original request
           const originalRequest = error.config;
@@ -83,13 +84,15 @@ export class NaverProductService {
    */
   async searchProductsBySellerManagementCode(sku: string): Promise<NaverProduct[]> {
     try {
-      const response = await this.axiosInstance.get('/v2/products', {
-        params: {
-          sellerManagementCode: sku,
-          page: 1,
-          size: 10
-        }
-      });
+      // POST /v1/products/search 사용 (baseURL이 /external 포함)
+      const requestBody = {
+        searchType: 'SELLER_MANAGEMENT_CODE',
+        searchKeyword: sku,
+        page: 1,
+        size: 10
+      };
+
+      const response = await this.axiosInstance.post('/v1/products/search', requestBody);
 
       if (response.data && response.data.contents) {
         return response.data.contents;
@@ -112,32 +115,37 @@ export class NaverProductService {
    */
   async searchProducts(options: NaverProductSearchOptions): Promise<any> {
     try {
-      const params: any = {
+      // POST /v1/products/search 사용 (baseURL이 /external 포함)
+      const requestBody: any = {
         page: options.page || 1,
         size: options.size || 20
       };
 
       if (options.searchKeyword) {
-        params.searchKeyword = options.searchKeyword;
+        requestBody.searchKeyword = options.searchKeyword;
       }
 
       if (options.searchType) {
-        params.searchType = options.searchType;
+        requestBody.searchType = options.searchType;
       }
 
-      const response = await this.axiosInstance.get('/v2/products', {
-        params
-      });
+      const response = await this.axiosInstance.post('/v1/products/search', requestBody);
+      
+      if (response.status === 200 && response.data) {
+        return response.data;
+      }
 
-      return response.data;
+      // 결과가 없으면 빈 결과 반환
+      return { contents: [], totalElements: 0 };
+      
     } catch (error: any) {
       logger.error('Error searching products:', error);
       
       if (error.response?.status === 404) {
-        return { contents: [], totalElements: 0 };
+        logger.warn('Search endpoint not found, returning empty result');
       }
       
-      throw error;
+      return { contents: [], totalElements: 0 };
     }
   }
 
@@ -150,18 +158,17 @@ export class NaverProductService {
     page?: number;
   } = {}): Promise<any> {
     try {
-      const params: any = {
+      // POST /v1/products/search 사용 (baseURL이 /external 포함)
+      const requestBody: any = {
         page: options.page || 1,
         size: options.limit || 100
       };
 
       if (options.saleStatus) {
-        params.statusType = options.saleStatus;
+        requestBody.saleStatus = options.saleStatus;
       }
 
-      const response = await this.axiosInstance.get('/v2/products', {
-        params
-      });
+      const response = await this.axiosInstance.post('/v1/products/search', requestBody);
 
       return {
         items: response.data.contents || [],
@@ -185,7 +192,8 @@ export class NaverProductService {
    */
   async getProduct(productId: string): Promise<NaverProduct | null> {
     try {
-      const response = await this.axiosInstance.get(`/v2/products/${productId}`);
+      // GET /v2/products/origin-products/{originProductNo} 사용
+      const response = await this.axiosInstance.get(`/v2/products/origin-products/${productId}`);
       return response.data;
     } catch (error: any) {
       logger.error(`Error getting product ${productId}:`, error);
@@ -216,9 +224,13 @@ export class NaverProductService {
    */
   async updateProductStock(productId: string, quantity: number): Promise<boolean> {
     try {
-      const response = await this.axiosInstance.patch(`/v2/products/${productId}`, {
-        stockQuantity: quantity
-      });
+      // PUT /v1/products/origin-products/{originProductNo}/option-stock 사용
+      const response = await this.axiosInstance.put(
+        `/v1/products/origin-products/${productId}/option-stock`,
+        {
+          stockQuantity: quantity
+        }
+      );
 
       return response.status === 200;
     } catch (error) {
@@ -232,9 +244,13 @@ export class NaverProductService {
    */
   async updateProductPrice(productId: string, price: number): Promise<boolean> {
     try {
-      const response = await this.axiosInstance.patch(`/v2/products/${productId}`, {
-        salePrice: price
-      });
+      // PUT /v2/products/origin-products/{originProductNo} 사용
+      const response = await this.axiosInstance.put(
+        `/v2/products/origin-products/${productId}`,
+        {
+          salePrice: price
+        }
+      );
 
       return response.status === 200;
     } catch (error) {
@@ -248,9 +264,13 @@ export class NaverProductService {
    */
   async updateProductStatus(productId: string, status: 'SALE' | 'SUSPENSION' | 'OUTOFSTOCK'): Promise<boolean> {
     try {
-      const response = await this.axiosInstance.patch(`/v2/products/${productId}/status`, {
-        statusType: status
-      });
+      // PUT /v1/products/origin-products/{originProductNo}/change-status 사용
+      const response = await this.axiosInstance.put(
+        `/v1/products/origin-products/${productId}/change-status`,
+        {
+          statusType: status
+        }
+      );
 
       return response.status === 200;
     } catch (error) {
@@ -268,13 +288,14 @@ export class NaverProductService {
     size?: number;
   }): Promise<any> {
     try {
-      const response = await this.axiosInstance.get('/v2/products', {
-        params: {
-          ...params,
-          page: params.page || 1,
-          size: params.size || 20
-        }
-      });
+      // POST /v1/products/search 사용 (baseURL이 /external 포함)
+      const requestBody = {
+        ...params,
+        page: params.page || 1,
+        size: params.size || 20
+      };
+
+      const response = await this.axiosInstance.post('/v1/products/search', requestBody);
 
       return response.data;
     } catch (error) {
@@ -288,7 +309,7 @@ export class NaverProductService {
    */
   async getStockHistory(productId: string, startDate: Date, endDate: Date): Promise<any[]> {
     try {
-      const response = await this.axiosInstance.get(`/v2/products/${productId}/stock-history`, {
+      const response = await this.axiosInstance.get(`/v1/products/${productId}/stock-history`, {
         params: {
           startDate: startDate.toISOString(),
           endDate: endDate.toISOString()

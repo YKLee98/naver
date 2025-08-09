@@ -53,10 +53,42 @@ function safeStringify(obj: any): string {
   }, 2);
 }
 
+// 안전한 타임스탬프 포맷팅 함수
+function formatTimestamp(timestamp: any): string {
+  try {
+    // timestamp가 없으면 현재 시간 사용
+    if (!timestamp) {
+      return new Date().toISOString().replace('T', ' ').split('.')[0];
+    }
+    
+    // timestamp가 유효한 Date 객체 또는 변환 가능한 값인지 확인
+    let date: Date;
+    
+    if (timestamp instanceof Date) {
+      date = timestamp;
+    } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+      date = new Date(timestamp);
+    } else {
+      // 기타 유효하지 않은 타입인 경우 현재 시간 사용
+      return new Date().toISOString().replace('T', ' ').split('.')[0];
+    }
+    
+    // Invalid Date 체크
+    if (isNaN(date.getTime())) {
+      return new Date().toISOString().replace('T', ' ').split('.')[0];
+    }
+    
+    return date.toISOString().replace('T', ' ').split('.')[0];
+  } catch (error) {
+    // 모든 에러 상황에서 현재 시간 반환
+    return new Date().toISOString().replace('T', ' ').split('.')[0];
+  }
+}
+
 // 커스텀 포맷
 const customFormat = winston.format.printf((info) => {
   const { timestamp, level, message, ...meta } = info;
-  const time = timestamp ? new Date(timestamp).toISOString().replace('T', ' ').split('.')[0] : new Date().toISOString().replace('T', ' ').split('.')[0];
+  const time = formatTimestamp(timestamp);
   
   let logMessage = `${time} [${level}]: ${message}`;
   
