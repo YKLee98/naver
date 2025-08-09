@@ -173,7 +173,9 @@ export class MappingController {
         naverProductId,
         shopifyProductId,
         shopifyVariantId,
-        priceMargin = 15,
+        productName,
+        vendor = 'album',
+        priceMargin = 0.15,
         isActive = true,
         autoSearch = false
       } = req.body;
@@ -196,67 +198,22 @@ export class MappingController {
         throw new AppError('SKU already exists', 409);
       }
 
-      let finalNaverProductId = naverProductId;
-      let finalShopifyProductId = shopifyProductId;
-      let finalShopifyVariantId = shopifyVariantId;
-      let productName = '';
-      let vendor = 'album';
-
-      // 자동 검색이 활성화된 경우 - ShopifyProductSearchService 사용
-      if (autoSearch) {
-        try {
-          // 네이버 검색 - 올바른 파라미터 사용
-          if (!naverProductId && this.naverProductService) {
-            try {
-              const naverProducts = await this.naverProductService.searchProducts({
-                searchKeyword: sku,  // keyword 대신 searchKeyword 사용
-                searchType: 'SELLER_MANAGEMENT_CODE',  // searchType 추가
-                page: 1,
-                size: 1
-              });
-              if (naverProducts && naverProducts.contents && naverProducts.contents.length > 0) {
-                const naverProduct = naverProducts.contents[0];
-                finalNaverProductId = naverProduct.productNo || naverProduct.productId || 'PENDING';
-                productName = naverProduct.name || sku;
-              }
-            } catch (naverError) {
-              logger.warn(`Naver auto-search failed for SKU ${sku}:`, naverError);
-            }
-          }
-          
-          // Shopify 검색 - ShopifyProductSearchService 사용
-          if (!shopifyProductId && this.shopifySearchService) {
-            const shopifyProduct = await this.searchShopifyProducts(sku);
-            if (shopifyProduct) {
-              finalShopifyProductId = shopifyProduct.product_id || 'PENDING';
-              finalShopifyVariantId = shopifyProduct.id || 'PENDING';
-              vendor = shopifyProduct.vendor || 'album';
-              if (!productName) {
-                productName = shopifyProduct.product_title || sku;
-              }
-            }
-          }
-        } catch (searchError) {
-          logger.warn(`Auto-search failed for SKU ${sku}:`, searchError);
-        }
-      }
-
       // 매핑 상태 결정
       const mappingStatus = (
-        finalNaverProductId === 'PENDING' || 
-        finalShopifyProductId === 'PENDING' || 
-        finalShopifyVariantId === 'PENDING'
+        !naverProductId || naverProductId === 'PENDING' || 
+        !shopifyProductId || shopifyProductId === 'PENDING' || 
+        !shopifyVariantId || shopifyVariantId === 'PENDING'
       ) ? 'PENDING' : 'ACTIVE';
 
       // 매핑 생성
       const mapping = await ProductMapping.create([{
         sku: sku.toUpperCase(),
-        naverProductId: finalNaverProductId || 'PENDING',
-        shopifyProductId: finalShopifyProductId || 'PENDING',
-        shopifyVariantId: finalShopifyVariantId || 'PENDING',
+        naverProductId: naverProductId || 'PENDING',
+        shopifyProductId: shopifyProductId || 'PENDING',
+        shopifyVariantId: shopifyVariantId || 'PENDING',
         productName: productName || sku,
-        vendor: vendor,
-        priceMargin: priceMargin / 100,
+        vendor: vendor || 'album',
+        priceMargin: typeof priceMargin === 'number' ? priceMargin : 0.15,
         isActive: mappingStatus === 'ACTIVE' ? isActive : false,
         status: mappingStatus,
         syncStatus: 'pending',
@@ -270,16 +227,22 @@ export class MappingController {
 
       await session.commitTransaction();
 
-      // 활동 로그 기록
-      await Activity.create({
-        type: 'mapping_created',
-        action: `매핑 생성: ${sku}`,
-        details: {
-          autoSearch,
-          status: mappingStatus
-        },
-        userId: (req as any).user?.id
-      });
+      // 활동 로그 기록 (트랜잭션 외부에서)
+      try {
+        await Activity.create({
+          type: 'mapping_created',
+          action: `매핑 생성: ${sku}`,
+          details: {
+            autoSearch,
+            status: mappingStatus
+          },
+          userId: (req as any).user?.id
+        });
+      } catch (activityError) {
+        logger.error('Failed to create activity log:', activityError);
+      }
+
+      logger.info(`Mapping created successfully: ${sku}`);
 
       res.status(201).json({
         success: true,
@@ -290,6 +253,7 @@ export class MappingController {
       });
     } catch (error) {
       await session.abortTransaction();
+      logger.error('Failed to create mapping:', error);
       next(error);
     } finally {
       session.endSession();
@@ -396,7 +360,7 @@ export class MappingController {
   }
 
   /**
-   * 모든 매핑 조회 - 프론트엔드 형식에 맞게 수정
+   * 모든 매핑 조회
    * GET /api/v1/mappings
    */
   async getAllMappings(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -411,16 +375,16 @@ export class MappingController {
         vendor,
         sortBy = 'createdAt',
         sortOrder = 'desc',
-        order = 'desc'  // sortOrder 대신 order도 지원
+        order = 'desc'
       } = req.query;
 
       const query: any = {};
 
-      if (status) {
+      if (status && status !== 'all') {
         query.status = status;
       }
 
-      if (syncStatus) {
+      if (syncStatus && syncStatus !== 'all') {
         query.syncStatus = syncStatus;
       }
 
@@ -428,17 +392,18 @@ export class MappingController {
         query.vendor = vendor;
       }
 
-      if (isActive !== undefined) {
+      if (isActive !== undefined && isActive !== '' && isActive !== 'all') {
         query.isActive = isActive === 'true';
       }
 
       if (search) {
+        const searchRegex = { $regex: search, $options: 'i' };
         query.$or = [
-          { sku: { $regex: search, $options: 'i' } },
-          { productName: { $regex: search, $options: 'i' } },
-          { vendor: { $regex: search, $options: 'i' } },
-          { naverProductId: { $regex: search, $options: 'i' } },
-          { shopifyProductId: { $regex: search, $options: 'i' } }
+          { sku: searchRegex },
+          { productName: searchRegex },
+          { vendor: searchRegex },
+          { naverProductId: searchRegex },
+          { shopifyProductId: searchRegex }
         ];
       }
 
@@ -446,11 +411,14 @@ export class MappingController {
       const finalSortOrder = sortOrder || order;
       sort[sortBy as string] = finalSortOrder === 'asc' ? 1 : -1;
 
+      logger.info('Fetching mappings with query:', query);
+
       const mappings = await ProductMapping
         .find(query)
         .sort(sort)
         .limit(Number(limit))
-        .skip((Number(page) - 1) * Number(limit));
+        .skip((Number(page) - 1) * Number(limit))
+        .lean();
 
       const total = await ProductMapping.countDocuments(query);
 
@@ -474,11 +442,12 @@ export class MappingController {
         })
       ]);
 
-      // 프론트엔드가 기대하는 형식으로 응답
+      logger.info(`Found ${mappings.length} mappings, total: ${total}`);
+
       res.json({
         success: true,
         data: {
-          mappings: mappings,  // 배열을 mappings 키로 감싸기
+          mappings: mappings,
           pagination: {
             total,
             page: Number(page),
@@ -496,6 +465,7 @@ export class MappingController {
         }
       });
     } catch (error) {
+      logger.error('Failed to get mappings:', error);
       next(error);
     }
   }
@@ -548,7 +518,7 @@ export class MappingController {
   }
 
   /**
-   * 자동 매핑 탐색 - ShopifyProductSearchService 사용
+   * 자동 매핑 탐색
    * POST /api/v1/mappings/auto-discover
    */
   async autoDiscoverMappings(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -557,12 +527,11 @@ export class MappingController {
 
       const discoveries = [];
 
-      // 네이버 상품 목록 가져오기
       if (this.naverProductService) {
         try {
           const naverProducts = await this.naverProductService.listProducts({ 
             limit,
-            saleStatus: 'ALL'  // 모든 상태의 상품 포함
+            saleStatus: 'ALL'
           });
           
           if (naverProducts && naverProducts.items) {
@@ -570,13 +539,11 @@ export class MappingController {
               const sku = naverProduct.sellerManagementCode || naverProduct.sku;
               
               if (sku) {
-                // 이미 매핑이 있는지 확인
                 const existingMapping = await ProductMapping.findOne({ 
                   sku: sku.toUpperCase() 
                 });
                 
                 if (!existingMapping) {
-                  // Shopify에서 동일한 SKU 검색 - ShopifyProductSearchService 사용
                   const shopifyProduct = await this.searchShopifyProducts(sku);
                   
                   if (shopifyProduct) {
@@ -593,7 +560,7 @@ export class MappingController {
                         title: shopifyProduct.product_title,
                         price: shopifyProduct.price
                       },
-                      confidence: 100 // SKU 정확히 일치
+                      confidence: 100
                     });
                   }
                 }
@@ -666,7 +633,6 @@ export class MappingController {
 
       for (const mappingData of mappings) {
         try {
-          // SKU 유효성 검사
           if (!validateSKU(mappingData.sku)) {
             results.failed++;
             results.errors.push({
@@ -676,7 +642,6 @@ export class MappingController {
             continue;
           }
 
-          // 중복 확인
           const existing = await ProductMapping.findOne({ 
             sku: mappingData.sku.toUpperCase() 
           }).session(session);
@@ -690,7 +655,6 @@ export class MappingController {
             continue;
           }
 
-          // 매핑 생성
           await ProductMapping.create([{
             ...mappingData,
             sku: mappingData.sku.toUpperCase(),
@@ -724,13 +688,11 @@ export class MappingController {
   }
 
   /**
-   * SKU로 상품 검색 - 네이버 API 파라미터 수정 및 성능 최적화
-   * GET /api/v1/mappings/search/:sku
+   * SKU로 상품 검색
    * GET /api/v1/mappings/search-by-sku
    */
   async searchProductsBySku(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      // params에서 sku를 가져오거나 query에서 가져옴
       const sku = req.params.sku || req.query.sku;
 
       if (!sku || (typeof sku === 'string' && sku.length < 2)) {
@@ -762,10 +724,9 @@ export class MappingController {
         }
       };
 
-      // 네이버와 Shopify 검색을 병렬로 처리하여 성능 개선
       const searchPromises = [];
 
-      // 네이버 상품 검색 Promise
+      // 네이버 상품 검색
       if (this.naverProductService) {
         const naverPromise = (async () => {
           try {
@@ -773,72 +734,37 @@ export class MappingController {
             
             let naverProducts: any[] = [];
             
-            // SKU로 직접 검색
             try {
               const skuSearchResult = await this.naverProductService.searchProducts({
                 searchKeyword: skuUpper,
                 searchType: 'SELLER_MANAGEMENT_CODE',
                 page: 1,
-                size: 5  // 성능을 위해 크기 제한
+                size: 10
               });
               
-              // 디버깅: API 응답 구조 확인
-              logger.info('=== Naver API Response Structure ===');
-              if (skuSearchResult) {
-                logger.info('Response type:', typeof skuSearchResult);
-                logger.info('Response keys:', Object.keys(skuSearchResult));
-                
-                if (skuSearchResult.contents && skuSearchResult.contents.length > 0) {
-                  const firstItem = skuSearchResult.contents[0];
-                  logger.info('First content item keys:', Object.keys(firstItem));
-                  
-                  // channelProducts 구조 확인
-                  if (firstItem.channelProducts) {
-                    logger.info('channelProducts type:', typeof firstItem.channelProducts);
-                    logger.info('channelProducts is array:', Array.isArray(firstItem.channelProducts));
-                    
-                    if (Array.isArray(firstItem.channelProducts) && firstItem.channelProducts.length > 0) {
-                      logger.info('First channelProduct keys:', Object.keys(firstItem.channelProducts[0]));
-                      logger.info('First channelProduct sample:', {
-                        productNo: firstItem.channelProducts[0].productNo,
-                        channelProductNo: firstItem.channelProducts[0].channelProductNo,
-                        name: firstItem.channelProducts[0].name,
-                        salePrice: firstItem.channelProducts[0].salePrice,
-                        sellerManagementCode: firstItem.channelProducts[0].sellerManagementCode,
-                        statusType: firstItem.channelProducts[0].statusType
-                      });
-                    }
-                  }
-                }
-              }
-              
-              // channelProducts 배열을 평탄화
               if (skuSearchResult && skuSearchResult.contents) {
                 const flatProducts = [];
                 for (const item of skuSearchResult.contents) {
                   if (item.channelProducts && Array.isArray(item.channelProducts)) {
                     for (const channelProduct of item.channelProducts) {
-                      // originProductNo를 추가
                       flatProducts.push({
                         ...channelProduct,
                         originProductNo: item.originProductNo
                       });
                     }
+                  } else {
+                    flatProducts.push(item);
                   }
                 }
                 
                 if (flatProducts.length > 0) {
                   naverProducts = flatProducts;
-                  logger.info(`Flattened ${flatProducts.length} products from channelProducts`);
                 } else {
-                  // channelProducts가 없으면 기존 방식 시도
                   naverProducts = skuSearchResult.contents;
                 }
               } else if (skuSearchResult) {
                 if (skuSearchResult.items && Array.isArray(skuSearchResult.items)) {
                   naverProducts = skuSearchResult.items;
-                } else if (skuSearchResult.content && Array.isArray(skuSearchResult.content)) {
-                  naverProducts = skuSearchResult.content;
                 } else if (Array.isArray(skuSearchResult)) {
                   naverProducts = skuSearchResult;
                 }
@@ -848,94 +774,40 @@ export class MappingController {
             }
 
             if (naverProducts.length > 0) {
-              logger.info(`Processing ${naverProducts.length} Naver products`);
-              
-              // 중복 제거: ID가 같거나 비어있는 경우 처리
               const uniqueProducts = new Map();
-              naverProducts.forEach((product: any, index: number) => {
+              naverProducts.forEach((product: any) => {
                 const productId = product.channelProductNo ||
                                  product.productNo || 
                                  product.originProductNo ||
-                                 product.id || 
-                                 product.productId;
+                                 product.id;
                 
-                // ID가 있고 중복되지 않은 경우만 추가
                 if (productId && !uniqueProducts.has(productId)) {
                   uniqueProducts.set(productId, product);
-                } else if (!productId && uniqueProducts.size < 5) {
-                  // ID가 없는 경우 인덱스를 키로 사용 (최대 5개)
-                  uniqueProducts.set(`temp-${index}`, product);
                 }
               });
               
-              // Map을 배열로 변환
               const dedupedProducts = Array.from(uniqueProducts.values());
-              
-              logger.info(`After deduplication: ${dedupedProducts.length} unique products`);
               
               searchResults.naver = {
                 found: true,
-                products: dedupedProducts.slice(0, 5).map((product: any, index: number) => {
-                  // 디버깅: 첫 번째 상품의 실제 데이터 확인
-                  if (index === 0) {
-                    logger.info('First Naver product raw data:', {
-                      hasProductNo: !!product.productNo,
-                      hasChannelProductNo: !!product.channelProductNo,
-                      hasOriginProductNo: !!product.originProductNo,
-                      hasId: !!product.id,
-                      hasName: !!product.name,
-                      hasSalePrice: !!product.salePrice,
-                      actualProductNo: product.productNo,
-                      actualChannelProductNo: product.channelProductNo,
-                      actualName: product.name,
-                      actualSalePrice: product.salePrice
-                    });
-                  }
-                  
-                  // 다양한 ID 필드 확인 (channelProductNo 우선)
-                  const productId = product.channelProductNo ||
-                                   product.productNo || 
-                                   product.originProductNo ||
-                                   product.id || 
-                                   product.productId || 
-                                   `naver-${index}`;  // fallback ID
-                  
-                  // 다양한 이름 필드 확인
-                  const productName = product.name || 
-                                     product.productName || 
-                                     product.modelName || 
-                                     product.title ||
-                                     'Unknown Product';
-                  
-                  // 다양한 가격 필드 확인
-                  const productPrice = product.salePrice || 
-                                      product.discountedPrice || 
-                                      product.price || 
-                                      product.supplyPrice ||
-                                      0;
-                  
-                  return {
-                    id: productId,
-                    name: productName,
-                    sku: product.sellerManagementCode || product.sellerProductTag || product.sku || skuUpper,
-                    price: productPrice,
-                    imageUrl: product.representativeImage?.url || product.imageUrl || '',
-                    stockQuantity: product.stockQuantity || 0,
-                    status: product.statusType || product.channelProductDisplayStatusType || product.saleStatus || product.status || 'SALE',
-                    similarity: this.calculateSimilarity(
-                      skuUpper, 
-                      product.sellerManagementCode || product.sellerProductTag || product.sku || ''
-                    )
-                  };
-                }),
+                products: dedupedProducts.slice(0, 5).map((product: any) => ({
+                  id: product.channelProductNo || product.productNo || product.originProductNo || product.id,
+                  name: product.name || product.productName || 'Unknown Product',
+                  sku: product.sellerManagementCode || product.sellerProductTag || skuUpper,
+                  price: product.salePrice || product.price || 0,
+                  imageUrl: product.representativeImage?.url || product.imageUrl || '',
+                  stockQuantity: product.stockQuantity || 0,
+                  status: product.statusType || product.channelProductDisplayStatusType || 'SALE',
+                  similarity: this.calculateSimilarity(
+                    skuUpper, 
+                    product.sellerManagementCode || product.sellerProductTag || ''
+                  )
+                })),
                 message: `네이버에서 ${dedupedProducts.length}개의 상품을 찾았습니다.`,
                 error: ''
               };
-              
-              logger.info(`Found ${dedupedProducts.length} unique Naver products for SKU: ${skuUpper}`);
             } else {
               searchResults.naver.message = '네이버에서 일치하는 상품을 찾을 수 없습니다.';
-              logger.info(`No Naver products found for SKU: ${skuUpper}`);
             }
           } catch (naverError: any) {
             logger.error('Naver search error:', naverError);
@@ -946,11 +818,11 @@ export class MappingController {
         searchPromises.push(naverPromise);
       }
 
-      // Shopify 상품 검색 Promise
+      // Shopify 상품 검색
       if (this.shopifySearchService) {
         const shopifyPromise = (async () => {
           try {
-            logger.info('Searching Shopify products with ShopifyProductSearchService...');
+            logger.info('Searching Shopify products...');
             
             const shopifyResult = await this.shopifySearchService.searchBySKU(skuUpper);
             
@@ -984,30 +856,7 @@ export class MappingController {
         searchPromises.push(shopifyPromise);
       }
 
-      // 모든 검색을 병렬로 실행
       await Promise.all(searchPromises);
-
-      // 자동 매핑 가능 여부 판단
-      if (searchResults.naver.found && searchResults.shopify.found) {
-        const naverProduct = searchResults.naver.products[0];
-        const shopifyProduct = searchResults.shopify.products[0];
-        
-        if (naverProduct && shopifyProduct) {
-          const skuMatch = naverProduct.similarity > 80 && shopifyProduct.similarity > 80;
-          searchResults.recommendations = {
-            autoMappingPossible: skuMatch,
-            confidence: skuMatch ? Math.min(naverProduct.similarity, shopifyProduct.similarity) : 0
-          };
-        }
-      }
-
-      logger.info('Search results:', {
-        sku: skuUpper,
-        naverFound: searchResults.naver.found,
-        naverCount: searchResults.naver.products.length,
-        shopifyFound: searchResults.shopify.found,
-        shopifyCount: searchResults.shopify.products.length
-      });
 
       res.json({
         success: true,
@@ -1040,13 +889,11 @@ export class MappingController {
         shopifyProduct: null as any
       };
 
-      // SKU 유효성 검사
       if (!validateSKU(sku)) {
         validation.errors.push('Invalid SKU format');
         validation.isValid = false;
       }
 
-      // 중복 확인
       const existing = await ProductMapping.findOne({ 
         sku: sku.toUpperCase() 
       });
@@ -1056,7 +903,6 @@ export class MappingController {
         validation.isValid = false;
       }
 
-      // 네이버 상품 확인
       if (naverProductId && naverProductId !== 'PENDING') {
         if (this.naverProductService) {
           try {
@@ -1074,7 +920,6 @@ export class MappingController {
         validation.warnings.push('Naver product ID is missing');
       }
 
-      // Shopify 상품 확인 - ShopifyProductSearchService 사용
       if (shopifyProductId && shopifyProductId !== 'PENDING') {
         if (this.shopifySearchService) {
           try {
@@ -1082,7 +927,6 @@ export class MappingController {
             if (shopifyProduct) {
               validation.shopifyProduct = shopifyProduct;
               
-              // Variant 확인
               if (shopifyVariantId && shopifyVariantId !== 'PENDING') {
                 if (shopifyProduct.id !== shopifyVariantId) {
                   validation.warnings.push('Shopify variant ID mismatch');
@@ -1109,7 +953,7 @@ export class MappingController {
   }
 
   /**
-   * PENDING 매핑 재시도 - 네이버 API 파라미터 수정
+   * PENDING 매핑 재시도
    * POST /api/v1/mappings/:id/retry
    */
   async retryPendingMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -1127,12 +971,11 @@ export class MappingController {
 
       let updated = false;
 
-      // 네이버 재검색 - 올바른 파라미터 사용
       if (mapping.naverProductId === 'PENDING' && this.naverProductService) {
         try {
           const naverProducts = await this.naverProductService.searchProducts({
-            searchKeyword: mapping.sku,  // keyword가 아닌 searchKeyword 사용
-            searchType: 'SELLER_MANAGEMENT_CODE',  // searchType 추가
+            searchKeyword: mapping.sku,
+            searchType: 'SELLER_MANAGEMENT_CODE',
             page: 1,
             size: 1
           });
@@ -1145,7 +988,6 @@ export class MappingController {
         }
       }
 
-      // Shopify 재검색 - ShopifyProductSearchService 사용
       if (mapping.shopifyProductId === 'PENDING' && this.shopifySearchService) {
         const shopifyProduct = await this.searchShopifyProducts(mapping.sku);
         if (shopifyProduct) {
@@ -1156,7 +998,6 @@ export class MappingController {
       }
 
       if (updated) {
-        // 모든 ID가 채워졌는지 확인
         if (mapping.naverProductId !== 'PENDING' &&
             mapping.shopifyProductId !== 'PENDING' &&
             mapping.shopifyVariantId !== 'PENDING') {
@@ -1193,13 +1034,11 @@ export class MappingController {
       const mappings = await ProductMapping.find({ status: 'ACTIVE' });
 
       if (format === 'csv') {
-        // CSV 형식으로 변환
         const csv = this.convertToCSV(mappings);
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=mappings.csv');
         res.send(csv);
       } else if (format === 'xlsx') {
-        // Excel 형식으로 변환
         const worksheet = XLSX.utils.json_to_sheet(mappings.map(m => m.toObject()));
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Mappings');
@@ -1230,13 +1069,11 @@ export class MappingController {
       let mappings = [];
 
       if (format === 'csv') {
-        // CSV 파싱
         mappings = this.parseCSV(data);
       } else {
         mappings = data;
       }
 
-      // 대량 업로드 처리
       req.body.mappings = mappings;
       await this.bulkUploadMappings(req, res, next);
     } catch (error) {

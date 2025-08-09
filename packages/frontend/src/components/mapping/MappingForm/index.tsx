@@ -1,5 +1,4 @@
-// packages/frontend/src/components/mapping/MappingForm/index.tsx
-
+/ ===== 2. packages/frontend/src/components/mapping/MappingForm/index.tsx =====
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -11,7 +10,6 @@ import {
   InputAdornment,
   Alert,
   CircularProgress,
-  Autocomplete,
   Typography,
   Card,
   CardContent,
@@ -20,14 +18,17 @@ import {
   Tooltip,
   Chip,
   Divider,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  ListItemAvatar,
+  Avatar,
+  Paper,
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  Refresh as RefreshIcon,
   CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
-  Image as ImageIcon,
 } from '@mui/icons-material';
 import { useForm, Controller } from 'react-hook-form';
 import { mappingService, type SkuSearchResult } from '@/services/api/mapping.service';
@@ -67,7 +68,7 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
       shopifyProductId: mapping?.shopifyProductId || '',
       shopifyVariantId: mapping?.shopifyVariantId || '',
       productName: mapping?.productName || '',
-      vendor: mapping?.vendor || '',
+      vendor: mapping?.vendor || 'album',
       priceMargin: (mapping?.priceMargin || 0.15) * 100,
       isActive: mapping?.isActive ?? true,
     },
@@ -96,19 +97,12 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
 
       // 네이버 상품이 1개만 찾아진 경우 자동 선택
       if (data.naver.found && data.naver.products.length === 1) {
-        const product = data.naver.products[0];
-        setSelectedNaverProduct(product);
-        setValue('naverProductId', product.id);
-        setValue('productName', product.name);
+        handleSelectNaverProduct(data.naver.products[0]);
       }
 
       // Shopify 상품이 1개만 찾아진 경우 자동 선택
       if (data.shopify.found && data.shopify.products.length === 1) {
-        const product = data.shopify.products[0];
-        setSelectedShopifyProduct(product);
-        setValue('shopifyProductId', product.id);
-        setValue('shopifyVariantId', product.variantId);
-        setValue('vendor', product.vendor || '');
+        handleSelectShopifyProduct(data.shopify.products[0]);
       }
 
     } catch (error: any) {
@@ -119,7 +113,22 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
     }
   };
 
-  // SKU 입력 후 엔터키 또는 포커스 아웃 시 자동 검색
+  // 네이버 상품 선택 처리
+  const handleSelectNaverProduct = (product: any) => {
+    setSelectedNaverProduct(product);
+    setValue('naverProductId', product.id);
+    setValue('productName', product.name);
+  };
+
+  // Shopify 상품 선택 처리
+  const handleSelectShopifyProduct = (product: any) => {
+    setSelectedShopifyProduct(product);
+    setValue('shopifyProductId', product.id);
+    setValue('shopifyVariantId', product.variantId);
+    setValue('vendor', product.vendor || 'album');
+  };
+
+  // SKU 입력 후 자동 검색
   useEffect(() => {
     const delayTimer = setTimeout(() => {
       if (autoSearchEnabled && skuValue && skuValue.length >= 3 && !mapping) {
@@ -133,10 +142,22 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
   const onSubmit = async (data: MappingFormData) => {
     try {
       setErrorMessage('');
+      
+      // 유효성 검사
+      if (!data.naverProductId || data.naverProductId === 'PENDING') {
+        setErrorMessage('네이버 상품을 선택해주세요.');
+        return;
+      }
+      
+      if (!data.shopifyProductId || !data.shopifyVariantId) {
+        setErrorMessage('Shopify 상품을 선택해주세요.');
+        return;
+      }
+
       const payload = {
         ...data,
         priceMargin: data.priceMargin / 100,
-        autoSearch: autoSearchEnabled, // 자동 검색 플래그 추가
+        autoSearch: autoSearchEnabled,
       };
 
       if (mapping) {
@@ -227,66 +248,51 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
                     네이버 상품
-                    {searchResults.naver.found ? (
+                    {searchResults.naver.found && (
                       <Chip 
-                        label={`${searchResults.naver.products.length}개 발견`} 
-                        color="success" 
-                        size="small" 
+                        label={`${searchResults.naver.products.length}개 발견`}
+                        size="small"
+                        color="primary"
                         sx={{ ml: 1 }}
                       />
-                    ) : (
-                      <Chip label="미발견" color="error" size="small" sx={{ ml: 1 }} />
                     )}
                   </Typography>
                   
-                  {searchResults.naver.found ? (
-                    <Box>
-                      <Autocomplete
-                        options={searchResults.naver.products}
-                        getOptionLabel={(option) => `${option.name} (${option.id})`}
-                        value={selectedNaverProduct}
-                        onChange={(_, value) => {
-                          setSelectedNaverProduct(value);
-                          if (value) {
-                            setValue('naverProductId', value.id);
-                            setValue('productName', value.name);
-                          }
-                        }}
-                        renderOption={(props, option) => (
-                          <Box component="li" {...props}>
-                            <Stack>
-                              <Typography variant="body2">{option.name}</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                ID: {option.id} | 가격: {option.price?.toLocaleString()}원
-                              </Typography>
-                            </Stack>
-                          </Box>
-                        )}
-                        renderInput={(params) => (
-                          <TextField 
-                            {...params} 
-                            label="네이버 상품 선택" 
-                            size="small"
-                            fullWidth
-                          />
-                        )}
-                      />
-                      
-                      {selectedNaverProduct && (
-                        <Box sx={{ mt: 2 }}>
-                          {selectedNaverProduct.imageUrl && (
-                            <img 
-                              src={selectedNaverProduct.imageUrl} 
-                              alt={selectedNaverProduct.name}
-                              style={{ width: '100px', height: '100px', objectFit: 'cover' }}
-                            />
-                          )}
-                          <Typography variant="caption" display="block">
-                            재고: {selectedNaverProduct.stockQuantity}개
-                          </Typography>
-                        </Box>
-                      )}
-                    </Box>
+                  {searchResults.naver.found && searchResults.naver.products.length > 0 ? (
+                    <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
+                      <List>
+                        {searchResults.naver.products.map((product: any, index: number) => (
+                          <ListItem key={product.id || index} disablePadding>
+                            <ListItemButton
+                              selected={selectedNaverProduct?.id === product.id}
+                              onClick={() => handleSelectNaverProduct(product)}
+                            >
+                              {product.imageUrl && (
+                                <ListItemAvatar>
+                                  <Avatar src={product.imageUrl} variant="square" />
+                                </ListItemAvatar>
+                              )}
+                              <ListItemText
+                                primary={product.name}
+                                secondary={
+                                  <React.Fragment>
+                                    <Typography variant="caption" display="block">
+                                      ID: {product.id}
+                                    </Typography>
+                                    <Typography variant="caption" display="block">
+                                      가격: {product.price?.toLocaleString()}원 | 재고: {product.stockQuantity}개
+                                    </Typography>
+                                  </React.Fragment>
+                                }
+                              />
+                              {selectedNaverProduct?.id === product.id && (
+                                <CheckCircleIcon color="primary" />
+                              )}
+                            </ListItemButton>
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Paper>
                   ) : (
                     <Alert severity="warning" sx={{ mt: 1 }}>
                       {searchResults.naver.message || '네이버에서 상품을 찾을 수 없습니다'}
@@ -302,72 +308,53 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
                     Shopify 상품
-                    {searchResults.shopify.found ? (
+                    {searchResults.shopify.found && (
                       <Chip 
-                        label={`${searchResults.shopify.products.length}개 발견`} 
-                        color="success" 
-                        size="small" 
+                        label={`${searchResults.shopify.products.length}개 발견`}
+                        size="small"
+                        color="success"
                         sx={{ ml: 1 }}
                       />
-                    ) : (
-                      <Chip label="미발견" color="error" size="small" sx={{ ml: 1 }} />
                     )}
                   </Typography>
                   
-                  {searchResults.shopify.found ? (
-                    <Box>
-                      <Autocomplete
-                        options={searchResults.shopify.products}
-                        getOptionLabel={(option) => 
-                          `${option.title} ${option.variantTitle ? `- ${option.variantTitle}` : ''} (${option.sku})`
-                        }
-                        value={selectedShopifyProduct}
-                        onChange={(_, value) => {
-                          setSelectedShopifyProduct(value);
-                          if (value) {
-                            setValue('shopifyProductId', value.id);
-                            setValue('shopifyVariantId', value.variantId);
-                            setValue('vendor', value.vendor || '');
-                          }
-                        }}
-                        renderOption={(props, option) => (
-                          <Box component="li" {...props}>
-                            <Stack>
-                              <Typography variant="body2">{option.title}</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                SKU: {option.sku} | 가격: ${option.price}
-                              </Typography>
-                            </Stack>
-                          </Box>
-                        )}
-                        renderInput={(params) => (
-                          <TextField 
-                            {...params} 
-                            label="Shopify 상품 선택" 
-                            size="small"
-                            fullWidth
-                          />
-                        )}
-                      />
-                      
-                      {selectedShopifyProduct && (
-                        <Box sx={{ mt: 2 }}>
-                          {selectedShopifyProduct.imageUrl && (
-                            <img 
-                              src={selectedShopifyProduct.imageUrl} 
-                              alt={selectedShopifyProduct.title}
-                              style={{ width: '100px', height: '100px', objectFit: 'cover' }}
-                            />
-                          )}
-                          <Typography variant="caption" display="block">
-                            재고: {selectedShopifyProduct.inventoryQuantity}개
-                          </Typography>
-                          <Typography variant="caption" display="block">
-                            벤더: {selectedShopifyProduct.vendor}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Box>
+                  {searchResults.shopify.found && searchResults.shopify.products.length > 0 ? (
+                    <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
+                      <List>
+                        {searchResults.shopify.products.map((product: any, index: number) => (
+                          <ListItem key={product.variantId || index} disablePadding>
+                            <ListItemButton
+                              selected={selectedShopifyProduct?.variantId === product.variantId}
+                              onClick={() => handleSelectShopifyProduct(product)}
+                            >
+                              {product.imageUrl && (
+                                <ListItemAvatar>
+                                  <Avatar src={product.imageUrl} variant="square" />
+                                </ListItemAvatar>
+                              )}
+                              <ListItemText
+                                primary={product.title}
+                                secondary={
+                                  <React.Fragment>
+                                    {product.variantTitle && (
+                                      <Typography variant="caption" display="block">
+                                        Variant: {product.variantTitle}
+                                      </Typography>
+                                    )}
+                                    <Typography variant="caption" display="block">
+                                      SKU: {product.sku} | 가격: ${product.price}
+                                    </Typography>
+                                  </React.Fragment>
+                                }
+                              />
+                              {selectedShopifyProduct?.variantId === product.variantId && (
+                                <CheckCircleIcon color="success" />
+                              )}
+                            </ListItemButton>
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Paper>
                   ) : (
                     <Alert severity="warning" sx={{ mt: 1 }}>
                       {searchResults.shopify.message || 'Shopify에서 상품을 찾을 수 없습니다'}
@@ -379,78 +366,39 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
           </Grid>
         )}
 
+        {/* 선택된 상품 정보 표시 */}
+        {(selectedNaverProduct || selectedShopifyProduct) && (
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>선택된 상품</Typography>
+              <Grid container spacing={2}>
+                {selectedNaverProduct && (
+                  <Grid item xs={12} md={6}>
+                    <Alert severity="info">
+                      <Typography variant="subtitle2">네이버 상품</Typography>
+                      <Typography variant="body2">{selectedNaverProduct.name}</Typography>
+                      <Typography variant="caption">ID: {selectedNaverProduct.id}</Typography>
+                    </Alert>
+                  </Grid>
+                )}
+                {selectedShopifyProduct && (
+                  <Grid item xs={12} md={6}>
+                    <Alert severity="success">
+                      <Typography variant="subtitle2">Shopify 상품</Typography>
+                      <Typography variant="body2">{selectedShopifyProduct.title}</Typography>
+                      <Typography variant="caption">ID: {selectedShopifyProduct.variantId}</Typography>
+                    </Alert>
+                  </Grid>
+                )}
+              </Grid>
+            </CardContent>
+          </Card>
+        )}
+
         <Divider />
 
-        {/* 수동 입력 필드들 (검색 결과가 없거나 수동 입력이 필요한 경우) */}
-        <Typography variant="subtitle2" color="text.secondary">
-          수동 입력 (검색 결과가 없는 경우)
-        </Typography>
-        
+        {/* 추가 설정 */}
         <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
-            <Controller
-              name="naverProductId"
-              control={control}
-              rules={{ required: '네이버 상품 ID는 필수입니다' }}
-              render={({ field }) => (
-                <TextField
-                  {...field}
-                  label="네이버 상품 ID"
-                  fullWidth
-                  error={!!errors.naverProductId}
-                  helperText={errors.naverProductId?.message}
-                  disabled={!!selectedNaverProduct}
-                />
-              )}
-            />
-          </Grid>
-          
-          <Grid item xs={12} md={6}>
-            <Controller
-              name="shopifyProductId"
-              control={control}
-              rules={{ required: 'Shopify 상품 ID는 필수입니다' }}
-              render={({ field }) => (
-                <TextField
-                  {...field}
-                  label="Shopify 상품 ID"
-                  fullWidth
-                  error={!!errors.shopifyProductId}
-                  helperText={errors.shopifyProductId?.message}
-                  disabled={!!selectedShopifyProduct}
-                />
-              )}
-            />
-          </Grid>
-        </Grid>
-
-        <Controller
-          name="productName"
-          control={control}
-          render={({ field }) => (
-            <TextField
-              {...field}
-              label="상품명"
-              fullWidth
-            />
-          )}
-        />
-
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
-            <Controller
-              name="vendor"
-              control={control}
-              render={({ field }) => (
-                <TextField
-                  {...field}
-                  label="벤더"
-                  fullWidth
-                />
-              )}
-            />
-          </Grid>
-          
           <Grid item xs={12} md={6}>
             <Controller
               name="priceMargin"
@@ -464,6 +412,20 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
                   InputProps={{
                     endAdornment: <InputAdornment position="end">%</InputAdornment>,
                   }}
+                />
+              )}
+            />
+          </Grid>
+          
+          <Grid item xs={12} md={6}>
+            <Controller
+              name="vendor"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label="벤더"
+                  fullWidth
                 />
               )}
             />

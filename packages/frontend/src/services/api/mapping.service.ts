@@ -36,7 +36,15 @@ export interface MappingListResponse {
     page: number;
     limit: number;
     total: number;
-    pages: number;
+    totalPages: number;
+  };
+  stats?: {
+    total: number;
+    active: number;
+    inactive: number;
+    error: number;
+    pending: number;
+    syncNeeded: number;
   };
 }
 
@@ -74,6 +82,7 @@ export interface SkuSearchResult {
       imageUrl?: string;
       stockQuantity?: number;
       status?: string;
+      similarity?: number;
     }>;
     message?: string;
     error?: string;
@@ -87,15 +96,17 @@ export interface SkuSearchResult {
       variantTitle?: string;
       sku: string;
       price: string;
-      compareAtPrice?: string;
       imageUrl?: string;
       inventoryQuantity?: number;
       vendor?: string;
-      productType?: string;
-      tags?: string[];
+      similarity?: number;
     }>;
     message?: string;
     error?: string;
+  };
+  recommendations?: {
+    autoMappingPossible: boolean;
+    confidence: number;
   };
 }
 
@@ -130,16 +141,16 @@ class MappingService {
   }
 
   /**
-   * 매핑 생성 (개선된 버전)
+   * 매핑 생성
    */
-  async createMapping(data: Partial<MappingData> & { autoSearch?: boolean }): Promise<AxiosResponse<{ success: boolean; data: { mapping: MappingData; validation: ValidationResult } }>> {
+  async createMapping(data: Partial<MappingData> & { autoSearch?: boolean }): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
     return apiClient.post('/mappings', data);
   }
 
   /**
    * 매핑 수정
    */
-  async updateMapping(id: string, data: Partial<MappingData>): Promise<AxiosResponse<{ success: boolean; data: { mapping: MappingData; validation: ValidationResult } }>> {
+  async updateMapping(id: string, data: Partial<MappingData>): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
     return apiClient.put(`/mappings/${id}`, data);
   }
 
@@ -235,11 +246,46 @@ class MappingService {
       active: number;
       inactive: number;
       error: number;
-      warning: number;
-      lastUpdated: Date;
+      pending: number;
+      syncNeeded: number;
     }
   }>> {
-    return apiClient.get('/mappings/statistics');
+    return apiClient.get('/mappings/stats');
+  }
+
+  /**
+   * 단일 매핑 조회
+   */
+  async getMapping(id: string): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
+    return apiClient.get(`/mappings/${id}`);
+  }
+
+  /**
+   * SKU로 매핑 조회
+   */
+  async getMappingBySku(sku: string): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
+    return apiClient.get(`/mappings/sku/${sku}`);
+  }
+
+  /**
+   * 매핑 동기화
+   */
+  async syncMapping(id: string): Promise<AxiosResponse<{ success: boolean; message: string }>> {
+    return apiClient.post(`/mappings/${id}/sync`);
+  }
+
+  /**
+   * PENDING 매핑 재시도
+   */
+  async retryPendingMapping(id: string): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
+    return apiClient.post(`/mappings/${id}/retry`);
+  }
+
+  /**
+   * 매핑 가져오기 (import)
+   */
+  async importMappings(data: any, format: string = 'json'): Promise<AxiosResponse<{ success: boolean; data: BulkUploadResult }>> {
+    return apiClient.post('/mappings/import', { data, format });
   }
 }
 

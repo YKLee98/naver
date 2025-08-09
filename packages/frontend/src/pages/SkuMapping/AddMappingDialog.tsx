@@ -8,108 +8,73 @@ import {
   Button,
   TextField,
   Grid,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  FormHelperText,
+  Typography,
+  Box,
   Alert,
-  Autocomplete,
-  InputAdornment,
+  IconButton,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemAvatar,
+  ListItemText,
+  Avatar,
+  Chip,
+  CircularProgress,
   Switch,
   FormControlLabel,
-  Box,
-  Typography,
-  Divider,
-  CircularProgress,
-  Chip,
+  Paper,
+  InputAdornment,
+  Fade,
+  Zoom,
   Card,
   CardContent,
   CardMedia,
   Stack,
+  Divider,
   LinearProgress,
-  IconButton,
-  Collapse,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  Avatar,
-  ListItemSecondaryAction,
-  Radio,
-  RadioGroup,
+  Badge,
+  Skeleton,
 } from '@mui/material';
 import {
-  Search,
-  CheckCircle,
-  Error,
-  Warning,
-  Refresh,
-  ExpandMore,
-  ExpandLess,
+  Search as SearchIcon,
+  CheckCircle as CheckCircleIcon,
   Image as ImageIcon,
-  Store,
-  ShoppingCart,
+  Close as CloseIcon,
+  LocalOffer as TagIcon,
+  Inventory as InventoryIcon,
+  AttachMoney as MoneyIcon,
+  Store as StoreIcon,
+  ShoppingCart as ShoppingCartIcon,
+  Percent as PercentIcon,
+  Business as BusinessIcon,
 } from '@mui/icons-material';
 import { useFormik } from 'formik';
-import * as yup from 'yup';
+import * as Yup from 'yup';
 import { mappingService } from '@/services/api/mapping.service';
 import { useNotification } from '@/hooks/useNotification';
-import { formatCurrency } from '@/utils/formatters';
-
-interface MappingFormData {
-  sku: string;
-  naverProductId: string;
-  shopifyProductId: string;
-  shopifyVariantId?: string;
-  priceMargin: number;
-  isActive: boolean;
-}
 
 interface AddMappingDialogProps {
   open: boolean;
   onClose: () => void;
-  onSave: (data: MappingFormData) => void;
-  initialData?: MappingFormData | null;
+  onSave: (data: any) => Promise<void>;
+  initialData?: any;
 }
 
-interface ProductSearchResult {
-  naver: {
-    found: boolean;
-    products: any[];
-    message?: string;
-    error?: string;
-  };
-  shopify: {
-    found: boolean;
-    products: any[];
-    message?: string;
-    error?: string;
-  };
-  recommendations?: {
-    autoMappingPossible: boolean;
-    confidence: number;
-  };
-}
-
-const validationSchema = yup.object({
-  sku: yup
-    .string()
-    .required('SKU는 필수입니다')
-    .min(3, 'SKU는 최소 3자 이상이어야 합니다')
-    .matches(/^[A-Za-z0-9_-]+$/, 'SKU는 영문, 숫자, -, _ 만 사용 가능합니다'),
-  naverProductId: yup
-    .string()
-    .required('네이버 상품 ID는 필수입니다'),
-  shopifyProductId: yup
-    .string()
-    .required('Shopify 상품 ID는 필수입니다'),
-  priceMargin: yup
-    .number()
-    .min(0, '마진율은 0 이상이어야 합니다')
-    .max(100, '마진율은 100 이하여야 합니다'),
-  isActive: yup.boolean(),
+const validationSchema = Yup.object({
+  sku: Yup.string().required('SKU는 필수입니다'),
+  naverProductId: Yup.string().required('네이버 상품을 선택해주세요'),
+  shopifyProductId: Yup.string().required('Shopify 상품을 선택해주세요'),
+  shopifyVariantId: Yup.string().required('Shopify Variant를 선택해주세요'),
+  priceMargin: Yup.number().min(0).max(100),
+  isActive: Yup.boolean(),
 });
+
+const formatCurrency = (amount: number, currency: string) => {
+  if (currency === 'KRW') {
+    return `₩${amount.toLocaleString()}`;
+  }
+  return `$${amount.toLocaleString()}`;
+};
 
 const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
   open,
@@ -119,21 +84,9 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
 }) => {
   const { showNotification } = useNotification();
   const [searching, setSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<ProductSearchResult | null>(null);
+  const [searchResults, setSearchResults] = useState<any>(null);
   const [selectedNaverProduct, setSelectedNaverProduct] = useState<any>(null);
   const [selectedShopifyProduct, setSelectedShopifyProduct] = useState<any>(null);
-  const [expandedSections, setExpandedSections] = useState({
-    naver: true,
-    shopify: true,
-  });
-
-  const handleClose = () => {
-    formik.resetForm();
-    setSearchResults(null);
-    setSelectedNaverProduct(null);
-    setSelectedShopifyProduct(null);
-    onClose();
-  };
 
   const formik = useFormik({
     initialValues: {
@@ -141,16 +94,48 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
       naverProductId: initialData?.naverProductId || '',
       shopifyProductId: initialData?.shopifyProductId || '',
       shopifyVariantId: initialData?.shopifyVariantId || '',
-      priceMargin: initialData?.priceMargin || 15,
+      productName: initialData?.productName || '',
+      vendor: initialData?.vendor || 'album',
+      priceMargin: initialData?.priceMargin ? initialData.priceMargin * 100 : 15,
       isActive: initialData?.isActive !== undefined ? initialData.isActive : true,
     },
     validationSchema,
     onSubmit: async (values) => {
       try {
-        await onSave(values);
+        // 매핑 생성 데이터 준비
+        const mappingData = {
+          sku: values.sku,
+          naverProductId: values.naverProductId,
+          shopifyProductId: values.shopifyProductId,
+          shopifyVariantId: values.shopifyVariantId,
+          productName: values.productName || selectedNaverProduct?.name || values.sku,
+          vendor: values.vendor || 'album',
+          priceMargin: values.priceMargin / 100,
+          isActive: values.isActive,
+          autoSearch: false
+        };
+
+        console.log('Saving mapping data:', mappingData);
+        
+        // 직접 API 호출
+        if (initialData) {
+          // 수정
+          await mappingService.updateMapping(initialData._id, mappingData);
+        } else {
+          // 생성
+          await mappingService.createMapping(mappingData);
+        }
+        
         showNotification('매핑이 성공적으로 저장되었습니다.', 'success');
+        
+        // onSave 콜백 호출 (리스트 새로고침용)
+        if (onSave) {
+          await onSave(mappingData);
+        }
+        
         handleClose();
       } catch (error: any) {
+        console.error('Mapping save error:', error);
         showNotification(
           error.response?.data?.message || '매핑 저장에 실패했습니다.',
           'error'
@@ -178,44 +163,13 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
       
       setSearchResults(data);
 
-      // 검색 결과 분석
-      if (data.naver.found) {
-        showNotification(
-          `네이버에서 ${data.naver.products.length}개 상품을 찾았습니다.`,
-          'info'
-        );
-        
-        // 정확히 하나만 찾은 경우 자동 선택
-        if (data.naver.products.length === 1) {
-          const product = data.naver.products[0];
-          setSelectedNaverProduct(product);
-          formik.setFieldValue('naverProductId', product.id);
-        }
-      } else {
-        showNotification(
-          data.naver.message || '네이버에서 상품을 찾을 수 없습니다.',
-          'warning'
-        );
+      // 정확히 하나만 찾은 경우 자동 선택
+      if (data.naver.found && data.naver.products.length === 1) {
+        handleSelectNaverProduct(data.naver.products[0]);
       }
 
-      if (data.shopify.found) {
-        showNotification(
-          `Shopify에서 ${data.shopify.products.length}개 상품을 찾았습니다.`,
-          'info'
-        );
-        
-        // 정확히 하나만 찾은 경우 자동 선택
-        if (data.shopify.products.length === 1) {
-          const product = data.shopify.products[0];
-          setSelectedShopifyProduct(product);
-          formik.setFieldValue('shopifyProductId', product.id);
-          formik.setFieldValue('shopifyVariantId', product.variantId);
-        }
-      } else {
-        showNotification(
-          data.shopify.message || 'Shopify에서 상품을 찾을 수 없습니다.',
-          'warning'
-        );
+      if (data.shopify.found && data.shopify.products.length === 1) {
+        handleSelectShopifyProduct(data.shopify.products[0]);
       }
     } catch (error: any) {
       console.error('SKU 검색 실패:', error);
@@ -227,331 +181,559 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
 
   // 선택한 네이버 상품 적용
   const handleSelectNaverProduct = (product: any) => {
+    console.log('Selected Naver product:', product);
     setSelectedNaverProduct(product);
     formik.setFieldValue('naverProductId', product.id);
+    formik.setFieldValue('productName', product.name);
   };
 
   // 선택한 Shopify 상품 적용
   const handleSelectShopifyProduct = (product: any) => {
+    console.log('Selected Shopify product:', product);
     setSelectedShopifyProduct(product);
     formik.setFieldValue('shopifyProductId', product.id);
     formik.setFieldValue('shopifyVariantId', product.variantId);
+    formik.setFieldValue('vendor', product.vendor || 'album');
   };
 
-  return (
-    <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>
-      <DialogTitle>
-        {initialData ? 'SKU 매핑 수정' : '새 SKU 매핑 추가'}
-      </DialogTitle>
-      <form onSubmit={formik.handleSubmit}>
-        <DialogContent>
-          <Grid container spacing={3}>
-            {/* SKU 입력 및 검색 */}
-            <Grid item xs={12}>
-              <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-                <TextField
-                  fullWidth
-                  id="sku"
-                  name="sku"
-                  label="SKU"
-                  value={formik.values.sku}
-                  onChange={formik.handleChange}
-                  onBlur={formik.handleBlur}
-                  error={formik.touched.sku && Boolean(formik.errors.sku)}
-                  helperText={formik.touched.sku && formik.errors.sku}
-                  disabled={!!initialData}
-                  InputProps={{
-                    endAdornment: searching && (
-                      <InputAdornment position="end">
-                        <CircularProgress size={20} />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-                <Button
-                  variant="contained"
-                  onClick={handleSkuSearch}
-                  disabled={searching || !formik.values.sku}
-                  startIcon={<Search />}
-                  sx={{ minWidth: 120, height: 56 }}
-                >
-                  검색
-                </Button>
-              </Box>
-            </Grid>
+  const handleClose = () => {
+    formik.resetForm();
+    setSearchResults(null);
+    setSelectedNaverProduct(null);
+    setSelectedShopifyProduct(null);
+    onClose();
+  };
 
-            {/* 검색 결과 - 네이버 */}
-            {searchResults?.naver && (
-              <Grid item xs={12} md={6}>
-                <Card>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <Store sx={{ mr: 1 }} />
-                      <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                        네이버 상품
-                      </Typography>
-                      <IconButton
-                        size="small"
-                        onClick={() => setExpandedSections({
-                          ...expandedSections,
-                          naver: !expandedSections.naver
-                        })}
-                      >
-                        {expandedSections.naver ? <ExpandLess /> : <ExpandMore />}
-                      </IconButton>
-                    </Box>
+  // 유효성 검사 헬퍼
+  const isFormValid = () => {
+    return !!(
+      formik.values.sku &&
+      formik.values.naverProductId &&
+      formik.values.shopifyProductId &&
+      formik.values.shopifyVariantId
+    );
+  };
 
-                    <Collapse in={expandedSections.naver}>
-                      {searchResults.naver.found ? (
-                        <RadioGroup
-                          value={selectedNaverProduct?.id || ''}
-                          onChange={(e) => {
-                            const product = searchResults.naver.products.find(
-                              p => p.id === e.target.value
-                            );
-                            if (product) handleSelectNaverProduct(product);
-                          }}
-                        >
-                          <List dense>
-                            {searchResults.naver.products.map((product, index) => (
-                              <ListItem key={`naver-${product.id}-${index}`} divider>
-                                <Radio value={product.id} />
-                                <ListItemAvatar>
-                                  {product.imageUrl ? (
-                                    <Avatar src={product.imageUrl} variant="rounded" />
-                                  ) : (
-                                    <Avatar variant="rounded">
-                                      <ImageIcon />
-                                    </Avatar>
-                                  )}
-                                </ListItemAvatar>
-                                <ListItemText
-                                  primary={product.name}
-                                  secondary={
-                                    <Box component="span">
-                                      <Typography variant="caption" display="block">
-                                        ID: {product.id}
-                                      </Typography>
-                                      <Typography variant="caption" display="block">
-                                        SKU: {product.sku || '-'}
-                                      </Typography>
-                                      <Typography variant="caption" display="block">
-                                        가격: {formatCurrency(product.price, 'KRW')}
-                                      </Typography>
-                                      <Typography variant="caption" display="block">
-                                        재고: {product.stockQuantity}개
-                                      </Typography>
-                                    </Box>
-                                  }
-                                />
-                                {product.similarity && (
-                                  <Chip
-                                    label={`${product.similarity}% 일치`}
-                                    size="small"
-                                    color={product.similarity >= 80 ? 'success' : 'warning'}
-                                  />
-                                )}
-                              </ListItem>
-                            ))}
-                          </List>
-                        </RadioGroup>
-                      ) : (
-                        <Alert severity="warning">
-                          {searchResults.naver.message || '상품을 찾을 수 없습니다.'}
-                        </Alert>
-                      )}
-                    </Collapse>
-
-                    {/* 수동 입력 */}
-                    <TextField
-                      fullWidth
-                      id="naverProductId"
-                      name="naverProductId"
-                      label="네이버 상품 ID"
-                      value={formik.values.naverProductId}
-                      onChange={formik.handleChange}
-                      onBlur={formik.handleBlur}
-                      error={formik.touched.naverProductId && Boolean(formik.errors.naverProductId)}
-                      helperText={formik.touched.naverProductId && formik.errors.naverProductId}
-                      placeholder="수동으로 입력"
-                      sx={{ mt: 2 }}
-                    />
-                  </CardContent>
-                </Card>
-              </Grid>
-            )}
-
-            {/* 검색 결과 - Shopify */}
-            {searchResults?.shopify && (
-              <Grid item xs={12} md={6}>
-                <Card>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <ShoppingCart sx={{ mr: 1 }} />
-                      <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                        Shopify 상품
-                      </Typography>
-                      <IconButton
-                        size="small"
-                        onClick={() => setExpandedSections({
-                          ...expandedSections,
-                          shopify: !expandedSections.shopify
-                        })}
-                      >
-                        {expandedSections.shopify ? <ExpandLess /> : <ExpandMore />}
-                      </IconButton>
-                    </Box>
-
-                    <Collapse in={expandedSections.shopify}>
-                      {searchResults.shopify.found ? (
-                        <RadioGroup
-                          value={selectedShopifyProduct?.variantId || ''}
-                          onChange={(e) => {
-                            const product = searchResults.shopify.products.find(
-                              p => p.variantId === e.target.value
-                            );
-                            if (product) handleSelectShopifyProduct(product);
-                          }}
-                        >
-                          <List dense>
-                            {searchResults.shopify.products.map((product, index) => (
-                              <ListItem key={`shopify-${product.variantId || product.id}-${index}`} divider>
-                                <Radio value={product.variantId} />
-                                <ListItemAvatar>
-                                  {product.imageUrl ? (
-                                    <Avatar src={product.imageUrl} variant="rounded" />
-                                  ) : (
-                                    <Avatar variant="rounded">
-                                      <ImageIcon />
-                                    </Avatar>
-                                  )}
-                                </ListItemAvatar>
-                                <ListItemText
-                                  primary={product.title}
-                                  secondary={
-                                    <Box component="span">
-                                      <Typography variant="caption" display="block">
-                                        Variant: {product.variantTitle || 'Default'}
-                                      </Typography>
-                                      <Typography variant="caption" display="block">
-                                        SKU: {product.sku || '-'}
-                                      </Typography>
-                                      <Typography variant="caption" display="block">
-                                        가격: ${product.price}
-                                      </Typography>
-                                      <Typography variant="caption" display="block">
-                                        재고: {product.inventoryQuantity}개
-                                      </Typography>
-                                      <Typography variant="caption" display="block">
-                                        벤더: {product.vendor}
-                                      </Typography>
-                                    </Box>
-                                  }
-                                />
-                                {product.similarity && (
-                                  <Chip
-                                    label={`${product.similarity}% 일치`}
-                                    size="small"
-                                    color={product.similarity >= 80 ? 'success' : 'warning'}
-                                  />
-                                )}
-                              </ListItem>
-                            ))}
-                          </List>
-                        </RadioGroup>
-                      ) : (
-                        <Alert severity="warning">
-                          {searchResults.shopify.message || '상품을 찾을 수 없습니다.'}
-                        </Alert>
-                      )}
-                    </Collapse>
-
-                    {/* 수동 입력 */}
-                    <Box sx={{ mt: 2 }}>
-                      <TextField
-                        fullWidth
-                        id="shopifyProductId"
-                        name="shopifyProductId"
-                        label="Shopify 상품 ID"
-                        value={formik.values.shopifyProductId}
-                        onChange={formik.handleChange}
-                        onBlur={formik.handleBlur}
-                        error={formik.touched.shopifyProductId && Boolean(formik.errors.shopifyProductId)}
-                        helperText={formik.touched.shopifyProductId && formik.errors.shopifyProductId}
-                        placeholder="수동으로 입력"
-                        sx={{ mb: 2 }}
-                      />
-                      <TextField
-                        fullWidth
-                        id="shopifyVariantId"
-                        name="shopifyVariantId"
-                        label="Shopify Variant ID (선택사항)"
-                        value={formik.values.shopifyVariantId}
-                        onChange={formik.handleChange}
-                        onBlur={formik.handleBlur}
-                        placeholder="수동으로 입력"
-                      />
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            )}
-
-            {/* 추가 설정 */}
-            <Grid item xs={12}>
-              <Divider sx={{ my: 2 }}>추가 설정</Divider>
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                id="priceMargin"
-                name="priceMargin"
-                label="가격 마진율 (%)"
-                type="number"
-                value={formik.values.priceMargin}
-                onChange={formik.handleChange}
-                onBlur={formik.handleBlur}
-                error={formik.touched.priceMargin && Boolean(formik.errors.priceMargin)}
-                helperText={formik.touched.priceMargin && formik.errors.priceMargin}
-                InputProps={{
-                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
+  // 상품 카드 컴포넌트
+  const ProductCard = ({ product, platform, isSelected, onSelect }: any) => (
+    <Card
+      sx={{
+        mb: 1.5,
+        cursor: 'pointer',
+        transition: 'all 0.3s ease',
+        border: isSelected ? '2px solid' : '1px solid',
+        borderColor: isSelected 
+          ? (platform === 'naver' ? 'primary.main' : 'success.main')
+          : 'divider',
+        boxShadow: isSelected ? 3 : 1,
+        '&:hover': {
+          boxShadow: 4,
+          transform: 'translateY(-2px)',
+        },
+        position: 'relative',
+        background: isSelected 
+          ? (platform === 'naver' ? 'rgba(25, 118, 210, 0.04)' : 'rgba(46, 125, 50, 0.04)')
+          : 'background.paper',
+      }}
+      onClick={() => onSelect(product)}
+    >
+      {isSelected && (
+        <Zoom in={isSelected}>
+          <Badge
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              zIndex: 1,
+            }}
+          >
+            <CheckCircleIcon 
+              sx={{ 
+                color: platform === 'naver' ? 'primary.main' : 'success.main',
+                fontSize: 32,
+              }} 
+            />
+          </Badge>
+        </Zoom>
+      )}
+      
+      <CardContent sx={{ p: 2.5 }}>
+        <Grid container spacing={2} alignItems="flex-start">
+          <Grid item xs="auto">
+            {product.imageUrl ? (
+              <Avatar
+                src={product.imageUrl}
+                variant="rounded"
+                sx={{ width: 80, height: 80 }}
+              />
+            ) : (
+              <Avatar
+                variant="rounded"
+                sx={{ 
+                  width: 80, 
+                  height: 80,
+                  bgcolor: platform === 'naver' ? 'primary.light' : 'success.light',
                 }}
-              />
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    id="isActive"
-                    name="isActive"
-                    checked={formik.values.isActive}
-                    onChange={formik.handleChange}
-                    color="primary"
-                  />
-                }
-                label="활성화"
-              />
-            </Grid>
-
-            {/* 자동 매핑 추천 */}
-            {searchResults?.recommendations?.autoMappingPossible && (
-              <Grid item xs={12}>
-                <Alert severity="success" icon={<CheckCircle />}>
-                  자동 매핑 가능: SKU가 {searchResults.recommendations.confidence}% 일치합니다.
-                </Alert>
-              </Grid>
+              >
+                <ImageIcon sx={{ fontSize: 40 }} />
+              </Avatar>
             )}
           </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>취소</Button>
-          <Button type="submit" variant="contained" color="primary">
-            {initialData ? '수정' : '추가'}
-          </Button>
-        </DialogActions>
-      </form>
+          
+          <Grid item xs>
+            {/* 상품명을 크게 표시 */}
+            <Typography 
+              variant="h6" 
+              fontWeight="bold" 
+              sx={{ 
+                mb: 1,
+                fontSize: '1.25rem',
+                lineHeight: 1.3,
+                color: isSelected 
+                  ? (platform === 'naver' ? 'primary.main' : 'success.main')
+                  : 'text.primary',
+              }}
+            >
+              {product.name || product.title}
+            </Typography>
+            
+            {/* ID 정보 */}
+            <Typography 
+              variant="caption" 
+              color="text.secondary"
+              sx={{ display: 'block', mb: 1, fontFamily: 'monospace' }}
+            >
+              ID: {product.id || product.variantId}
+            </Typography>
+            
+            {/* 태그들 */}
+            <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', gap: 0.5 }}>
+              <Chip
+                icon={<TagIcon />}
+                label={product.sku || 'SKU 없음'}
+                size="small"
+                variant="outlined"
+                sx={{ fontWeight: 'medium' }}
+              />
+              <Chip
+                icon={<MoneyIcon />}
+                label={formatCurrency(
+                  platform === 'naver' ? product.price : parseFloat(product.price || '0'),
+                  platform === 'naver' ? 'KRW' : 'USD'
+                )}
+                size="small"
+                color={platform === 'naver' ? 'primary' : 'success'}
+                sx={{ fontWeight: 'bold' }}
+              />
+              <Chip
+                icon={<InventoryIcon />}
+                label={`재고: ${product.stockQuantity || product.inventoryQuantity || 0}`}
+                size="small"
+                variant="outlined"
+              />
+            </Stack>
+            
+            {/* 유사도 표시 개선 */}
+            {product.similarity && (
+              <Box sx={{ mt: 1.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    SKU 일치도
+                  </Typography>
+                  <Typography 
+                    variant="caption" 
+                    fontWeight="bold"
+                    color={product.similarity >= 80 ? 'success.main' : 'warning.main'}
+                  >
+                    {product.similarity}%
+                  </Typography>
+                </Box>
+                <LinearProgress
+                  variant="determinate"
+                  value={product.similarity}
+                  sx={{ 
+                    height: 8, 
+                    borderRadius: 4,
+                    bgcolor: 'grey.200',
+                    '& .MuiLinearProgress-bar': {
+                      borderRadius: 4,
+                      bgcolor: product.similarity >= 80 ? 'success.main' : 'warning.main',
+                    }
+                  }}
+                />
+              </Box>
+            )}
+          </Grid>
+        </Grid>
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <Dialog 
+      open={open} 
+      onClose={handleClose} 
+      maxWidth="lg" 
+      fullWidth
+      PaperProps={{
+        sx: { borderRadius: 2 }
+      }}
+    >
+      <DialogTitle sx={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between',
+        borderBottom: 1,
+        borderColor: 'divider',
+        pb: 2,
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {initialData ? '🔄 매핑 수정' : '➕ 새 매핑 추가'}
+        </Box>
+        <IconButton onClick={handleClose} size="small">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+      
+      <DialogContent sx={{ mt: 3 }}>
+        {/* SKU 검색 섹션 */}
+        <Paper 
+          elevation={0} 
+          sx={{ 
+            p: 3, 
+            mb: 3, 
+            bgcolor: 'grey.50',
+            borderRadius: 2,
+          }}
+        >
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SearchIcon /> SKU 검색
+          </Typography>
+          
+          <TextField
+            fullWidth
+            name="sku"
+            label="SKU 입력"
+            value={formik.values.sku}
+            onChange={formik.handleChange}
+            error={formik.touched.sku && Boolean(formik.errors.sku)}
+            helperText={formik.touched.sku && formik.errors.sku}
+            disabled={!!initialData}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSkuSearch();
+              }
+            }}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <Button
+                    variant="contained"
+                    onClick={handleSkuSearch}
+                    disabled={searching || !formik.values.sku}
+                    sx={{ borderRadius: 1 }}
+                  >
+                    {searching ? <CircularProgress size={20} /> : '검색'}
+                  </Button>
+                </InputAdornment>
+              ),
+            }}
+            sx={{ 
+              '& .MuiOutlinedInput-root': {
+                bgcolor: 'white',
+              }
+            }}
+          />
+        </Paper>
+
+        {searching && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {/* 검색 결과 */}
+        {searchResults && !searching && (
+          <Fade in={true}>
+            <Grid container spacing={3}>
+              {/* 네이버 상품 */}
+              <Grid item xs={12} md={6}>
+                <Paper 
+                  elevation={0} 
+                  sx={{ 
+                    p: 2, 
+                    borderRadius: 2,
+                    border: 1,
+                    borderColor: 'divider',
+                    bgcolor: 'background.paper',
+                  }}
+                >
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between',
+                    mb: 2,
+                  }}>
+                    <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <StoreIcon color="primary" />
+                      네이버 상품
+                    </Typography>
+                    <Chip
+                      label={searchResults.naver.found 
+                        ? `${searchResults.naver.products.length}개 발견` 
+                        : '미발견'}
+                      color={searchResults.naver.found ? 'primary' : 'default'}
+                      size="small"
+                    />
+                  </Box>
+
+                  {searchResults.naver.found ? (
+                    <Box sx={{ maxHeight: 400, overflow: 'auto', pr: 1 }}>
+                      {searchResults.naver.products.map((product: any, index: number) => (
+                        <ProductCard
+                          key={`naver-${product.id}-${index}`}
+                          product={product}
+                          platform="naver"
+                          isSelected={selectedNaverProduct?.id === product.id}
+                          onSelect={handleSelectNaverProduct}
+                        />
+                      ))}
+                    </Box>
+                  ) : (
+                    <Alert severity="info" icon={false} sx={{ borderRadius: 1 }}>
+                      {searchResults.naver.message || '네이버에서 상품을 찾을 수 없습니다.'}
+                    </Alert>
+                  )}
+                </Paper>
+              </Grid>
+
+              {/* Shopify 상품 */}
+              <Grid item xs={12} md={6}>
+                <Paper 
+                  elevation={0} 
+                  sx={{ 
+                    p: 2, 
+                    borderRadius: 2,
+                    border: 1,
+                    borderColor: 'divider',
+                    bgcolor: 'background.paper',
+                  }}
+                >
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between',
+                    mb: 2,
+                  }}>
+                    <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <ShoppingCartIcon color="success" />
+                      Shopify 상품
+                    </Typography>
+                    <Chip
+                      label={searchResults.shopify.found 
+                        ? `${searchResults.shopify.products.length}개 발견` 
+                        : '미발견'}
+                      color={searchResults.shopify.found ? 'success' : 'default'}
+                      size="small"
+                    />
+                  </Box>
+
+                  {searchResults.shopify.found ? (
+                    <Box sx={{ maxHeight: 400, overflow: 'auto', pr: 1 }}>
+                      {searchResults.shopify.products.map((product: any, index: number) => (
+                        <ProductCard
+                          key={`shopify-${product.variantId}-${index}`}
+                          product={product}
+                          platform="shopify"
+                          isSelected={selectedShopifyProduct?.variantId === product.variantId}
+                          onSelect={handleSelectShopifyProduct}
+                        />
+                      ))}
+                    </Box>
+                  ) : (
+                    <Alert severity="info" icon={false} sx={{ borderRadius: 1 }}>
+                      {searchResults.shopify.message || 'Shopify에서 상품을 찾을 수 없습니다.'}
+                    </Alert>
+                  )}
+                </Paper>
+              </Grid>
+            </Grid>
+          </Fade>
+        )}
+
+        {/* 선택된 상품 정보 - 더 크고 명확하게 표시 */}
+        {(selectedNaverProduct || selectedShopifyProduct) && (
+          <Fade in={true}>
+            <Paper 
+              elevation={0} 
+              sx={{ 
+                p: 3, 
+                mt: 3,
+                bgcolor: 'success.50',
+                borderRadius: 2,
+                border: 2,
+                borderColor: 'success.main',
+              }}
+            >
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                <CheckCircleIcon color="success" />
+                선택된 상품
+              </Typography>
+              
+              <Grid container spacing={3}>
+                {selectedNaverProduct && (
+                  <Grid item xs={12} md={6}>
+                    <Paper elevation={1} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                        <StoreIcon color="primary" />
+                        <Typography variant="subtitle1" fontWeight="bold" color="primary">
+                          네이버 상품
+                        </Typography>
+                      </Box>
+                      <Typography 
+                        variant="h5" 
+                        fontWeight="bold" 
+                        sx={{ mb: 1, color: 'text.primary' }}
+                      >
+                        {selectedNaverProduct.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                        ID: {selectedNaverProduct.id}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        SKU: {selectedNaverProduct.sku}
+                      </Typography>
+                      <Typography variant="h6" color="primary" sx={{ mt: 1 }}>
+                        {formatCurrency(selectedNaverProduct.price, 'KRW')}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                )}
+                
+                {selectedShopifyProduct && (
+                  <Grid item xs={12} md={6}>
+                    <Paper elevation={1} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                        <ShoppingCartIcon color="success" />
+                        <Typography variant="subtitle1" fontWeight="bold" color="success.main">
+                          Shopify 상품
+                        </Typography>
+                      </Box>
+                      <Typography 
+                        variant="h5" 
+                        fontWeight="bold" 
+                        sx={{ mb: 1, color: 'text.primary' }}
+                      >
+                        {selectedShopifyProduct.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                        ID: {selectedShopifyProduct.variantId}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        SKU: {selectedShopifyProduct.sku}
+                      </Typography>
+                      <Typography variant="h6" color="success.main" sx={{ mt: 1 }}>
+                        {formatCurrency(parseFloat(selectedShopifyProduct.price || '0'), 'USD')}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                )}
+              </Grid>
+              {/* 매핑 설정 섹션 */}
+              <Box sx={{ mt: 3, pt: 3, borderTop: 1, borderColor: 'divider' }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  매핑 설정
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      name="priceMargin"
+                      label="가격 마진"
+                      type="number"
+                      value={formik.values.priceMargin}
+                      onChange={formik.handleChange}
+                      error={formik.touched.priceMargin && Boolean(formik.errors.priceMargin)}
+                      helperText={formik.touched.priceMargin && formik.errors.priceMargin}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <PercentIcon />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{ bgcolor: 'white' }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      name="vendor"
+                      label="벤더"
+                      value={formik.values.vendor}
+                      onChange={formik.handleChange}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <BusinessIcon />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{ bgcolor: 'white' }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          name="isActive"
+                          checked={formik.values.isActive}
+                          onChange={formik.handleChange}
+                          color="success"
+                        />
+                      }
+                      label={
+                        <Typography variant="body1" fontWeight="medium">
+                          활성화
+                        </Typography>
+                      }
+                      sx={{ mt: 1 }}
+                    />
+                  </Grid>
+                </Grid>
+              </Box>
+            </Paper>
+          </Fade>
+        )}
+      </DialogContent>
+      
+      <Divider />
+      
+      <DialogActions sx={{ p: 2.5 }}>
+        <Button 
+          onClick={handleClose}
+          variant="outlined"
+          size="large"
+          sx={{ borderRadius: 1 }}
+        >
+          취소
+        </Button>
+        <Button
+          onClick={() => {
+            console.log('Form values before submit:', formik.values);
+            console.log('Form errors:', formik.errors);
+            console.log('Is form valid:', isFormValid());
+            formik.handleSubmit();
+          }}
+          variant="contained"
+          size="large"
+          disabled={searching || !isFormValid()}
+          sx={{ borderRadius: 1, minWidth: 120 }}
+        >
+          {initialData ? '수정하기' : '저장하기'}
+        </Button>
+      </DialogActions>
     </Dialog>
   );
 };
