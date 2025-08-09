@@ -40,7 +40,7 @@ export class NaverProductService {
     
     this.axiosInstance = axios.create({
       baseURL: this.baseUrl,
-      timeout: 10000,
+      timeout: 60000,
       headers: {
         'Content-Type': 'application/json',
       }

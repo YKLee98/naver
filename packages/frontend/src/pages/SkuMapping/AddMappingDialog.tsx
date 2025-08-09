@@ -1,4 +1,4 @@
-// ===== 2. packages/frontend/src/pages/SkuMapping/AddMappingDialog.tsx (자동 SKU 검색 기능 강화) =====
+// packages/frontend/src/pages/SkuMapping/AddMappingDialog.tsx
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
@@ -86,19 +86,29 @@ interface ProductSearchResult {
     message?: string;
     error?: string;
   };
+  recommendations?: {
+    autoMappingPossible: boolean;
+    confidence: number;
+  };
 }
 
 const validationSchema = yup.object({
   sku: yup
     .string()
     .required('SKU는 필수입니다')
-    .matches(/^[A-Za-z0-9_-]{3,50}$/, 'SKU는 영문, 숫자, 하이픈, 언더스코어만 사용 가능합니다 (3-50자)'),
-  naverProductId: yup.string().required('네이버 상품 ID는 필수입니다'),
-  shopifyProductId: yup.string().required('Shopify 상품 ID는 필수입니다'),
+    .min(3, 'SKU는 최소 3자 이상이어야 합니다')
+    .matches(/^[A-Za-z0-9_-]+$/, 'SKU는 영문, 숫자, -, _ 만 사용 가능합니다'),
+  naverProductId: yup
+    .string()
+    .required('네이버 상품 ID는 필수입니다'),
+  shopifyProductId: yup
+    .string()
+    .required('Shopify 상품 ID는 필수입니다'),
   priceMargin: yup
     .number()
-    .min(0, '마진율은 0% 이상이어야 합니다')
-    .max(100, '마진율은 100% 이하여야 합니다'),
+    .min(0, '마진율은 0 이상이어야 합니다')
+    .max(100, '마진율은 100 이하여야 합니다'),
+  isActive: yup.boolean(),
 });
 
 const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
@@ -112,12 +122,18 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
   const [searchResults, setSearchResults] = useState<ProductSearchResult | null>(null);
   const [selectedNaverProduct, setSelectedNaverProduct] = useState<any>(null);
   const [selectedShopifyProduct, setSelectedShopifyProduct] = useState<any>(null);
-  const [autoSearchEnabled, setAutoSearchEnabled] = useState(true);
-  const [validationResult, setValidationResult] = useState<any>(null);
   const [expandedSections, setExpandedSections] = useState({
     naver: true,
     shopify: true,
   });
+
+  const handleClose = () => {
+    formik.resetForm();
+    setSearchResults(null);
+    setSelectedNaverProduct(null);
+    setSelectedShopifyProduct(null);
+    onClose();
+  };
 
   const formik = useFormik({
     initialValues: {
@@ -126,17 +142,12 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
       shopifyProductId: initialData?.shopifyProductId || '',
       shopifyVariantId: initialData?.shopifyVariantId || '',
       priceMargin: initialData?.priceMargin || 15,
-      isActive: initialData?.isActive ?? true,
+      isActive: initialData?.isActive !== undefined ? initialData.isActive : true,
     },
     validationSchema,
     onSubmit: async (values) => {
       try {
-        const payload = {
-          ...values,
-          autoSearch: autoSearchEnabled,
-        };
-        
-        await onSave(payload);
+        await onSave(values);
         showNotification('매핑이 성공적으로 저장되었습니다.', 'success');
         handleClose();
       } catch (error: any) {
@@ -227,58 +238,16 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
     formik.setFieldValue('shopifyVariantId', product.variantId);
   };
 
-  // 매핑 검증
-  const handleValidate = async () => {
-    const { sku, naverProductId, shopifyProductId } = formik.values;
-    
-    if (!sku || !naverProductId || !shopifyProductId) {
-      showNotification('모든 필수 항목을 입력해주세요.', 'warning');
-      return;
-    }
-
-    try {
-      const response = await mappingService.validateMappingData({
-        sku,
-        naverProductId,
-        shopifyProductId,
-      });
-      
-      setValidationResult(response.data);
-      
-      if (response.data.isValid) {
-        showNotification('매핑이 유효합니다.', 'success');
-      } else {
-        showNotification('매핑에 문제가 있습니다.', 'warning');
-      }
-    } catch (error) {
-      showNotification('검증에 실패했습니다.', 'error');
-    }
-  };
-
-  const handleClose = () => {
-    formik.resetForm();
-    setSearchResults(null);
-    setSelectedNaverProduct(null);
-    setSelectedShopifyProduct(null);
-    setValidationResult(null);
-    onClose();
-  };
-
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>
+      <DialogTitle>
+        {initialData ? 'SKU 매핑 수정' : '새 SKU 매핑 추가'}
+      </DialogTitle>
       <form onSubmit={formik.handleSubmit}>
-        <DialogTitle>
-          {initialData ? 'SKU 매핑 수정' : 'SKU 매핑 추가'}
-        </DialogTitle>
-        
-        <DialogContent dividers>
+        <DialogContent>
           <Grid container spacing={3}>
             {/* SKU 입력 및 검색 */}
             <Grid item xs={12}>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                💡 SKU를 입력하면 네이버와 Shopify에서 자동으로 상품을 검색합니다.
-              </Alert>
-              
               <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
                 <TextField
                   fullWidth
@@ -290,7 +259,6 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                   onBlur={formik.handleBlur}
                   error={formik.touched.sku && Boolean(formik.errors.sku)}
                   helperText={formik.touched.sku && formik.errors.sku}
-                  placeholder="예: ALBUM-001"
                   disabled={!!initialData}
                   InputProps={{
                     endAdornment: searching && (
@@ -345,8 +313,8 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                           }}
                         >
                           <List dense>
-                            {searchResults.naver.products.map((product) => (
-                              <ListItem key={product.id} divider>
+                            {searchResults.naver.products.map((product, index) => (
+                              <ListItem key={`naver-${product.id}-${index}`} divider>
                                 <Radio value={product.id} />
                                 <ListItemAvatar>
                                   {product.imageUrl ? (
@@ -360,20 +328,20 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                                 <ListItemText
                                   primary={product.name}
                                   secondary={
-                                    <Stack spacing={0.5}>
-                                      <Typography variant="caption">
+                                    <Box component="span">
+                                      <Typography variant="caption" display="block">
                                         ID: {product.id}
                                       </Typography>
-                                      <Typography variant="caption">
+                                      <Typography variant="caption" display="block">
                                         SKU: {product.sku || '-'}
                                       </Typography>
-                                      <Typography variant="caption">
+                                      <Typography variant="caption" display="block">
                                         가격: {formatCurrency(product.price, 'KRW')}
                                       </Typography>
-                                      <Typography variant="caption">
+                                      <Typography variant="caption" display="block">
                                         재고: {product.stockQuantity}개
                                       </Typography>
-                                    </Stack>
+                                    </Box>
                                   }
                                 />
                                 {product.similarity && (
@@ -446,8 +414,8 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                           }}
                         >
                           <List dense>
-                            {searchResults.shopify.products.map((product) => (
-                              <ListItem key={product.variantId} divider>
+                            {searchResults.shopify.products.map((product, index) => (
+                              <ListItem key={`shopify-${product.variantId || product.id}-${index}`} divider>
                                 <Radio value={product.variantId} />
                                 <ListItemAvatar>
                                   {product.imageUrl ? (
@@ -461,23 +429,23 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                                 <ListItemText
                                   primary={product.title}
                                   secondary={
-                                    <Stack spacing={0.5}>
-                                      <Typography variant="caption">
+                                    <Box component="span">
+                                      <Typography variant="caption" display="block">
                                         Variant: {product.variantTitle || 'Default'}
                                       </Typography>
-                                      <Typography variant="caption">
+                                      <Typography variant="caption" display="block">
                                         SKU: {product.sku || '-'}
                                       </Typography>
-                                      <Typography variant="caption">
+                                      <Typography variant="caption" display="block">
                                         가격: ${product.price}
                                       </Typography>
-                                      <Typography variant="caption">
+                                      <Typography variant="caption" display="block">
                                         재고: {product.inventoryQuantity}개
                                       </Typography>
-                                      <Typography variant="caption">
+                                      <Typography variant="caption" display="block">
                                         벤더: {product.vendor}
                                       </Typography>
-                                    </Stack>
+                                    </Box>
                                   }
                                 />
                                 {product.similarity && (
@@ -499,7 +467,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                     </Collapse>
 
                     {/* 수동 입력 */}
-                    <Stack spacing={2} sx={{ mt: 2 }}>
+                    <Box sx={{ mt: 2 }}>
                       <TextField
                         fullWidth
                         id="shopifyProductId"
@@ -511,107 +479,76 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                         error={formik.touched.shopifyProductId && Boolean(formik.errors.shopifyProductId)}
                         helperText={formik.touched.shopifyProductId && formik.errors.shopifyProductId}
                         placeholder="수동으로 입력"
+                        sx={{ mb: 2 }}
                       />
                       <TextField
                         fullWidth
                         id="shopifyVariantId"
                         name="shopifyVariantId"
-                        label="Shopify Variant ID (선택)"
+                        label="Shopify Variant ID (선택사항)"
                         value={formik.values.shopifyVariantId}
                         onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
                         placeholder="수동으로 입력"
                       />
-                    </Stack>
+                    </Box>
                   </CardContent>
                 </Card>
               </Grid>
             )}
 
-            {/* 설정 */}
+            {/* 추가 설정 */}
             <Grid item xs={12}>
-              <Divider sx={{ my: 2 }} />
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    id="priceMargin"
-                    name="priceMargin"
-                    label="마진율 (%)"
-                    type="number"
-                    value={formik.values.priceMargin}
-                    onChange={formik.handleChange}
-                    InputProps={{
-                      endAdornment: <InputAdornment position="end">%</InputAdornment>,
-                    }}
-                  />
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={formik.values.isActive}
-                        onChange={(e) => formik.setFieldValue('isActive', e.target.checked)}
-                      />
-                    }
-                    label="활성화"
-                  />
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <Button
-                    fullWidth
-                    variant="outlined"
-                    onClick={handleValidate}
-                    startIcon={<CheckCircle />}
-                  >
-                    매핑 검증
-                  </Button>
-                </Grid>
-              </Grid>
+              <Divider sx={{ my: 2 }}>추가 설정</Divider>
             </Grid>
 
-            {/* 검증 결과 */}
-            {validationResult && (
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                id="priceMargin"
+                name="priceMargin"
+                label="가격 마진율 (%)"
+                type="number"
+                value={formik.values.priceMargin}
+                onChange={formik.handleChange}
+                onBlur={formik.handleBlur}
+                error={formik.touched.priceMargin && Boolean(formik.errors.priceMargin)}
+                helperText={formik.touched.priceMargin && formik.errors.priceMargin}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                }}
+              />
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    id="isActive"
+                    name="isActive"
+                    checked={formik.values.isActive}
+                    onChange={formik.handleChange}
+                    color="primary"
+                  />
+                }
+                label="활성화"
+              />
+            </Grid>
+
+            {/* 자동 매핑 추천 */}
+            {searchResults?.recommendations?.autoMappingPossible && (
               <Grid item xs={12}>
-                <Alert
-                  severity={validationResult.isValid ? 'success' : 'error'}
-                  sx={{ mt: 2 }}
-                >
-                  {validationResult.isValid ? (
-                    '✅ 매핑이 유효합니다.'
-                  ) : (
-                    <>
-                      ❌ 매핑 검증 실패:
-                      <ul>
-                        {validationResult.errors.map((error: string, index: number) => (
-                          <li key={index}>{error}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                  {validationResult.warnings?.length > 0 && (
-                    <>
-                      ⚠️ 경고:
-                      <ul>
-                        {validationResult.warnings.map((warning: string, index: number) => (
-                          <li key={index}>{warning}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
+                <Alert severity="success" icon={<CheckCircle />}>
+                  자동 매핑 가능: SKU가 {searchResults.recommendations.confidence}% 일치합니다.
                 </Alert>
               </Grid>
             )}
           </Grid>
         </DialogContent>
-        
         <DialogActions>
           <Button onClick={handleClose}>취소</Button>
-          <Button
-            type="submit"
-            variant="contained"
-            disabled={formik.isSubmitting || !formik.isValid}
-          >
-            {initialData ? '수정' : '저장'}
+          <Button type="submit" variant="contained" color="primary">
+            {initialData ? '수정' : '추가'}
           </Button>
         </DialogActions>
       </form>

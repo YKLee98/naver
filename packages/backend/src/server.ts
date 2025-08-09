@@ -469,6 +469,7 @@ class Server {
 
   /**
    * Setup scheduled tasks with proper error handling
+   * 수정됨: 메서드 존재 여부 확인 추가
    */
   private setupScheduledTasks(
     inventorySyncService: any,
@@ -481,7 +482,19 @@ class Server {
       
       try {
         logger.info('Running scheduled inventory sync...');
-        await inventorySyncService.syncAllInventory();
+        
+        // 메서드 존재 여부 확인
+        if (inventorySyncService.syncAllInventory) {
+          await inventorySyncService.syncAllInventory();
+        } else if (inventorySyncService.syncInventory) {
+          await inventorySyncService.syncInventory();
+        } else if (inventorySyncService.sync) {
+          await inventorySyncService.sync();
+        } else {
+          logger.warn('Inventory sync method not found - skipping sync');
+          return;
+        }
+        
         logger.info('Scheduled inventory sync completed');
       } catch (error) {
         logger.error('Scheduled inventory sync failed:', error);
@@ -494,7 +507,19 @@ class Server {
       
       try {
         logger.info('Running scheduled price sync...');
-        await priceSyncService.syncAllPrices();
+        
+        // 메서드 존재 여부 확인
+        if (priceSyncService.syncAllPrices) {
+          await priceSyncService.syncAllPrices();
+        } else if (priceSyncService.syncPrices) {
+          await priceSyncService.syncPrices();
+        } else if (priceSyncService.sync) {
+          await priceSyncService.sync();
+        } else {
+          logger.warn('Price sync method not found - skipping sync');
+          return;
+        }
+        
         logger.info('Scheduled price sync completed');
       } catch (error) {
         logger.error('Scheduled price sync failed:', error);
@@ -507,17 +532,33 @@ class Server {
       
       try {
         logger.info('Updating exchange rates...');
-        await exchangeRateService.updateExchangeRate();
+        
+        // 메서드 존재 여부 확인
+        if (exchangeRateService.updateExchangeRate) {
+          await exchangeRateService.updateExchangeRate();
+        } else if (exchangeRateService.getCurrentRate) {
+          await exchangeRateService.getCurrentRate();
+        } else {
+          logger.warn('Exchange rate update method not found - skipping update');
+          return;
+        }
+        
         logger.info('Exchange rates updated');
       } catch (error) {
         logger.error('Exchange rate update failed:', error);
       }
     }, { scheduled: false });
 
-    // Store and start cron tasks
+    // Store cron tasks
     this.cronTasks = [inventorySyncJob, priceSyncJob, exchangeRateJob];
-    this.cronTasks.forEach(task => task.start());
-    logger.info('Cron jobs started');
+    
+    // 환경 변수로 스케줄 작업 활성화 제어
+    if (process.env.ENABLE_SCHEDULED_TASKS !== 'false') {
+      this.cronTasks.forEach(task => task.start());
+      logger.info('Cron jobs started');
+    } else {
+      logger.info('Scheduled tasks disabled by environment variable');
+    }
   }
 
   /**
@@ -528,7 +569,6 @@ class Server {
       logger.info('Setting up WebSocket server...');
       initializeWebSocket(this.io);
       logger.info('WebSocket server setup complete');
-      logger.info('WebSocket server initialized');
     } catch (error) {
       logger.error('Failed to initialize WebSocket:', error);
       // Don't throw - allow server to start without WebSocket
@@ -665,6 +705,13 @@ class Server {
         logger.info(`💡 Health Check: http://localhost:${this.port}/health`);
         logger.info(`🔌 WebSocket: ws://localhost:${this.port}`);
         logger.info('========================================');
+        
+        // 추가 정보 로그
+        if (process.env.ENABLE_SCHEDULED_TASKS === 'false') {
+          logger.info('⏸️  Scheduled tasks are DISABLED');
+        } else {
+          logger.info('▶️  Scheduled tasks are ENABLED');
+        }
       });
 
     } catch (error) {
