@@ -1,463 +1,598 @@
 // packages/frontend/src/pages/Dashboard/index.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box,
   Grid,
-  Paper,
-  Typography,
   Card,
   CardContent,
+  Typography,
+  Box,
+  CircularProgress,
+  Alert,
   IconButton,
+  Chip,
+  Paper,
   List,
   ListItem,
   ListItemText,
   ListItemIcon,
-  Chip,
-  CircularProgress,
-  Alert,
+  Divider,
+  Button,
+  ButtonGroup,
+  Tooltip,
+  LinearProgress,
+  Badge
 } from '@mui/material';
 import {
-  Inventory2,
-  AttachMoney,
-  Sync as SyncIcon,
-  Warning,
+  Refresh as RefreshIcon,
   TrendingUp,
   TrendingDown,
-  ShoppingCart,
-  Error,
+  Warning,
   CheckCircle,
-  Refresh,
+  Error as ErrorIcon,
+  Inventory,
+  AttachMoney,
+  Sync as SyncIcon,
+  Notifications,
+  Timeline,
+  BarChart as BarChartIcon,
+  PieChart as PieChartIcon,
+  Download,
+  Settings
 } from '@mui/icons-material';
 import {
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
   BarChart,
   Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
+  LineChart,
+  Line,
   PieChart,
   Pie,
   Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as ChartTooltip,
+  Legend,
+  ResponsiveContainer,
+  AreaChart,
+  Area
 } from 'recharts';
-import { useAppDispatch } from '@/hooks';
-import { dashboardService } from '@/services/api/dashboard.service';
-import { formatNumber, formatCurrency } from '@/utils/formatters';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { useAppDispatch, useAppSelector } from '../../hooks/redux';
+import { dashboardService, DashboardStats, Activity, ChartData } from '../../services/api/dashboard.service';
+import { addNotification } from '../../store/slices/notificationSlice';
 
-interface DashboardStats {
-  totalInventory: number;
-  todaySales: number;
-  syncStatus: 'normal' | 'warning' | 'error';
-  alertCount: number;
-  inventoryValue: number;
-  lowStockCount: number;
-  outOfStockCount: number;
-  syncSuccessRate: number;
-}
-
-interface ActivityItem {
-  id: string;
-  timestamp: string;
-  type: 'order' | 'sync' | 'price' | 'alert';
-  message: string;
-  status: 'success' | 'warning' | 'error';
-  details?: string;
-}
-
-interface InventoryChartItem {
-  name: string;
-  value: number;
-}
-
-interface InventoryChartResponse {
-  byStatus: Array<{ _id: string; count: number }>;
-  byRange: Array<{ _id: string; count: number }>;
-  byPlatform: Array<{ 
-    _id: string; 
-    averageQuantity: number;
-    totalQuantity: number;
-    count: number; 
-  }>;
-}
-
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+const COLORS = {
+  primary: '#1976d2',
+  secondary: '#dc004e',
+  success: '#4caf50',
+  warning: '#ff9800',
+  error: '#f44336',
+  info: '#2196f3',
+  chart: ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8']
+};
 
 const Dashboard: React.FC = () => {
   const dispatch = useAppDispatch();
+  const user = useAppSelector((state) => state.auth.user);
+  
+  // State
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardStats>({
-    totalInventory: 0,
-    todaySales: 0,
-    syncStatus: 'normal',
-    alertCount: 0,
-    inventoryValue: 0,
-    lowStockCount: 0,
-    outOfStockCount: 0,
-    syncSuccessRate: 0,
-  });
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
-  const [salesData, setSalesData] = useState<any[]>([]);
-  const [inventoryData, setInventoryData] = useState<InventoryChartItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [salesChartData, setSalesChartData] = useState<ChartData | null>(null);
+  const [inventoryChartData, setInventoryChartData] = useState<ChartData | null>(null);
+  const [priceChartData, setPriceChartData] = useState<ChartData | null>(null);
+  const [syncChartData, setSyncChartData] = useState<ChartData | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('day');
+  const [error, setError] = useState<string | null>(null);
 
-  // 재고 상태 이름 변환
-  const getStatusName = (status: string): string => {
-    switch (status) {
-      case 'inStock':
-        return '정상재고';
-      case 'lowStock':
-        return '재고부족';
-      case 'outOfStock':
-        return '품절';
-      default:
-        return status;
-    }
-  };
-
-  // 대시보드 데이터 로드
-  const loadDashboardData = async () => {
+  // Load dashboard data
+  const loadDashboardData = useCallback(async (showLoader = true) => {
     try {
-      const [statsRes, activitiesRes, salesRes, inventoryRes] = await Promise.all([
+      if (showLoader) setLoading(true);
+      setError(null);
+
+      // Parallel API calls for better performance
+      const [
+        statsRes,
+        activitiesRes,
+        salesRes,
+        inventoryRes,
+        priceRes,
+        syncRes
+      ] = await Promise.all([
         dashboardService.getStatistics(),
-        dashboardService.getRecentActivities(),
-        dashboardService.getSalesChartData({ period: 'day' }),
+        dashboardService.getRecentActivities({ limit: 10 }),
+        dashboardService.getSalesChartData({ period: selectedPeriod }),
         dashboardService.getInventoryChartData(),
+        dashboardService.getPriceChartData({ period: '7d' }),
+        dashboardService.getSyncChartData({ period: '7d' })
       ]);
 
       setStats(statsRes.data.data);
-      setActivities(activitiesRes.data.data.activities || []);
-      setSalesData(salesRes.data.data || []);
-      
-      // 재고 차트 데이터 변환
-      const inventoryResponse = inventoryRes.data.data as InventoryChartResponse;
-      if (inventoryResponse && inventoryResponse.byStatus) {
-        const transformedData: InventoryChartItem[] = inventoryResponse.byStatus.map((item) => ({
-          name: getStatusName(item._id),
-          value: item.count || 0,
-        }));
-        setInventoryData(transformedData);
-      } else {
-        // 기본값 설정
-        setInventoryData([
-          { name: '정상재고', value: 0 },
-          { name: '재고부족', value: 0 },
-          { name: '품절', value: 0 },
-        ]);
-      }
-    } catch (error) {
-      console.error('Failed to load dashboard data:', error);
-      // 오류 발생 시 기본값 설정
-      setInventoryData([
-        { name: '정상재고', value: 0 },
-        { name: '재고부족', value: 0 },
-        { name: '품절', value: 0 },
-      ]);
+      setActivities(activitiesRes.data.data.activities);
+      setSalesChartData(salesRes.data.data);
+      setInventoryChartData(inventoryRes.data.data);
+      setPriceChartData(priceRes.data.data);
+      setSyncChartData(syncRes.data.data);
+
+      dispatch(addNotification({
+        type: 'success',
+        title: '성공',
+        message: '대시보드 데이터를 성공적으로 로드했습니다.'
+      }));
+    } catch (err: any) {
+      console.error('Failed to load dashboard data:', err);
+      setError(err.response?.data?.message || '대시보드 데이터를 불러오는데 실패했습니다.');
+      dispatch(addNotification({
+        type: 'error',
+        title: '오류',
+        message: '대시보드 데이터 로드 실패'
+      }));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [dispatch, selectedPeriod]);
 
+  // Initial load
   useEffect(() => {
     loadDashboardData();
-    
-    // 30초마다 자동 새로고침
-    const interval = setInterval(loadDashboardData, 30000);
-    
-    return () => clearInterval(interval);
   }, []);
 
+  // Refresh handler
   const handleRefresh = () => {
     setRefreshing(true);
-    loadDashboardData();
+    loadDashboardData(false);
   };
 
-  // 활동 아이콘 렌더링
-  const getActivityIcon = (type: string, status: string) => {
-    if (status === 'error') return <Error color="error" />;
-    
-    switch (type) {
-      case 'order':
-        return <ShoppingCart color="primary" />;
-      case 'sync':
-        return <SyncIcon color="info" />;
-      case 'price':
-        return <AttachMoney color="success" />;
-      case 'alert':
-        return <Warning color="warning" />;
+  // Period change handler
+  const handlePeriodChange = (period: string) => {
+    setSelectedPeriod(period);
+  };
+
+  // Reload when period changes
+  useEffect(() => {
+    if (selectedPeriod) {
+      loadDashboardData(false);
+    }
+  }, [selectedPeriod]);
+
+  // Format number with commas
+  const formatNumber = (num: number): string => {
+    return new Intl.NumberFormat('ko-KR').format(num);
+  };
+
+  // Format currency
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('ko-KR', {
+      style: 'currency',
+      currency: 'KRW'
+    }).format(amount);
+  };
+
+  // Get status color
+  const getStatusColor = (status: string): string => {
+    switch (status) {
+      case 'normal':
+        return COLORS.success;
+      case 'warning':
+        return COLORS.warning;
+      case 'error':
+        return COLORS.error;
       default:
-        return <CheckCircle color="action" />;
+        return COLORS.info;
     }
   };
 
+  // Get activity icon
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case 'sync':
+        return <SyncIcon />;
+      case 'inventory_update':
+        return <Inventory />;
+      case 'price_update':
+        return <AttachMoney />;
+      case 'error':
+        return <ErrorIcon />;
+      default:
+        return <Timeline />;
+    }
+  };
+
+  // Render loading state
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
-        <CircularProgress />
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+        <CircularProgress size={60} />
+      </Box>
+    );
+  }
+
+  // Render error state
+  if (error) {
+    return (
+      <Box p={3}>
+        <Alert severity="error" action={
+          <Button color="inherit" size="small" onClick={() => loadDashboardData()}>
+            재시도
+          </Button>
+        }>
+          {error}
+        </Alert>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ flexGrow: 1, p: 3 }}>
-      {/* 상단 통계 카드 */}
+    <Box sx={{ p: 3 }}>
+      {/* Header */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4" component="h1">
+          대시보드
+        </Typography>
+        <Box display="flex" gap={2}>
+          <ButtonGroup variant="outlined" size="small">
+            <Button 
+              onClick={() => handlePeriodChange('hour')}
+              variant={selectedPeriod === 'hour' ? 'contained' : 'outlined'}
+            >
+              시간
+            </Button>
+            <Button 
+              onClick={() => handlePeriodChange('day')}
+              variant={selectedPeriod === 'day' ? 'contained' : 'outlined'}
+            >
+              일
+            </Button>
+            <Button 
+              onClick={() => handlePeriodChange('week')}
+              variant={selectedPeriod === 'week' ? 'contained' : 'outlined'}
+            >
+              주
+            </Button>
+            <Button 
+              onClick={() => handlePeriodChange('month')}
+              variant={selectedPeriod === 'month' ? 'contained' : 'outlined'}
+            >
+              월
+            </Button>
+          </ButtonGroup>
+          <Tooltip title="새로고침">
+            <IconButton onClick={handleRefresh} disabled={refreshing}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+
+      {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+
+      {/* Statistics Cards */}
+      {stats && (
+        <Grid container spacing={3} mb={3}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography color="textSecondary" gutterBottom>
+                      총 재고
+                    </Typography>
+                    <Typography variant="h5">
+                      {formatNumber(stats.totalInventory)}
+                    </Typography>
+                    <Box display="flex" alignItems="center" mt={1}>
+                      <Chip 
+                        label={`활성: ${stats.activeProducts}`}
+                        size="small"
+                        color="success"
+                      />
+                    </Box>
+                  </Box>
+                  <Inventory fontSize="large" color="primary" />
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography color="textSecondary" gutterBottom>
+                      오늘 판매
+                    </Typography>
+                    <Typography variant="h5">
+                      {formatNumber(stats.todaySales)}
+                    </Typography>
+                    <Box display="flex" alignItems="center" mt={1}>
+                      <TrendingUp fontSize="small" color="success" />
+                      <Typography variant="caption" color="success.main" ml={0.5}>
+                        전일 대비 +12%
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <AttachMoney fontSize="large" color="success" />
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography color="textSecondary" gutterBottom>
+                      동기화 상태
+                    </Typography>
+                    <Typography variant="h5">
+                      {stats.syncSuccessRate}%
+                    </Typography>
+                    <Box display="flex" alignItems="center" mt={1}>
+                      <Chip 
+                        label={stats.syncStatus}
+                        size="small"
+                        style={{ 
+                          backgroundColor: getStatusColor(stats.syncStatus),
+                          color: 'white'
+                        }}
+                      />
+                    </Box>
+                  </Box>
+                  <SyncIcon 
+                    fontSize="large" 
+                    style={{ color: getStatusColor(stats.syncStatus) }}
+                  />
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography color="textSecondary" gutterBottom>
+                      알림
+                    </Typography>
+                    <Typography variant="h5">
+                      {stats.alertCount}
+                    </Typography>
+                    <Box display="flex" gap={0.5} mt={1}>
+                      {stats.lowStockCount > 0 && (
+                        <Chip 
+                          label={`재고부족: ${stats.lowStockCount}`}
+                          size="small"
+                          color="warning"
+                        />
+                      )}
+                      {stats.outOfStockCount > 0 && (
+                        <Chip 
+                          label={`품절: ${stats.outOfStockCount}`}
+                          size="small"
+                          color="error"
+                        />
+                      )}
+                    </Box>
+                  </Box>
+                  <Badge badgeContent={stats.alertCount} color="error">
+                    <Notifications fontSize="large" color="action" />
+                  </Badge>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Charts */}
       <Grid container spacing={3} mb={3}>
-        <Grid item xs={12} sm={6} md={3}>
+        {/* Sales Chart */}
+        <Grid item xs={12} md={8}>
           <Card>
             <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom variant="body2">
-                    전체 재고
+              <Typography variant="h6" gutterBottom>
+                판매 추이
+              </Typography>
+              {salesChartData && (
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={salesChartData.datasets[0].data.map((value, index) => ({
+                    name: salesChartData.labels[index],
+                    value
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <ChartTooltip />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke={COLORS.primary}
+                      fill={COLORS.primary}
+                      fillOpacity={0.3}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+              {salesChartData?.summary && (
+                <Box display="flex" justifyContent="space-between" mt={2}>
+                  <Typography variant="body2" color="textSecondary">
+                    총 판매: {formatNumber(salesChartData.summary.total || 0)}
                   </Typography>
-                  <Typography variant="h5" component="div">
-                    {formatNumber(stats.totalInventory)}
-                  </Typography>
-                </Box>
-                <Inventory2 sx={{ fontSize: 40, color: 'primary.main', opacity: 0.7 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom variant="body2">
-                    오늘 판매
-                  </Typography>
-                  <Typography variant="h5" component="div">
-                    {formatNumber(stats.todaySales)}
-                  </Typography>
-                </Box>
-                <AttachMoney sx={{ fontSize: 40, color: 'success.main', opacity: 0.7 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom variant="body2">
-                    동기화 상태
+                  <Typography variant="body2" color="textSecondary">
+                    평균: {formatNumber(salesChartData.summary.average || 0)}
                   </Typography>
                   <Chip 
-                    label={stats.syncStatus === 'normal' ? '정상' : stats.syncStatus === 'warning' ? '주의' : '오류'}
-                    color={stats.syncStatus === 'normal' ? 'success' : stats.syncStatus === 'warning' ? 'warning' : 'error'}
+                    icon={salesChartData.summary.trend === 'up' ? <TrendingUp /> : <TrendingDown />}
+                    label={`${salesChartData.summary.changePercent || 0}%`}
+                    color={salesChartData.summary.trend === 'up' ? 'success' : 'error'}
                     size="small"
                   />
                 </Box>
-                <SyncIcon sx={{ fontSize: 40, color: 'info.main', opacity: 0.7 }} />
-              </Box>
+              )}
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        {/* Inventory Distribution */}
+        <Grid item xs={12} md={4}>
           <Card>
             <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom variant="body2">
-                    알림
-                  </Typography>
-                  <Typography variant="h5" component="div">
-                    {stats.alertCount}
-                  </Typography>
-                </Box>
-                <Warning sx={{ fontSize: 40, color: 'warning.main', opacity: 0.7 }} />
-              </Box>
+              <Typography variant="h6" gutterBottom>
+                재고 현황
+              </Typography>
+              {inventoryChartData && (
+                <>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={inventoryChartData.datasets[0].data.map((value, index) => ({
+                          name: inventoryChartData.labels[index],
+                          value
+                        }))}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {inventoryChartData.datasets[0].data.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS.chart[index % COLORS.chart.length]} />
+                        ))}
+                      </Pie>
+                      <ChartTooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <Box mt={2}>
+                    {inventoryChartData.labels.map((label, index) => (
+                      <Box key={label} display="flex" alignItems="center" mb={1}>
+                        <Box
+                          width={16}
+                          height={16}
+                          bgcolor={COLORS.chart[index % COLORS.chart.length]}
+                          mr={1}
+                        />
+                        <Typography variant="body2">
+                          {label}: {inventoryChartData.datasets[0].data[index]}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Sync History */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                동기화 이력
+              </Typography>
+              {syncChartData && (
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={syncChartData.labels.map((label, index) => ({
+                    name: label,
+                    success: syncChartData.datasets[0]?.data[index] || 0,
+                    failed: syncChartData.datasets[1]?.data[index] || 0
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <ChartTooltip />
+                    <Legend />
+                    <Bar dataKey="success" fill={COLORS.success} name="성공" />
+                    <Bar dataKey="failed" fill={COLORS.error} name="실패" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Price Trends */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                가격 추이
+              </Typography>
+              {priceChartData && (
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={priceChartData.labels.map((label, index) => ({
+                    name: label,
+                    price: priceChartData.datasets[0].data[index]
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <ChartTooltip formatter={(value) => formatCurrency(Number(value))} />
+                    <Line 
+                      type="monotone" 
+                      dataKey="price" 
+                      stroke={COLORS.secondary}
+                      strokeWidth={2}
+                      dot={{ fill: COLORS.secondary }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      {/* 차트 및 활동 섹션 */}
+      {/* Recent Activities */}
       <Grid container spacing={3}>
-        {/* 최근 활동 */}
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2, height: '100%' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">최근 활동</Typography>
-              <IconButton size="small" onClick={handleRefresh} disabled={refreshing}>
-                <Refresh />
-              </IconButton>
-            </Box>
-            
-            <List sx={{ maxHeight: 400, overflow: 'auto' }}>
-              {activities.map((activity) => (
-                <ListItem key={activity.id} alignItems="flex-start">
-                  <ListItemIcon>
-                    {getActivityIcon(activity.type, activity.status)}
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={activity.message}
-                    secondary={
-                      <>
-                        {format(new Date(activity.timestamp), 'MM-dd HH:mm', { locale: ko })}
-                        {activity.details && ` • ${activity.details}`}
-                      </>
-                    }
-                  />
-                </ListItem>
-              ))}
-              
-              {activities.length === 0 && (
-                <ListItem>
-                  <ListItemText
-                    primary="활동 내역이 없습니다"
-                    secondary="시스템 활동이 여기에 표시됩니다"
-                  />
-                </ListItem>
-              )}
-            </List>
-          </Paper>
-        </Grid>
-
-        {/* 판매 추이 차트 */}
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              판매 추이
-            </Typography>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={salesData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="time" />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value: any) => formatCurrency(value)}
-                  labelFormatter={(label) => `시간: ${label}`}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="sales" 
-                  stroke="#8884d8" 
-                  fill="#8884d8" 
-                  fillOpacity={0.6}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </Paper>
-        </Grid>
-
-        {/* 재고 현황 차트 */}
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              재고 현황
-            </Typography>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={inventoryData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {inventoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: any) => formatNumber(value)} />
-              </PieChart>
-            </ResponsiveContainer>
-            <Box sx={{ mt: 2 }}>
-              {inventoryData.map((item, index) => (
-                <Box key={item.name} display="flex" alignItems="center" mb={1}>
-                  <Box
-                    sx={{
-                      width: 12,
-                      height: 12,
-                      bgcolor: COLORS[index % COLORS.length],
-                      borderRadius: '50%',
-                      mr: 1,
-                    }}
-                  />
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    {item.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {formatNumber(item.value)}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          </Paper>
-        </Grid>
-      </Grid>
-
-      {/* 추가 정보 카드 */}
-      <Grid container spacing={3} mt={2}>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              재고 상태 요약
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={4}>
-                <Box textAlign="center">
-                  <Typography variant="h4" color="error.main">
-                    {stats.outOfStockCount}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    품절
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={4}>
-                <Box textAlign="center">
-                  <Typography variant="h4" color="warning.main">
-                    {stats.lowStockCount}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    재고 부족
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={4}>
-                <Box textAlign="center">
-                  <Typography variant="h4" color="success.main">
-                    {stats.syncSuccessRate}%
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    동기화 성공률
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
-          </Paper>
-        </Grid>
-
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              재고 가치
-            </Typography>
-            <Box display="flex" alignItems="baseline">
-              <Typography variant="h4" component="span">
-                {formatCurrency(stats.inventoryValue)}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" ml={2}>
-                총 재고 가치
-              </Typography>
-            </Box>
-          </Paper>
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="h6">
+                  최근 활동
+                </Typography>
+                <Button size="small" color="primary">
+                  모두 보기
+                </Button>
+              </Box>
+              <List>
+                {activities.map((activity, index) => (
+                  <React.Fragment key={activity._id}>
+                    <ListItem alignItems="flex-start">
+                      <ListItemIcon>
+                        {getActivityIcon(activity.type)}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={activity.action}
+                        secondary={
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="textSecondary">
+                              {activity.details}
+                            </Typography>
+                            <Typography variant="caption" color="textSecondary">
+                              {format(parseISO(activity.createdAt), 'MM/dd HH:mm', { locale: ko })}
+                            </Typography>
+                          </Box>
+                        }
+                      />
+                    </ListItem>
+                    {index < activities.length - 1 && <Divider variant="inset" component="li" />}
+                  </React.Fragment>
+                ))}
+              </List>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
     </Box>

@@ -89,6 +89,9 @@ importers:
       socket.io:
         specifier: ^4.8.1
         version: 4.8.1
+      socket.io-client:
+        specifier: ^4.8.1
+        version: 4.8.1
       string-similarity:
         specifier: ^4.0.4
         version: 4.0.4

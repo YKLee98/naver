@@ -16,7 +16,7 @@ export const store = configureStore({
     dashboard: dashboardReducer,
     inventory: inventoryReducer,
     products: productReducer,
-    notification: notificationReducer,  // 'notifications'에서 'notification'으로 변경
+    notification: notificationReducer,
     settings: settingsReducer,
     sync: syncReducer,
     pricing: pricingReducer,
@@ -25,10 +25,15 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
-        ignoredActions: ['websocket/connect', 'websocket/disconnect'],
-        ignoredPaths: ['websocket.socket'],
+        // Ignore these action types
+        ignoredActions: ['websocket/connect', 'websocket/disconnect', 'notification/addNotification'],
+        // Ignore these field paths in all actions
+        ignoredActionPaths: ['meta.arg', 'payload.timestamp'],
+        // Ignore these paths in the state
+        ignoredPaths: ['websocket.socket', 'notification.notifications'],
       },
     }),
+  devTools: process.env.NODE_ENV !== 'production',
 });
 
 export type RootState = ReturnType<typeof store.getState>;

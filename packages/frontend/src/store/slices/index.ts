@@ -1,20 +1,54 @@
 // packages/frontend/src/store/slices/index.ts
 
+// Slice exports
 export { default as authSlice } from './authSlice';
+export { default as dashboardSlice } from './dashboardSlice';
 export { default as inventorySlice } from './inventorySlice';
 export { default as pricingSlice } from './pricingSlice';
-export { default as settingsSlice } from './settingsSlice';
-export { default as dashboardSlice } from './dashboardSlice';
-export { default as notificationSlice } from './notificationSlice';
 export { default as productSlice } from './productSlice';
+export { default as settingsSlice } from './settingsSlice';
 export { default as syncSlice } from './syncSlice';
+export { default as notificationSlice } from './notificationSlice';
+export { default as websocketSlice } from './websocketSlice';
 
-// Action exports from inventorySlice
+// Auth actions
+export {
+  setAuthenticated,
+  login,
+  logout,
+  getCurrentUser,
+  updateProfile,
+} from './authSlice';
+
+// Dashboard actions
+export {
+  setDashboardStats,
+  setActivities,
+  addActivity,
+  setDateRange,
+  toggleAutoRefresh,
+  setRefreshInterval,
+  addDashboardNotification,
+  removeDashboardNotification,
+  clearDashboardError,
+  fetchDashboardStats,
+  fetchRecentActivity,
+  fetchSalesChart,
+  fetchInventoryChart,
+  fetchSyncChart,
+  fetchNotifications,
+  markNotificationRead,
+  fetchSystemHealth,
+} from './dashboardSlice';
+
+// Inventory actions
 export {
   setSelectedSku,
-  clearError as clearInventoryError,
-  updateInventoryStatus,
   updateInventoryRealTime,
+  updateInventoryStatus,
+  setFilters as setInventoryFilters,
+  clearInventoryError,
+  resetInventoryState,
   fetchInventoryStatus,
   fetchInventoryBySku,
   fetchTransactions,
@@ -25,7 +59,7 @@ export {
   generateInventoryReport,
 } from './inventorySlice';
 
-// Action exports from pricingSlice
+// Pricing actions
 export {
   setPriceHistory,
   addPriceHistory,
@@ -38,58 +72,7 @@ export {
   clearPricingState,
 } from './pricingSlice';
 
-// Action exports from productSlice
-export {
-  setSelectedProduct,
-  setSelectedMapping,
-  clearError as clearProductError,
-  fetchProducts,
-  fetchMappings,
-  createMapping,
-  updateMapping,
-  deleteMapping,
-  syncMapping,
-} from './productSlice';
-
-// Action exports from settingsSlice
-export {
-  clearError as clearSettingsError,
-  setConnectionStatus,
-  fetchSettings,
-  fetchApiSettings,
-  updateApiSettings,
-  fetchSyncSettings,
-  updateSyncSettings,
-  fetchNotificationSettings,
-  updateNotificationSettings,
-  testApiConnection,
-  exportSettings,
-  importSettings,
-  resetSettings,
-} from './settingsSlice';
-
-// Action exports from dashboardSlice
-export {
-  clearError as clearDashboardError,
-  addNotification as addDashboardNotification,
-  removeNotification as removeDashboardNotification,
-  setDashboardStats,
-  setActivities,
-  addActivity,  // addActivity export 추가
-  setDateRange,
-  toggleAutoRefresh,
-  setRefreshInterval,
-  fetchDashboardStats,
-  fetchRecentActivity,
-  fetchSalesChart,
-  fetchInventoryChart,
-  fetchSyncChart,
-  fetchNotifications,
-  markNotificationRead,
-  fetchSystemHealth,
-} from './dashboardSlice';
-
-// Action exports from notificationSlice
+// Notification actions
 export {
   addNotification,
   markAsRead,
@@ -97,29 +80,26 @@ export {
   removeNotification,
   clearNotifications,
   toggleDrawer,
+  setDrawerOpen,
   toggleSound,
+  setSoundEnabled,
 } from './notificationSlice';
 
-// Action exports from authSlice
+// WebSocket actions
 export {
-  clearError as clearAuthError,
-  setAuthenticated,
-  login,
-  logout,
-  getCurrentUser,
-  updateProfile,
-} from './authSlice';
+  setConnected,
+  setReconnecting,
+  incrementReconnectAttempts,
+  resetReconnectAttempts,
+  setError as setWebSocketError,
+  resetWebSocketState,
+} from './websocketSlice';
 
-// Action exports from syncSlice
-export {
-  clearError as clearSyncError,
-  startSync,
-  syncSuccess,
-  syncFailure,
-  updateSyncProgress,
-  cancelSync,
-  performFullSync,
-  performInventorySync,
-  performPriceSync,
-  syncSingleProduct,
-} from './syncSlice';
+// Product actions (if exists)
+export type { default as ProductSlice } from './productSlice';
+
+// Settings actions (if exists)
+export type { default as SettingsSlice } from './settingsSlice';
+
+// Sync actions (if exists)
+export type { default as SyncSlice } from './syncSlice';

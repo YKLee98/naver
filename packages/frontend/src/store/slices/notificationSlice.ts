@@ -1,5 +1,4 @@
-// ===== 2. packages/frontend/src/store/slices/notificationSlice.ts =====
-// notificationSlice가 없다면 생성
+// packages/frontend/src/store/slices/notificationSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
 interface Notification {
@@ -9,6 +8,12 @@ interface Notification {
   message: string;
   read: boolean;
   createdAt: string;
+}
+
+interface NotificationPayload {
+  type: 'info' | 'success' | 'warning' | 'error';
+  title: string;
+  message: string;
 }
 
 interface NotificationState {
@@ -26,10 +31,10 @@ const initialState: NotificationState = {
 };
 
 const notificationSlice = createSlice({
-  name: 'notifications',
+  name: 'notification',
   initialState,
   reducers: {
-    addNotification: (state, action: PayloadAction<Omit<Notification, 'id' | 'read' | 'createdAt'>>) => {
+    addNotification: (state, action: PayloadAction<NotificationPayload>) => {
       const notification: Notification = {
         ...action.payload,
         id: Date.now().toString(),
@@ -38,6 +43,19 @@ const notificationSlice = createSlice({
       };
       state.notifications.unshift(notification);
       state.unreadCount += 1;
+
+      // 사운드 재생 (브라우저에서 지원하는 경우)
+      if (state.soundEnabled && typeof window !== 'undefined') {
+        try {
+          const audio = new Audio('/notification.mp3');
+          audio.volume = 0.5;
+          audio.play().catch(() => {
+            // 사운드 재생 실패 시 무시
+          });
+        } catch (error) {
+          // 오디오 생성 실패 시 무시
+        }
+      }
     },
     markAsRead: (state, action: PayloadAction<string>) => {
       const notification = state.notifications.find(n => n.id === action.payload);
@@ -69,8 +87,14 @@ const notificationSlice = createSlice({
     toggleDrawer: (state) => {
       state.drawerOpen = !state.drawerOpen;
     },
+    setDrawerOpen: (state, action: PayloadAction<boolean>) => {
+      state.drawerOpen = action.payload;
+    },
     toggleSound: (state) => {
       state.soundEnabled = !state.soundEnabled;
+    },
+    setSoundEnabled: (state, action: PayloadAction<boolean>) => {
+      state.soundEnabled = action.payload;
     },
   },
 });
@@ -82,7 +106,9 @@ export const {
   removeNotification,
   clearNotifications,
   toggleDrawer,
+  setDrawerOpen,
   toggleSound,
+  setSoundEnabled,
 } = notificationSlice.actions;
 
 export default notificationSlice.reducer;

@@ -78,6 +78,7 @@
     "rate-limiter-flexible": "^7.1.1",
     "shopify": "^3.82.1",
     "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
     "string-similarity": "^4.0.4",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",

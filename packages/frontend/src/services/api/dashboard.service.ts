@@ -1,31 +1,79 @@
-// ===== 1. packages/frontend/src/services/api/dashboard.service.ts =====
+
+// ===== 2. packages/frontend/src/services/api/dashboard.service.ts (Updated) =====
 import { api } from '../api';
-import {
-  DashboardStats,
-  Activity,
-  ChartData,
-  Alert,
-  Widget,
-  DashboardConfig,
-  ExportRequest,
-  ExportStatus
-} from '@/types/models';
+import { AxiosResponse } from 'axios';
+
+// Types
+export interface DashboardStats {
+  totalInventory: number;
+  todaySales: number;
+  syncStatus: 'normal' | 'warning' | 'error';
+  alertCount: number;
+  inventoryValue: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  syncSuccessRate: number;
+  lastSyncTime?: string;
+  activeProducts: number;
+  totalProducts: number;
+  priceDiscrepancies: number;
+  pendingSyncs: number;
+}
+
+export interface Activity {
+  _id: string;
+  id: string;
+  type: 'sync' | 'inventory_update' | 'price_update' | 'mapping_change' | 'error';
+  action: string;
+  details: string;
+  metadata?: Record<string, any>;
+  userId?: string;
+  createdAt: string;
+  timestamp: string;
+}
+
+export interface ChartData {
+  labels: string[];
+  datasets: Array<{
+    label: string;
+    data: number[];
+    backgroundColor?: string | string[];
+    borderColor?: string;
+    borderWidth?: number;
+    fill?: boolean;
+  }>;
+  summary?: {
+    total?: number;
+    average?: number;
+    trend?: 'up' | 'down' | 'stable';
+    changePercent?: number;
+  };
+}
+
+export interface Alert {
+  _id: string;
+  type: string;
+  severity: string;
+  status: string;
+  title: string;
+  message: string;
+  details?: any;
+  createdAt: string;
+}
 
 class DashboardService {
   /**
    * Get dashboard statistics
    */
-  async getStatistics(): Promise<DashboardStats> {
-    const response = await api.get('/dashboard/statistics');
-    return response.data.data;
+  async getStatistics(): Promise<AxiosResponse<{ success: boolean; data: DashboardStats }>> {
+    return api.get('/dashboard/statistics');
   }
 
   /**
    * Get statistics by type
    */
-  async getStatisticsByType(type: string): Promise<any> {
-    const response = await api.get(`/dashboard/statistics/${type}`);
-    return response.data.data;
+  async getStatisticsByType(type: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.get(`/dashboard/statistics/${type}`);
   }
 
   /**
@@ -35,49 +83,15 @@ class DashboardService {
     limit?: number;
     offset?: number;
     type?: string;
-  }): Promise<{ activities: Activity[]; pagination: any }> {
-    const response = await api.get('/dashboard/activities', { params });
-    return response.data.data;
+  }): Promise<AxiosResponse<{ success: boolean; data: { activities: Activity[]; pagination: any } }>> {
+    return api.get('/dashboard/activities', { params });
   }
 
   /**
    * Get activity by ID
    */
-  async getActivityById(id: string): Promise<Activity> {
-    const response = await api.get(`/dashboard/activities/${id}`);
-    return response.data.data;
-  }
-
-  /**
-   * Get price chart data
-   */
-  async getPriceChartData(params?: {
-    period?: string;
-    sku?: string;
-  }): Promise<ChartData> {
-    const response = await api.get('/dashboard/charts/price', { params });
-    return response.data.data;
-  }
-
-  /**
-   * Get inventory chart data
-   */
-  async getInventoryChartData(params?: {
-    period?: string;
-    sku?: string;
-  }): Promise<ChartData> {
-    const response = await api.get('/dashboard/charts/inventory', { params });
-    return response.data.data;
-  }
-
-  /**
-   * Get sync chart data
-   */
-  async getSyncChartData(params?: {
-    period?: string;
-  }): Promise<ChartData> {
-    const response = await api.get('/dashboard/charts/sync', { params });
-    return response.data.data;
+  async getActivityById(id: string): Promise<AxiosResponse<{ success: boolean; data: Activity }>> {
+    return api.get(`/dashboard/activities/${id}`);
   }
 
   /**
@@ -86,9 +100,37 @@ class DashboardService {
   async getSalesChartData(params?: {
     period?: string;
     platform?: string;
-  }): Promise<ChartData> {
-    const response = await api.get('/dashboard/charts/sales', { params });
-    return response.data.data;
+  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
+    return api.get('/dashboard/charts/sales', { params });
+  }
+
+  /**
+   * Get inventory chart data
+   */
+  async getInventoryChartData(params?: {
+    period?: string;
+    sku?: string;
+  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
+    return api.get('/dashboard/charts/inventory', { params });
+  }
+
+  /**
+   * Get price chart data
+   */
+  async getPriceChartData(params?: {
+    period?: string;
+    sku?: string;
+  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
+    return api.get('/dashboard/charts/price', { params });
+  }
+
+  /**
+   * Get sync chart data
+   */
+  async getSyncChartData(params?: {
+    period?: string;
+  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
+    return api.get('/dashboard/charts/sync', { params });
   }
 
   /**
@@ -96,9 +138,8 @@ class DashboardService {
    */
   async getPerformanceChartData(params?: {
     metric?: string;
-  }): Promise<ChartData> {
-    const response = await api.get('/dashboard/charts/performance', { params });
-    return response.data.data;
+  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
+    return api.get('/dashboard/charts/performance', { params });
   }
 
   /**
@@ -107,95 +148,74 @@ class DashboardService {
   async getAlerts(params?: {
     status?: string;
     severity?: string;
-  }): Promise<Alert[]> {
-    const response = await api.get('/dashboard/alerts', { params });
-    return response.data.data;
-  }
-
-  /**
-   * Get alert by ID
-   */
-  async getAlertById(id: string): Promise<Alert> {
-    const response = await api.get(`/dashboard/alerts/${id}`);
-    return response.data.data;
+  }): Promise<AxiosResponse<{ success: boolean; data: Alert[] }>> {
+    return api.get('/dashboard/alerts', { params });
   }
 
   /**
    * Dismiss alert
    */
-  async dismissAlert(id: string): Promise<void> {
-    await api.post(`/dashboard/alerts/${id}/dismiss`);
+  async dismissAlert(id: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.post(`/dashboard/alerts/${id}/dismiss`);
   }
 
   /**
    * Acknowledge alert
    */
-  async acknowledgeAlert(id: string): Promise<void> {
-    await api.post(`/dashboard/alerts/${id}/acknowledge`);
+  async acknowledgeAlert(id: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.post(`/dashboard/alerts/${id}/acknowledge`);
   }
 
   /**
    * Get widgets
    */
-  async getWidgets(): Promise<Widget[]> {
-    const response = await api.get('/dashboard/widgets');
-    return response.data.data;
+  async getWidgets(): Promise<AxiosResponse<{ success: boolean; data: any[] }>> {
+    return api.get('/dashboard/widgets');
   }
 
   /**
    * Get widget data
    */
-  async getWidgetData(widgetId: string): Promise<any> {
-    const response = await api.get(`/dashboard/widgets/${widgetId}`);
-    return response.data.data;
+  async getWidgetData(widgetId: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.get(`/dashboard/widgets/${widgetId}`);
   }
 
   /**
    * Refresh widget
    */
-  async refreshWidget(widgetId: string): Promise<any> {
-    const response = await api.post(`/dashboard/widgets/${widgetId}/refresh`);
-    return response.data.data;
+  async refreshWidget(widgetId: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.post(`/dashboard/widgets/${widgetId}/refresh`);
   }
 
   /**
-   * Get dashboard configuration
+   * Get dashboard config
    */
-  async getDashboardConfig(): Promise<DashboardConfig> {
-    const response = await api.get('/dashboard/config');
-    return response.data.data;
+  async getDashboardConfig(): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.get('/dashboard/config');
   }
 
   /**
-   * Update dashboard configuration
+   * Update dashboard config
    */
-  async updateDashboardConfig(config: Partial<DashboardConfig>): Promise<DashboardConfig> {
-    const response = await api.put('/dashboard/config', config);
-    return response.data.data;
-  }
-
-  /**
-   * Reset dashboard configuration
-   */
-  async resetDashboardConfig(): Promise<DashboardConfig> {
-    const response = await api.post('/dashboard/config/reset');
-    return response.data.data;
+  async updateDashboardConfig(config: any): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.put('/dashboard/config', config);
   }
 
   /**
    * Export dashboard data
    */
-  async exportDashboardData(request: ExportRequest): Promise<{ exportId: string; status: string }> {
-    const response = await api.post('/dashboard/export', request);
-    return response.data.data;
+  async exportDashboardData(params: {
+    format?: string;
+    dateRange?: any;
+  }): Promise<AxiosResponse<{ success: boolean; data: { exportId: string } }>> {
+    return api.post('/dashboard/export', params);
   }
 
   /**
    * Get export status
    */
-  async getExportStatus(exportId: string): Promise<ExportStatus> {
-    const response = await api.get(`/dashboard/export/${exportId}/status`);
-    return response.data.data;
+  async getExportStatus(exportId: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+    return api.get(`/dashboard/export/${exportId}/status`);
   }
 
   /**
@@ -209,4 +229,4 @@ class DashboardService {
   }
 }
 
-export const dashboardService = new DashboardService()
+export const dashboardService = new DashboardService();

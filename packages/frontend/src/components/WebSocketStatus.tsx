@@ -1,32 +1,45 @@
 // packages/frontend/src/components/WebSocketStatus.tsx
 import React from 'react';
-import { Chip } from '@mui/material';
+import { Chip, Tooltip } from '@mui/material';
 import { FiberManualRecord } from '@mui/icons-material';
-import { useAppSelector } from '@/hooks';
+import { useAppSelector } from '@/hooks/redux';
 
 const WebSocketStatus: React.FC = () => {
-  const { connected, reconnecting } = useAppSelector((state) => state.websocket);
+  const { connected, reconnecting, reconnectAttempts } = useAppSelector((state) => state.websocket);
 
-  if (reconnecting) {
-    return (
-      <Chip
-        icon={<FiberManualRecord />}
-        label="재연결 중..."
-        size="small"
-        color="warning"
-        sx={{ mr: 2 }}
-      />
-    );
-  }
+  const getStatusColor = () => {
+    if (connected) return 'success';
+    if (reconnecting) return 'warning';
+    return 'error';
+  };
+
+  const getStatusLabel = () => {
+    if (connected) return '연결됨';
+    if (reconnecting) return `재연결 중... (${reconnectAttempts})`;
+    return '연결 끊김';
+  };
+
+  const getTooltipText = () => {
+    if (connected) return 'WebSocket 실시간 연결 활성';
+    if (reconnecting) return `WebSocket 재연결 시도 중 (${reconnectAttempts}회)`;
+    return 'WebSocket 연결 끊김';
+  };
 
   return (
-    <Chip
-      icon={<FiberManualRecord />}
-      label={connected ? '연결됨' : '연결 끊김'}
-      size="small"
-      color={connected ? 'success' : 'error'}
-      sx={{ mr: 2 }}
-    />
+    <Tooltip title={getTooltipText()}>
+      <Chip
+        icon={<FiberManualRecord />}
+        label={getStatusLabel()}
+        color={getStatusColor() as any}
+        size="small"
+        sx={{ 
+          mr: 2,
+          '& .MuiChip-icon': {
+            fontSize: '12px'
+          }
+        }}
+      />
+    </Tooltip>
   );
 };
 

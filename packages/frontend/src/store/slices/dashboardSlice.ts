@@ -1,47 +1,20 @@
 // packages/frontend/src/store/slices/dashboardSlice.ts
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import apiService from '@/services/api';
-import { DashboardStats, Activity, Notification } from '@/types/models';
-
-interface ChartData {
-  labels: string[];
-  datasets: Array<{
-    label: string;
-    data: number[];
-    borderColor?: string;
-    backgroundColor?: string;
-    fill?: boolean;
-  }>;
-}
-
-interface SystemHealth {
-  status: 'healthy' | 'degraded' | 'down';
-  services: {
-    api: boolean;
-    database: boolean;
-    redis: boolean;
-    naver: boolean;
-    shopify: boolean;
-  };
-  lastChecked: string;
-}
+import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
+import { dashboardService } from '@/services/api/dashboard.service';
 
 interface DashboardState {
-  stats: DashboardStats | null;
-  activities: Activity[];
-  notifications: Notification[];
-  systemHealth: SystemHealth | null;
-  chartData: {
-    sales: ChartData | null;
-    inventory: ChartData | null;
-    sync: ChartData | null;
+  stats: any | null;
+  activities: any[];
+  salesChart: any | null;
+  inventoryChart: any | null;
+  syncChart: any | null;
+  notifications: any[];
+  dateRange: {
+    start: string;
+    end: string;
   };
-  selectedDateRange: {
-    startDate: string;
-    endDate: string;
-  };
+  autoRefresh: boolean;
   refreshInterval: number;
-  isAutoRefreshEnabled: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -49,19 +22,16 @@ interface DashboardState {
 const initialState: DashboardState = {
   stats: null,
   activities: [],
+  salesChart: null,
+  inventoryChart: null,
+  syncChart: null,
   notifications: [],
-  systemHealth: null,
-  chartData: {
-    sales: null,
-    inventory: null,
-    sync: null,
+  dateRange: {
+    start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    end: new Date().toISOString(),
   },
-  selectedDateRange: {
-    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    endDate: new Date().toISOString(),
-  },
-  refreshInterval: 30000, // 30초
-  isAutoRefreshEnabled: true,
+  autoRefresh: true,
+  refreshInterval: 60000, // 1 minute
   loading: false,
   error: null,
 };
@@ -70,200 +40,64 @@ const initialState: DashboardState = {
 export const fetchDashboardStats = createAsyncThunk(
   'dashboard/fetchStats',
   async () => {
-    try {
-      const response = await apiService.getDashboardStats();
-      return response;
-    } catch (error: any) {
-      console.error('Dashboard stats error:', error);
-      throw error;
-    }
+    const response = await dashboardService.getStatistics();
+    return response.data.data;
   }
 );
 
 export const fetchRecentActivity = createAsyncThunk(
   'dashboard/fetchActivity',
-  async (limit: number = 10) => {
-    try {
-      // API에서 limit 파라미터를 지원한다면
-      const response = await apiService.getRecentActivity();
-      return response;
-    } catch (error: any) {
-      console.error('Recent activity error:', error);
-      throw error;
-    }
+  async (params?: { limit?: number; offset?: number; type?: string }) => {
+    const response = await dashboardService.getRecentActivities(params);
+    return response.data.data;
   }
 );
 
 export const fetchSalesChart = createAsyncThunk(
   'dashboard/fetchSalesChart',
-  async (params: { startDate: string; endDate: string; interval?: string }) => {
-    try {
-      // 실제 API 호출로 변경
-      const response = await apiService.getSalesChartData(params);
-      
-      // API 응답을 ChartData 형식으로 변환
-      const chartData: ChartData = {
-        labels: response.map((item: any) => item._id || item.date),
-        datasets: [
-          {
-            label: '매출',
-            data: response.map((item: any) => item.totalQuantity || 0),
-            borderColor: 'rgb(75, 192, 192)',
-            backgroundColor: 'rgba(75, 192, 192, 0.2)',
-            fill: true,
-          }
-        ]
-      };
-      
-      return chartData;
-    } catch (error: any) {
-      console.error('Sales chart error:', error);
-      // 에러 시 빈 데이터 반환
-      return {
-        labels: [],
-        datasets: [{
-          label: '매출',
-          data: [],
-          borderColor: 'rgb(75, 192, 192)',
-          backgroundColor: 'rgba(75, 192, 192, 0.2)',
-          fill: true,
-        }]
-      };
-    }
+  async (params?: { period?: string; platform?: string }) => {
+    const response = await dashboardService.getSalesChartData(params);
+    return response.data.data;
   }
 );
 
 export const fetchInventoryChart = createAsyncThunk(
   'dashboard/fetchInventoryChart',
-  async () => {
-    try {
-      const response = await apiService.getInventoryChartData();
-      
-      // API 응답을 ChartData 형식으로 변환
-      const byStatus = response.byStatus || [];
-      const chartData: ChartData = {
-        labels: byStatus.map((item: any) => {
-          switch(item._id) {
-            case 'inStock': return '정상 재고';
-            case 'lowStock': return '부족';
-            case 'outOfStock': return '품절';
-            default: return item._id;
-          }
-        }),
-        datasets: [
-          {
-            label: '재고 현황',
-            data: byStatus.map((item: any) => item.count),
-            backgroundColor: [
-              'rgba(75, 192, 192, 0.8)',
-              'rgba(255, 206, 86, 0.8)',
-              'rgba(255, 99, 132, 0.8)',
-            ],
-          }
-        ]
-      };
-      
-      return chartData;
-    } catch (error: any) {
-      console.error('Inventory chart error:', error);
-      // 에러 시 빈 데이터 반환
-      return {
-        labels: ['정상 재고', '부족', '품절'],
-        datasets: [{
-          label: '재고 현황',
-          data: [0, 0, 0],
-          backgroundColor: [
-            'rgba(75, 192, 192, 0.8)',
-            'rgba(255, 206, 86, 0.8)',
-            'rgba(255, 99, 132, 0.8)',
-          ],
-        }]
-      };
-    }
+  async (params?: { period?: string; sku?: string }) => {
+    const response = await dashboardService.getInventoryChartData(params);
+    return response.data.data;
   }
 );
 
 export const fetchSyncChart = createAsyncThunk(
   'dashboard/fetchSyncChart',
-  async (params: { startDate: string; endDate: string }) => {
-    try {
-      const response = await apiService.getSyncChartData(params);
-      
-      // API 응답을 ChartData 형식으로 변환
-      const chartData: ChartData = {
-        labels: response.map((item: any) => item._id),
-        datasets: [
-          {
-            label: '동기화 건수',
-            data: response.map((item: any) => item.totalCount),
-            backgroundColor: 'rgba(75, 192, 192, 0.8)',
-          }
-        ]
-      };
-      
-      return chartData;
-    } catch (error: any) {
-      console.error('Sync chart error:', error);
-      // 에러 시 빈 데이터 반환
-      return {
-        labels: [],
-        datasets: [{
-          label: '동기화 건수',
-          data: [],
-          backgroundColor: 'rgba(75, 192, 192, 0.8)',
-        }]
-      };
-    }
+  async (params?: { period?: string }) => {
+    const response = await dashboardService.getSyncChartData(params);
+    return response.data.data;
   }
 );
 
 export const fetchNotifications = createAsyncThunk(
   'dashboard/fetchNotifications',
-  async (params?: { unreadOnly?: boolean; limit?: number }) => {
-    try {
-      const response = await apiService.getNotifications(params);
-      return response;
-    } catch (error: any) {
-      console.error('Notifications error:', error);
-      return [];
-    }
+  async (params?: { status?: string; severity?: string }) => {
+    const response = await dashboardService.getAlerts(params);
+    return response.data.data;
   }
 );
 
 export const markNotificationRead = createAsyncThunk(
   'dashboard/markNotificationRead',
   async (id: string) => {
-    try {
-      await apiService.markNotificationAsRead(id);
-      return { id };
-    } catch (error: any) {
-      console.error('Mark notification error:', error);
-      throw error;
-    }
+    const response = await dashboardService.acknowledgeAlert(id);
+    return response.data.data;
   }
 );
 
 export const fetchSystemHealth = createAsyncThunk(
   'dashboard/fetchSystemHealth',
   async () => {
-    try {
-      const response = await apiService.getSystemHealth();
-      return response;
-    } catch (error: any) {
-      console.error('System health error:', error);
-      // 에러 발생 시 기본값 반환
-      return {
-        status: 'degraded' as const,
-        services: {
-          api: true,
-          database: true,
-          redis: true,
-          naver: false,
-          shopify: false,
-        },
-        lastChecked: new Date().toISOString(),
-      };
-    }
+    // This would call a system health endpoint
+    return { status: 'healthy' };
   }
 );
 
@@ -271,113 +105,85 @@ const dashboardSlice = createSlice({
   name: 'dashboard',
   initialState,
   reducers: {
-    clearError: (state) => {
-      state.error = null;
-    },
-    setDashboardStats: (state, action: PayloadAction<DashboardStats>) => {
+    setDashboardStats: (state, action: PayloadAction<any>) => {
       state.stats = action.payload;
     },
-    setActivities: (state, action: PayloadAction<Activity[]>) => {
+    setActivities: (state, action: PayloadAction<any[]>) => {
       state.activities = action.payload;
     },
-    addActivity: (state, action: PayloadAction<Activity>) => {
+    addActivity: (state, action: PayloadAction<any>) => {
       state.activities.unshift(action.payload);
+      // Keep only last 100 activities
       if (state.activities.length > 100) {
-        state.activities.pop();
+        state.activities = state.activities.slice(0, 100);
       }
     },
-    addNotification: (state, action: PayloadAction<Notification>) => {
+    setDateRange: (state, action: PayloadAction<{ start: string; end: string }>) => {
+      state.dateRange = action.payload;
+    },
+    toggleAutoRefresh: (state) => {
+      state.autoRefresh = !state.autoRefresh;
+    },
+    setRefreshInterval: (state, action: PayloadAction<number>) => {
+      state.refreshInterval = action.payload;
+    },
+    addNotification: (state, action: PayloadAction<any>) => {
       state.notifications.unshift(action.payload);
     },
     removeNotification: (state, action: PayloadAction<string>) => {
       state.notifications = state.notifications.filter(n => n.id !== action.payload);
     },
-    setDateRange: (state, action: PayloadAction<typeof initialState.selectedDateRange>) => {
-      state.selectedDateRange = action.payload;
-    },
-    toggleAutoRefresh: (state) => {
-      state.isAutoRefreshEnabled = !state.isAutoRefreshEnabled;
-    },
-    setRefreshInterval: (state, action: PayloadAction<number>) => {
-      state.refreshInterval = action.payload;
+    clearError: (state) => {
+      state.error = null;
     },
   },
   extraReducers: (builder) => {
+    // Fetch dashboard stats
     builder
-      // Fetch stats
       .addCase(fetchDashboardStats.pending, (state) => {
         state.loading = true;
-        state.error = null;
       })
       .addCase(fetchDashboardStats.fulfilled, (state, action) => {
         state.loading = false;
         state.stats = action.payload;
-        state.error = null;
       })
       .addCase(fetchDashboardStats.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.error.message || '대시보드 통계 조회에 실패했습니다.';
+        state.error = action.error.message || 'Failed to fetch dashboard stats';
       })
-      // Fetch activities
-      .addCase(fetchRecentActivity.pending, (state) => {
-        // 활동 로딩은 별도 표시 없음
-      })
+      // Fetch recent activity
       .addCase(fetchRecentActivity.fulfilled, (state, action) => {
-        state.activities = action.payload || [];
+        state.activities = action.payload.activities;
       })
-      .addCase(fetchRecentActivity.rejected, (state, action) => {
-        console.error('Failed to fetch activities:', action.error);
-      })
-      // Fetch charts
+      // Fetch sales chart
       .addCase(fetchSalesChart.fulfilled, (state, action) => {
-        state.chartData.sales = action.payload;
+        state.salesChart = action.payload;
       })
+      // Fetch inventory chart
       .addCase(fetchInventoryChart.fulfilled, (state, action) => {
-        state.chartData.inventory = action.payload;
+        state.inventoryChart = action.payload;
       })
+      // Fetch sync chart
       .addCase(fetchSyncChart.fulfilled, (state, action) => {
-        state.chartData.sync = action.payload;
+        state.syncChart = action.payload;
       })
-      // Notifications
+      // Fetch notifications
       .addCase(fetchNotifications.fulfilled, (state, action) => {
-        state.notifications = action.payload || [];
-      })
-      .addCase(markNotificationRead.fulfilled, (state, action) => {
-        const notification = state.notifications.find(n => n.id === action.payload.id);
-        if (notification) {
-          notification.read = true;
-        }
-      })
-      // System health
-      .addCase(fetchSystemHealth.fulfilled, (state, action) => {
-        state.systemHealth = action.payload;
-      })
-      .addCase(fetchSystemHealth.rejected, (state) => {
-        state.systemHealth = {
-          status: 'down',
-          services: {
-            api: false,
-            database: false,
-            redis: false,
-            naver: false,
-            shopify: false,
-          },
-          lastChecked: new Date().toISOString(),
-        };
+        state.notifications = action.payload;
       });
   },
 });
 
-export const { 
-  clearError, 
+export const {
   setDashboardStats,
   setActivities,
   addActivity,
-  addNotification, 
-  removeNotification,
   setDateRange,
   toggleAutoRefresh,
   setRefreshInterval,
+  addNotification: addDashboardNotification,
+  removeNotification: removeDashboardNotification,
+  clearError: clearDashboardError,
 } = dashboardSlice.actions;
 
 export default dashboardSlice.reducer;

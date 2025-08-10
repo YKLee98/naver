@@ -1,98 +1,140 @@
-// packages/backend/src/models/SyncHistory.ts
+// ===== 3. packages/backend/src/models/SyncHistory.ts =====
 import { Schema, model, Document } from 'mongoose';
 
 export interface ISyncHistory extends Document {
-  sku: string;
-  vendor: string;
-  syncType: 'manual' | 'auto' | 'scheduled' | 'batch';
-  status: 'success' | 'failed' | 'partial';
-  details: {
-    syncedFields?: string[];
-    changes?: {
-      price?: { old: number; new: number };
-      inventory?: { old: number; new: number };
-      images?: { added: number; removed: number };
-      description?: boolean;
-    };
-    errors?: string[];
-    warnings?: string[];
+  jobId: string;
+  type: 'full' | 'partial' | 'inventory' | 'price' | 'manual';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  source: 'scheduled' | 'manual' | 'webhook' | 'api';
+  statistics: {
+    totalItems: number;
+    processedItems: number;
+    successCount: number;
+    failedCount: number;
+    skippedCount: number;
+    createdCount?: number;
+    updatedCount?: number;
   };
-  duration: number;
-  retryCount?: number;
-  metadata?: Record<string, any>;
+  performance: {
+    startTime: Date;
+    endTime?: Date;
+    duration?: number; // in milliseconds
+    itemsPerSecond?: number;
+  };
+  errors: Array<{
+    timestamp: Date;
+    entity: string;
+    error: string;
+    details?: any;
+  }>;
+  warnings: Array<{
+    timestamp: Date;
+    entity: string;
+    warning: string;
+    details?: any;
+  }>;
+  metadata?: {
+    triggerUser?: string;
+    triggerReason?: string;
+    options?: Record<string, any>;
+    results?: Record<string, any>;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
 
 const SyncHistorySchema = new Schema<ISyncHistory>(
   {
-    sku: {
+    jobId: {
       type: String,
       required: true,
-      index: true,
+      unique: true,
+      index: true
     },
-    vendor: {
+    type: {
       type: String,
       required: true,
-      default: 'album',
-    },
-    syncType: {
-      type: String,
-      required: true,
-      enum: ['manual', 'auto', 'scheduled', 'batch'],
+      enum: ['full', 'partial', 'inventory', 'price', 'manual'],
+      index: true
     },
     status: {
       type: String,
       required: true,
-      enum: ['success', 'failed', 'partial'],
-      index: true,
+      enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+      default: 'pending',
+      index: true
     },
-    details: {
-      syncedFields: [String],
-      changes: {
-        price: {
-          old: Number,
-          new: Number,
-        },
-        inventory: {
-          old: Number,
-          new: Number,
-        },
-        images: {
-          added: Number,
-          removed: Number,
-        },
-        description: Boolean,
-      },
-      errors: [String],
-      warnings: [String],
-    },
-    duration: {
-      type: Number,
+    source: {
+      type: String,
       required: true,
-      default: 0,
+      enum: ['scheduled', 'manual', 'webhook', 'api'],
+      default: 'manual'
     },
-    retryCount: {
-      type: Number,
-      default: 0,
+    statistics: {
+      totalItems: { type: Number, default: 0 },
+      processedItems: { type: Number, default: 0 },
+      successCount: { type: Number, default: 0 },
+      failedCount: { type: Number, default: 0 },
+      skippedCount: { type: Number, default: 0 },
+      createdCount: { type: Number, default: 0 },
+      updatedCount: { type: Number, default: 0 }
     },
+    performance: {
+      startTime: { type: Date, required: true },
+      endTime: Date,
+      duration: Number,
+      itemsPerSecond: Number
+    },
+    errors: [{
+      timestamp: { type: Date, default: Date.now },
+      entity: String,
+      error: String,
+      details: Schema.Types.Mixed
+    }],
+    warnings: [{
+      timestamp: { type: Date, default: Date.now },
+      entity: String,
+      warning: String,
+      details: Schema.Types.Mixed
+    }],
     metadata: {
-      type: Map,
-      of: Schema.Types.Mixed,
-    },
+      triggerUser: String,
+      triggerReason: String,
+      options: Schema.Types.Mixed,
+      results: Schema.Types.Mixed
+    }
   },
   {
-    timestamps: true,
-    collection: 'sync_histories',
+    timestamps: true
   }
 );
 
-// 복합 인덱스
-SyncHistorySchema.index({ sku: 1, createdAt: -1 });
-SyncHistorySchema.index({ vendor: 1, status: 1, createdAt: -1 });
-SyncHistorySchema.index({ syncType: 1, createdAt: -1 });
+// Indexes
+SyncHistorySchema.index({ type: 1, status: 1, createdAt: -1 });
+SyncHistorySchema.index({ 'performance.startTime': -1 });
+SyncHistorySchema.index({ source: 1, createdAt: -1 });
 
-// TTL 인덱스 - 90일 후 자동 삭제
+// TTL index (keep for 90 days)
 SyncHistorySchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
+
+// Virtual fields
+SyncHistorySchema.virtual('successRate').get(function() {
+  if (this.statistics.processedItems === 0) return 0;
+  return Math.round((this.statistics.successCount / this.statistics.processedItems) * 100);
+});
+
+// Pre-save hook to calculate duration
+SyncHistorySchema.pre('save', function(next) {
+  if (this.performance.startTime && this.performance.endTime) {
+    this.performance.duration = this.performance.endTime.getTime() - this.performance.startTime.getTime();
+    
+    if (this.statistics.processedItems > 0 && this.performance.duration > 0) {
+      this.performance.itemsPerSecond = Math.round(
+        (this.statistics.processedItems / (this.performance.duration / 1000)) * 100
+      ) / 100;
+    }
+  }
+  next();
+});
 
 export const SyncHistory = model<ISyncHistory>('SyncHistory', SyncHistorySchema);
