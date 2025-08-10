@@ -1,139 +1,161 @@
-// ===== 4. packages/backend/src/app.ts =====
+// packages/backend/src/app.ts
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
-import { createServer, Server } from 'http';
-import { config } from './config';
-import { logger, stream } from './utils/logger';
-import { errorHandler } from './middlewares/error.middleware';
-import { rateLimiter } from './middlewares/rateLimit.middleware';
-import { requestLogger } from './middlewares/logger.middleware';
-import { healthCheck } from './middlewares/health.middleware';
+import 'express-async-errors';
+
+import { config } from './config/index.js';
+import { logger } from './utils/logger.js';
+import { ServiceContainer } from './services/ServiceContainer.js';
 
 export class App {
   private app: Application;
-  private server: Server;
+  private io?: any;
+  private services: ServiceContainer;
   private isInitialized: boolean = false;
 
-  constructor() {
+  constructor(services: ServiceContainer) {
     this.app = express();
-    this.server = createServer(this.app);
+    this.services = services;
   }
 
-  /**
-   * 앱 초기화
-   */
   async initialize(): Promise<void> {
     if (this.isInitialized) {
-      return;
+      throw new Error('App is already initialized');
     }
 
-    try {
-      // 미들웨어 설정
-      this.setupMiddlewares();
-
-      // 라우트 설정 - Redis 초기화 이후에 호출됨
-      this.setupRoutes();
-
-      // 에러 핸들러 (반드시 마지막에)
-      this.setupErrorHandlers();
-
-      this.isInitialized = true;
-      logger.info('App initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize app:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 미들웨어 설정
-   */
-  private setupMiddlewares(): void {
-    // 보안 미들웨어
-    this.app.use(helmet({
-      contentSecurityPolicy: process.env.NODE_ENV === 'production',
-    }));
-
-    // CORS 설정
+    // Setup middlewares
+    this.app.use(helmet());
     this.app.use(cors({
-      origin: config.corsOrigin,
+      origin: config.corsOrigin || '*',
       credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     }));
-
-    // Body parser
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-    // 압축
+    this.app.use(express.json({ limit: '50mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
     this.app.use(compression());
-
-    // 로깅
-    this.app.use(morgan(config.env === 'production' ? 'combined' : 'dev', { stream }));
-    this.app.use(requestLogger);
-
-    // Rate limiting
-    if (config.env === 'production') {
-      this.app.use(config.apiPrefix, rateLimiter);
+    
+    if (config.env !== 'test') {
+      this.app.use(morgan('combined'));
     }
 
-    // Health check
-    this.app.use('/health', healthCheck);
-  }
-
-  /**
-   * 라우트 설정
-   */
-  private setupRoutes(): void {
-    // 동적 import를 사용하여 라우트 설정
-    // 이렇게 하면 Redis가 초기화된 후에 라우트가 설정됨
+    // Setup routes
+    const apiPrefix = config.apiPrefix || '/api/v1';
     
-    // API 버전 정보
+    // Health check
+    this.app.get('/health', (req: Request, res: Response) => {
+      res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+      });
+    });
+    
+    // API info
     this.app.get('/', (req: Request, res: Response) => {
       res.json({
-        name: 'Hallyu Pomaholic ERP API',
+        name: 'Hallyu ERP API',
         version: '1.0.0',
         environment: config.env,
         timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
       });
     });
 
-    // Health 라우트 (인증 불필요)
-    const healthRoutes = require('./routes/health.routes').default;
-    this.app.use('/health', healthRoutes);
+    // Mock Dashboard Stats
+    this.app.get(`${apiPrefix}/dashboard/stats`, (req: Request, res: Response) => {
+      res.json({
+        mappings: {
+          total: 150,
+          active: 120,
+          pending: 20,
+          failed: 10
+        },
+        orders: {
+          today: 45,
+          week: 280,
+          month: 1250
+        },
+        totalProducts: 150,
+        activeProducts: 120,
+        totalSales: 85,
+        syncStatus: {
+          synced: 100,
+          pending: 30,
+          error: 20
+        },
+        inventoryStatus: {
+          inStock: 90,
+          lowStock: 20,
+          outOfStock: 10
+        },
+        recentActivity: []
+      });
+    });
 
-    // Webhook 라우트
-    const webhookRoutes = require('./routes/webhook.routes').default;
-    this.app.use(`${config.apiPrefix}/webhooks`, webhookRoutes);
+    // Mock Dashboard Activity
+    this.app.get(`${apiPrefix}/dashboard/activity`, (req: Request, res: Response) => {
+      res.json({
+        data: [
+          {
+            _id: '1',
+            id: '1',
+            type: 'sync',
+            action: '재고 동기화 완료',
+            details: '50개 상품 업데이트됨',
+            createdAt: new Date().toISOString(),
+            timestamp: new Date().toISOString()
+          },
+          {
+            _id: '2',
+            id: '2',
+            type: 'price',
+            action: '가격 업데이트',
+            details: '환율 변경 적용됨',
+            createdAt: new Date(Date.now() - 3600000).toISOString(),
+            timestamp: new Date(Date.now() - 3600000).toISOString()
+          }
+        ]
+      });
+    });
 
-    // Dashboard 라우트
-    const dashboardRoutes = require('./routes/dashboard.routes').default;
-    this.app.use(`${config.apiPrefix}/dashboard`, dashboardRoutes);
+    // Mock Auth Login
+    this.app.post(`${apiPrefix}/auth/login`, (req: Request, res: Response) => {
+      const { email } = req.body;
+      res.json({
+        success: true,
+        data: {
+          user: {
+            id: '1',
+            email: email || 'admin@hallyu.com',
+            name: '관리자',
+            role: 'admin'
+          },
+          accessToken: 'mock-token-' + Date.now(),
+          refreshToken: 'mock-refresh-token-' + Date.now()
+        }
+      });
+    });
 
-    // API 라우트 - 함수 호출로 변경
-    const { setupApiRoutes } = require('./routes/api.routes');
-    this.app.use(`${config.apiPrefix}`, setupApiRoutes());
+    // Other mock endpoints
+    this.app.get(`${apiPrefix}/products`, (req: Request, res: Response) => {
+      res.json({ data: [], total: 0, page: 1, totalPages: 0 });
+    });
 
-    // Settings 라우트 - 함수 호출로 변경
-    const setupSettingsRoutes = require('./routes/settings.routes').default;
-    this.app.use(`${config.apiPrefix}/settings`, setupSettingsRoutes());
+    this.app.get(`${apiPrefix}/inventory/status`, (req: Request, res: Response) => {
+      res.json({ data: [], total: 0, page: 1, totalPages: 0 });
+    });
 
-    // Price Sync 라우트 - 함수 호출로 변경
-    const setupPriceSyncRoutes = require('./routes/priceSync.routes').default;
-    this.app.use(`${config.apiPrefix}/price-sync`, setupPriceSyncRoutes());
-    // Price 라우트
-    const setupPriceRoutes = require('./routes/price.routes').default;
-    this.app.use(`${config.apiPrefix}/prices`, setupPriceRoutes());
+    this.app.get(`${apiPrefix}/mappings`, (req: Request, res: Response) => {
+      res.json({ data: [], total: 0, page: 1, totalPages: 0 });
+    });
 
-    // Exchange Rates 라우트  
-    const setupExchangeRatesRoutes = require('./routes/exchangeRates.routes').default;
-    this.app.use(`${config.apiPrefix}/exchange-rates`, setupExchangeRatesRoutes());
+    this.app.get(`${apiPrefix}/settings`, (req: Request, res: Response) => {
+      res.json([]);
+    });
 
-    // 404 핸들러
+    // 404 Handler
     this.app.use((req: Request, res: Response) => {
       res.status(404).json({
         success: false,
@@ -141,88 +163,51 @@ export class App {
         path: req.path,
       });
     });
-  }
 
-  /**
-   * 에러 핸들러 설정
-   */
-  private setupErrorHandlers(): void {
-    // 글로벌 에러 핸들러
-    this.app.use(errorHandler);
-
-    // 서버 에러 이벤트 핸들러
-    this.server.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.syscall !== 'listen') {
-        throw error;
-      }
-
-      switch (error.code) {
-        case 'EACCES':
-          logger.error('Port requires elevated privileges');
-          process.exit(1);
-          break;
-        case 'EADDRINUSE':
-          logger.error('Port is already in use');
-          process.exit(1);
-          break;
-        default:
-          throw error;
-      }
+    // Error Handler
+    this.app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+      logger.error('Unhandled error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+        error: config.isDevelopment ? error.message : undefined,
+      });
     });
+
+    this.isInitialized = true;
+    logger.info('✅ Express app initialized successfully');
   }
 
-  /**
-   * 서버 시작
-   */
-  listen(port: number): void {
-    if (!this.isInitialized) {
-      throw new Error('App must be initialized before starting');
+  async initializeWebSocket(server: any): Promise<void> {
+    try {
+      const { Server } = await import('socket.io');
+      this.io = new Server(server, {
+        cors: {
+          origin: config.corsOrigin || '*',
+          credentials: true,
+        },
+      });
+
+      this.io.on('connection', (socket: any) => {
+        logger.info(`WebSocket client connected: ${socket.id}`);
+        
+        socket.on('disconnect', () => {
+          logger.info(`WebSocket client disconnected: ${socket.id}`);
+        });
+      });
+
+      this.services.setWebSocket(this.io);
+      logger.info('✅ WebSocket server initialized');
+    } catch (error) {
+      logger.warn('WebSocket initialization skipped:', error);
     }
-
-    this.server.listen(port, () => {
-      logger.info(`🚀 Server is running on port ${port}`);
-      logger.info(`🌍 Environment: ${config.env}`);
-      logger.info(`📍 API Endpoint: http://localhost:${port}${config.apiPrefix}`);
-    });
-
-    // 서버 시작 이벤트
-    this.server.on('listening', () => {
-      const addr = this.server.address();
-      const bind = typeof addr === 'string' ? `pipe ${addr}` : `port ${addr?.port}`;
-      logger.info(`Listening on ${bind}`);
-    });
   }
 
-  /**
-   * 서버 종료
-   */
-  close(callback?: () => void): void {
-    logger.info('Closing server...');
-    
-    this.server.close((err) => {
-      if (err) {
-        logger.error('Error closing server:', err);
-      } else {
-        logger.info('Server closed successfully');
-      }
-      
-      if (callback) {
-        callback();
-      }
-    });
-  }
-
-  /**
-   * Express 앱 인스턴스 반환
-   */
   getApp(): Application {
     return this.app;
   }
 
-  /**
-   * HTTP 서버 인스턴스 반환
-   */
-  getServer(): Server {
-    return this.server;
+  getIO(): any {
+    return this.io;
   }
 }
