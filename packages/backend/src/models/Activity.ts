@@ -1,67 +1,67 @@
+// ============================================
 // packages/backend/src/models/Activity.ts
-import { Schema, model, Document } from 'mongoose';
+// ============================================
+import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IActivity extends Document {
-  type: 'sync' | 'inventory_update' | 'price_update' | 'mapping_change' | 'error';
+  type: 'sync' | 'inventory_update' | 'price_update' | 'mapping' | 'order' | 'system';
   action: string;
-  details: string;
+  details?: string;
   metadata?: Record<string, any>;
   userId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  success: boolean;
+  errorMessage?: string;
+  duration?: number;
   createdAt: Date;
+  updatedAt: Date;
 }
 
-const activitySchema = new Schema<IActivity>(
+const ActivitySchema = new Schema<IActivity>(
   {
     type: {
       type: String,
+      enum: ['sync', 'inventory_update', 'price_update', 'mapping', 'order', 'system'],
       required: true,
-      enum: ['sync', 'inventory_update', 'price_update', 'mapping_change', 'error'],
-      index: true,
+      index: true
     },
     action: {
       type: String,
-      required: true,
+      required: true
     },
-    details: {
-      type: String,
-      required: true,
-    },
+    details: String,
     metadata: {
-      type: Schema.Types.Mixed,
-      default: {},
+      type: Map,
+      of: Schema.Types.Mixed
     },
     userId: {
       type: String,
-      index: true,
+      index: true
     },
+    ipAddress: String,
+    userAgent: String,
+    success: {
+      type: Boolean,
+      default: true
+    },
+    errorMessage: String,
+    duration: Number
   },
   {
-    timestamps: true,
+    timestamps: true
   }
 );
 
-// 인덱스
-activitySchema.index({ createdAt: -1 });
-activitySchema.index({ type: 1, createdAt: -1 });
+// Create compound indexes
+ActivitySchema.index({ type: 1, createdAt: -1 });
+ActivitySchema.index({ userId: 1, createdAt: -1 });
+ActivitySchema.index({ success: 1, createdAt: -1 });
 
-// 정적 메소드: 활동 로그 생성
-activitySchema.statics.log = async function(
-  type: IActivity['type'],
-  action: string,
-  details: string,
-  metadata?: Record<string, any>,
-  userId?: string
-) {
-  return this.create({
-    type,
-    action,
-    details,
-    metadata,
-    userId,
-  });
-};
+// TTL index for automatic cleanup (90 days)
+ActivitySchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 90 * 24 * 60 * 60 }
+);
 
-// TTL 설정 (30일 후 자동 삭제)
-activitySchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
-
-export const Activity = model<IActivity>('Activity', activitySchema);
+export const Activity = mongoose.model<IActivity>('Activity', ActivitySchema);

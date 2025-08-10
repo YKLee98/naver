@@ -5,19 +5,28 @@ import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
-import 'express-async-errors';
-
-import { config } from './config/index.js';
-import { logger } from './utils/logger.js';
+import { rateLimit } from 'express-rate-limit';
 import { ServiceContainer } from './services/ServiceContainer.js';
 import { setupApiRoutes } from './routes/api.routes.js';
-import { setupRoutes } from './routes/index.js';
+import { setupHealthRoutes } from './routes/health.routes.js';
+import { setupAuthRoutes } from './routes/auth.routes.js';
+import { setupWebhookRoutes } from './routes/webhook.routes.js';
+import { setupSettingsRoutes } from './routes/settings.routes.js';
+import { setupDashboardRoutes } from './routes/dashboard.routes.js';
+import { errorHandler } from './middlewares/error.middleware.js';
+import { requestLogger } from './middlewares/logger.middleware.js';
+import { logger } from './utils/logger.js';
+import { config } from './config/index.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export class App {
   private app: Application;
-  private io?: any;
   private services: ServiceContainer;
-  private isInitialized: boolean = false;
+  private io?: any;
 
   constructor(services: ServiceContainer) {
     this.app = express();
@@ -25,163 +34,191 @@ export class App {
   }
 
   async initialize(): Promise<void> {
-    if (this.isInitialized) {
-      throw new Error('App is already initialized');
+    try {
+      // Basic middleware
+      this.setupBasicMiddleware();
+      
+      // Security middleware
+      this.setupSecurityMiddleware();
+      
+      // Routes
+      await this.setupRoutes();
+      
+      // Error handling
+      this.setupErrorHandling();
+      
+      logger.info('✅ Express application initialized successfully');
+    } catch (error) {
+      logger.error('Failed to initialize Express application:', error);
+      throw error;
     }
-
-    // Setup middlewares
-    this.setupMiddlewares();
-
-    // Setup routes
-    await this.setupRoutes();
-
-    // Error handling middleware (must be last)
-    this.setupErrorHandlers();
-
-    this.isInitialized = true;
-    logger.info('✅ Express app initialized successfully');
   }
 
-  private setupMiddlewares(): void {
-    // Security
-    this.app.use(helmet({
-      contentSecurityPolicy: config.isProduction ? undefined : false,
-    }));
-
-    // CORS
-    this.app.use(cors({
-      origin: config.misc.corsOrigin || '*',
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    }));
-
+  private setupBasicMiddleware(): void {
     // Body parsing
     this.app.use(express.json({ limit: '50mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
     
-    // Cookie parser
+    // Cookie parsing
     this.app.use(cookieParser());
-
+    
     // Compression
     this.app.use(compression());
     
-    // Logging
-    if (config.env !== 'test') {
-      this.app.use(morgan('combined'));
+    // Request logging
+    if (process.env.NODE_ENV !== 'test') {
+      this.app.use(morgan('combined', {
+        stream: {
+          write: (message: string) => logger.http(message.trim())
+        }
+      }));
     }
+    
+    // Custom request logger
+    this.app.use(requestLogger);
+    
+    // Static files (if needed)
+    this.app.use('/static', express.static(path.join(__dirname, '../public')));
+  }
+
+  private setupSecurityMiddleware(): void {
+    // Helmet for security headers
+    this.app.use(helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+          imgSrc: ["'self'", "data:", "https:"],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
+    }));
+    
+    // CORS configuration
+    const corsOptions = {
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        const allowedOrigins = config.misc?.corsOrigin?.split(',') || ['http://localhost:5173'];
+        
+        // Allow requests with no origin (like mobile apps or Postman)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key'],
+      exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page'],
+    };
+    
+    this.app.use(cors(corsOptions));
+    
+    // Rate limiting
+    const limiter = rateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 100, // limit each IP to 100 requests per windowMs
+      message: 'Too many requests from this IP, please try again later.',
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+    
+    // Apply rate limiting to API routes
+    this.app.use('/api/', limiter);
+    
+    // Stricter rate limiting for auth routes
+    const authLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 5,
+      message: 'Too many authentication attempts, please try again later.',
+    });
+    
+    this.app.use('/auth/login', authLimiter);
+    this.app.use('/auth/register', authLimiter);
   }
 
   private async setupRoutes(): Promise<void> {
-    const apiPrefix = config.api.prefix || '/api/v1';
+    // Health check routes (no auth required)
+    const healthRoutes = setupHealthRoutes();
+    this.app.use('/health', healthRoutes);
+    logger.info('✅ Health routes registered at /health');
     
-    // Health check (no auth required)
-    this.app.get('/health', (req: Request, res: Response) => {
-      res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        environment: config.env,
-      });
-    });
-
-    // Metrics endpoint
-    this.app.get('/metrics', (req: Request, res: Response) => {
-      res.json({
-        uptime: process.uptime(),
-        memoryUsage: process.memoryUsage(),
-        cpuUsage: process.cpuUsage(),
-        timestamp: new Date().toISOString(),
-      });
-    });
+    // Auth routes
+    const authRoutes = setupAuthRoutes(this.services.authController);
+    this.app.use('/auth', authRoutes);
+    logger.info('✅ Auth routes registered at /auth');
     
-    // Root API info
-    this.app.get('/', (req: Request, res: Response) => {
+    // Webhook routes (no auth but with signature validation)
+    const webhookRoutes = setupWebhookRoutes(this.services);
+    this.app.use('/webhooks', webhookRoutes);
+    logger.info('✅ Webhook routes registered at /webhooks');
+    
+    // API routes (with auth)
+    const apiRoutes = setupApiRoutes(this.services);
+    this.app.use('/api/v1', apiRoutes);
+    logger.info('✅ API routes registered at /api/v1');
+    
+    // Dashboard routes (optional)
+    try {
+      const dashboardRoutes = setupDashboardRoutes(this.services);
+      this.app.use('/dashboard', dashboardRoutes);
+      logger.info('✅ Dashboard routes registered at /dashboard');
+    } catch (error) {
+      logger.warn('Dashboard routes not available:', error);
+    }
+    
+    // Settings routes (optional)
+    try {
+      const settingsRoutes = setupSettingsRoutes(this.services);
+      this.app.use('/settings', settingsRoutes);
+      logger.info('✅ Settings routes registered at /settings');
+    } catch (error) {
+      logger.warn('Settings routes not available:', error);
+    }
+    
+    // Root route
+    this.app.get('/', (req, res) => {
       res.json({
-        name: 'Hallyu ERP Backend API',
-        version: '1.0.0',
-        environment: config.env,
+        name: 'Hallyu ERP Backend',
+        version: process.env.npm_package_version || '1.0.0',
+        status: 'running',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
         endpoints: {
           health: '/health',
-          metrics: '/metrics',
-          api: apiPrefix,
-          swagger: '/api-docs',
+          api: '/api/v1',
+          auth: '/auth',
+          webhooks: '/webhooks',
+          dashboard: '/dashboard',
+          settings: '/settings'
         }
-      });
-    });
-
-    // API Version info
-    this.app.get(apiPrefix, (req: Request, res: Response) => {
-      res.json({
-        version: 'v1',
-        status: 'active',
-        timestamp: new Date().toISOString(),
-      });
-    });
-
-    // Setup main API routes using the function from api.routes.ts
-    try {
-      const apiRouter = setupApiRoutes();
-      this.app.use(apiPrefix, apiRouter);
-      logger.info('✅ API routes mounted at', apiPrefix);
-    } catch (error) {
-      logger.error('Failed to setup API routes:', error);
-      // Continue even if some routes fail
-    }
-
-    // Setup additional routes from routes/index.ts
-    try {
-      const additionalRoutes = await setupRoutes();
-      this.app.use(apiPrefix, additionalRoutes);
-      logger.info('✅ Additional routes mounted');
-    } catch (error) {
-      logger.warn('Some additional routes could not be loaded:', error);
-      // Continue even if some routes fail
-    }
-
-    // Swagger documentation (if enabled)
-    if (config.isDevelopment) {
-      this.app.get('/api-docs', (req: Request, res: Response) => {
-        res.json({
-          message: 'API documentation will be available here',
-          swagger: '/api-docs/swagger.json',
-        });
-      });
-    }
-
-    // 404 handler (must be last)
-    this.app.use((req: Request, res: Response) => {
-      logger.warn(`404 - ${req.method} ${req.originalUrl}`);
-      res.status(404).json({
-        success: false,
-        error: 'Resource not found',
-        path: req.originalUrl,
-        method: req.method,
       });
     });
   }
 
-  private setupErrorHandlers(): void {
-    // Global error handler
-    this.app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-      // Log error
-      logger.error('Express error handler:', {
-        error: err.message,
-        stack: err.stack,
-        url: req.url,
-        method: req.method,
-        body: req.body,
+  private setupErrorHandling(): void {
+    // 404 handler
+    this.app.use((req, res, next) => {
+      res.status(404).json({
+        success: false,
+        error: 'Route not found',
+        path: req.originalUrl,
+        method: req.method
       });
-
-      // Don't leak error details in production
-      const isDev = config.isDevelopment;
+    });
+    
+    // Global error handler
+    this.app.use(errorHandler);
+    
+    // Unhandled rejection handler
+    this.app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+      logger.error('Unhandled error:', err);
       
-      // Default error status
-      const status = err.statusCode || err.status || 500;
+      const isDev = process.env.NODE_ENV === 'development';
       
-      res.status(status).json({
+      res.status(err.status || 500).json({
         success: false,
         error: isDev ? err.message : 'Internal server error',
         ...(isDev && { stack: err.stack }),
@@ -193,35 +230,109 @@ export class App {
   async initializeWebSocket(server: any): Promise<void> {
     try {
       const { Server } = await import('socket.io');
+      
       this.io = new Server(server, {
         cors: {
-          origin: config.misc.corsOrigin || '*',
+          origin: config.misc?.corsOrigin?.split(',') || ['http://localhost:5173'],
           methods: ['GET', 'POST'],
+          credentials: true
         },
+        transports: ['websocket', 'polling'],
+        pingTimeout: 60000,
+        pingInterval: 25000
       });
 
+      // Attach WebSocket to service container
+      this.services.setWebSocket(this.io);
+
+      // WebSocket middleware for authentication
+      this.io.use(async (socket: any, next: any) => {
+        try {
+          const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
+          
+          if (!token) {
+            return next(new Error('Authentication required'));
+          }
+          
+          // TODO: Verify JWT token and attach user to socket
+          // const user = await verifyToken(token);
+          // socket.userId = user.id;
+          
+          next();
+        } catch (error) {
+          next(new Error('Authentication failed'));
+        }
+      });
+
+      // Connection handler
       this.io.on('connection', (socket: any) => {
-        logger.info('WebSocket client connected:', socket.id);
+        logger.info(`WebSocket client connected: ${socket.id}`);
+        
+        // Join user-specific room
+        if (socket.userId) {
+          socket.join(`user:${socket.userId}`);
+        }
 
-        socket.on('disconnect', () => {
-          logger.info('WebSocket client disconnected:', socket.id);
+        // Handle disconnection
+        socket.on('disconnect', (reason: string) => {
+          logger.info(`WebSocket client disconnected: ${socket.id}, reason: ${reason}`);
         });
 
-        // Add your WebSocket event handlers here
-        socket.on('subscribe', (channel: string) => {
-          socket.join(channel);
-          logger.debug(`Client ${socket.id} subscribed to ${channel}`);
+        // Subscribe to channels
+        socket.on('subscribe', (channels: string | string[]) => {
+          const channelList = Array.isArray(channels) ? channels : [channels];
+          channelList.forEach(channel => {
+            socket.join(channel);
+            logger.debug(`Client ${socket.id} subscribed to ${channel}`);
+          });
         });
 
-        socket.on('unsubscribe', (channel: string) => {
-          socket.leave(channel);
-          logger.debug(`Client ${socket.id} unsubscribed from ${channel}`);
+        // Unsubscribe from channels
+        socket.on('unsubscribe', (channels: string | string[]) => {
+          const channelList = Array.isArray(channels) ? channels : [channels];
+          channelList.forEach(channel => {
+            socket.leave(channel);
+            logger.debug(`Client ${socket.id} unsubscribed from ${channel}`);
+          });
+        });
+
+        // Handle ping/pong for keep-alive
+        socket.on('ping', () => {
+          socket.emit('pong', { timestamp: Date.now() });
         });
       });
 
-      logger.info('✅ WebSocket server initialized');
+      // Setup WebSocket event handlers
+      await this.setupWebSocketHandlers();
+
+      logger.info('✅ WebSocket server initialized successfully');
     } catch (error) {
       logger.error('Failed to initialize WebSocket:', error);
+      // Don't throw - WebSocket is optional
+    }
+  }
+
+  private async setupWebSocketHandlers(): Promise<void> {
+    if (!this.io) return;
+
+    try {
+      // Import WebSocket event handlers
+      const { registerInventoryEvents } = await import('./websocket/events/inventory.events.js');
+      const { registerSyncEvents } = await import('./websocket/events/sync.events.js');
+      const { registerPriceEvents } = await import('./websocket/events/price.events.js');
+      const { registerNotificationEvents } = await import('./websocket/events/notification.events.js');
+
+      this.io.on('connection', (socket: any) => {
+        // Register event handlers for each socket
+        registerInventoryEvents(this.io, socket);
+        registerSyncEvents(this.io, socket);
+        registerPriceEvents(this.io, socket);
+        registerNotificationEvents(this.io, socket);
+      });
+
+      logger.info('✅ WebSocket event handlers registered');
+    } catch (error) {
+      logger.warn('Some WebSocket event handlers not available:', error);
     }
   }
 

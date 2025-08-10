@@ -1,274 +1,316 @@
-// ===== 1. packages/backend/src/services/exchangeRate/ExchangeRateService.ts =====
+// packages/backend/src/services/exchangeRate/ExchangeRateService.ts
 import { Redis } from 'ioredis';
 import axios from 'axios';
-import { logger } from '../../utils/logger';
-import { ExchangeRate } from '../../models';
-import { config } from '../../config';
-import { retryOperation } from '../../utils/retry'; 
+import { ExchangeRate } from '../../models/ExchangeRate.js';
+import { logger } from '../../utils/logger.js';
 
-interface ExchangeRateProvider {
-  name: string;
-  url: string;
-  parser: (data: any) => number;
-  requiresApiKey: boolean;
-  priority: number;
+export interface ExchangeRateData {
+  base: string;
+  target: string;
+  rate: number;
+  date: Date;
+  source: string;
 }
 
 export class ExchangeRateService {
   private redis: Redis;
-  private readonly cacheKey = 'exchange_rate:KRW:USD';
-  private readonly cacheTTL = 3600; // 1시간
-  private readonly providers: ExchangeRateProvider[] = [
-    {
-      name: 'ExchangeRate-API',
-      url: 'https://api.exchangerate-api.com/v4/latest/USD',
-      parser: (data: any) => data.rates.KRW,
-      requiresApiKey: false,
-      priority: 1
-    },
-    {
-      name: 'Fixer.io',
-      url: `https://api.fixer.io/latest?base=USD&symbols=KRW`,
-      parser: (data: any) => data.rates.KRW,
-      requiresApiKey: true,
-      priority: 2
-    },
-    {
-      name: 'CurrencyAPI',
-      url: `https://api.currencyapi.com/v3/latest?base_currency=USD&currencies=KRW`,
-      parser: (data: any) => data.data.KRW.value,
-      requiresApiKey: true,
-      priority: 3
-    }
-  ];
+  private cacheTTL = 3600; // 1 hour
+  private defaultRate = 1300; // Default KRW/USD rate
+  private apiUrl = process.env.EXCHANGE_RATE_API_URL || 'https://api.exchangerate-api.com/v4/latest/USD';
+  private apiKey = process.env.EXCHANGE_RATE_API_KEY;
 
   constructor(redis: Redis) {
     this.redis = redis;
   }
 
   /**
-   * 현재 환율 조회 (USD to KRW)
+   * Get current exchange rate
    */
-  async getCurrentRate(): Promise<number> {
+  async getRate(base: string = 'USD', target: string = 'KRW'): Promise<number> {
     try {
-      // 1. 캐시 확인
-      const cached = await this.redis.get(this.cacheKey);
+      const cacheKey = `exchange_rate:${base}:${target}`;
+      
+      // Check cache first
+      const cached = await this.redis.get(cacheKey);
       if (cached) {
-        logger.debug(`Using cached exchange rate: ${cached}`);
+        logger.debug(`Exchange rate from cache: ${base}/${target} = ${cached}`);
         return parseFloat(cached);
       }
-
-      // 2. 수동 설정 환율 확인
-      const manualRate = await this.getManualRate();
-      if (manualRate) {
-        await this.setCacheRate(manualRate);
-        return manualRate;
-      }
-
-      // 3. API에서 환율 가져오기
-      const apiRate = await this.fetchFromProviders();
-      await this.saveRate(apiRate, 'api');
-      await this.setCacheRate(apiRate);
       
-      return apiRate;
+      // Check database
+      const dbRate = await ExchangeRate.findOne({
+        base,
+        target
+      }).sort({ date: -1 });
+      
+      if (dbRate && this.isRateValid(dbRate.date)) {
+        const rate = dbRate.rate;
+        
+        // Cache the rate
+        await this.redis.setex(cacheKey, this.cacheTTL, rate.toString());
+        
+        logger.debug(`Exchange rate from database: ${base}/${target} = ${rate}`);
+        return rate;
+      }
+      
+      // Fetch from API
+      const rate = await this.fetchRateFromAPI(base, target);
+      
+      // Save to database
+      await this.saveRate(base, target, rate);
+      
+      // Cache the rate
+      await this.redis.setex(cacheKey, this.cacheTTL, rate.toString());
+      
+      logger.info(`Exchange rate fetched from API: ${base}/${target} = ${rate}`);
+      return rate;
+      
     } catch (error) {
       logger.error('Failed to get exchange rate:', error);
       
-      // 4. 폴백: 마지막 저장된 환율
-      const lastRate = await this.getLastSavedRate();
-      if (lastRate) {
-        logger.warn(`Using last saved rate: ${lastRate}`);
-        return lastRate;
-      }
-
-      // 5. 최종 폴백: 기본값
-      const defaultRate = 1300;
-      logger.error(`Using default rate: ${defaultRate}`);
-      return defaultRate;
+      // Return default rate as fallback
+      logger.warn(`Using default exchange rate: ${base}/${target} = ${this.defaultRate}`);
+      return this.defaultRate;
     }
   }
 
   /**
-   * 수동 환율 설정
+   * Update exchange rates
    */
-  async setManualRate(rate: number, validHours: number = 24): Promise<void> {
+  async updateRates(): Promise<void> {
     try {
-      const now = new Date();
-      const validUntil = new Date(now.getTime() + validHours * 60 * 60 * 1000);
+      logger.info('Updating exchange rates...');
+      
+      const pairs = [
+        { base: 'USD', target: 'KRW' },
+        { base: 'KRW', target: 'USD' },
+        { base: 'EUR', target: 'KRW' },
+        { base: 'JPY', target: 'KRW' },
+        { base: 'CNY', target: 'KRW' }
+      ];
+      
+      for (const pair of pairs) {
+        try {
+          const rate = await this.fetchRateFromAPI(pair.base, pair.target);
+          await this.saveRate(pair.base, pair.target, rate);
+          
+          // Clear cache
+          const cacheKey = `exchange_rate:${pair.base}:${pair.target}`;
+          await this.redis.del(cacheKey);
+          
+          logger.info(`Updated exchange rate: ${pair.base}/${pair.target} = ${rate}`);
+        } catch (error) {
+          logger.error(`Failed to update rate for ${pair.base}/${pair.target}:`, error);
+        }
+      }
+      
+      logger.info('Exchange rates update completed');
+    } catch (error) {
+      logger.error('Failed to update exchange rates:', error);
+    }
+  }
 
-      // 기존 활성 환율 비활성화
-      await ExchangeRate.updateMany(
-        { isActive: true },
-        { isActive: false }
-      );
-
-      // 새 환율 저장
-      await ExchangeRate.create({
-        rate,
-        source: 'manual',
-        isActive: true,
-        isManual: true,
-        validUntil,
-        baseCurrency: 'USD',
-        targetCurrency: 'KRW',
-        metadata: {
-          setAt: now,
-          validHours
+  /**
+   * Fetch rate from API
+   */
+  private async fetchRateFromAPI(base: string, target: string): Promise<number> {
+    try {
+      let url = this.apiUrl;
+      
+      // Add API key if available
+      if (this.apiKey) {
+        url += url.includes('?') ? '&' : '?';
+        url += `apikey=${this.apiKey}`;
+      }
+      
+      // Replace base currency in URL
+      url = url.replace('/USD', `/${base}`);
+      
+      const response = await axios.get(url, {
+        timeout: 5000,
+        headers: {
+          'Accept': 'application/json'
         }
       });
-
-      // 캐시 업데이트
-      await this.setCacheRate(rate);
       
-      logger.info(`Manual exchange rate set: ${rate} (valid for ${validHours} hours)`);
+      if (response.data && response.data.rates && response.data.rates[target]) {
+        return response.data.rates[target];
+      }
+      
+      // Try alternative API structure
+      if (response.data && response.data[target]) {
+        return response.data[target];
+      }
+      
+      throw new Error('Invalid API response structure');
+      
     } catch (error) {
-      logger.error('Failed to set manual rate:', error);
-      throw error;
+      logger.error('Failed to fetch exchange rate from API:', error);
+      
+      // Fallback to hardcoded rates
+      return this.getFallbackRate(base, target);
     }
   }
 
   /**
-   * 환율 업데이트 (크론 작업용)
+   * Get fallback rate
    */
-  async updateExchangeRate(): Promise<number> {
-    try {
-      logger.info('Updating exchange rate...');
-      
-      // 수동 환율이 유효한지 확인
-      const manualRate = await this.getManualRate();
-      if (manualRate) {
-        logger.info('Manual rate is still valid, skipping update');
-        return manualRate;
+  private getFallbackRate(base: string, target: string): number {
+    const fallbackRates: Record<string, Record<string, number>> = {
+      'USD': {
+        'KRW': 1300,
+        'EUR': 0.85,
+        'JPY': 110,
+        'CNY': 6.5
+      },
+      'KRW': {
+        'USD': 0.00077,
+        'EUR': 0.00065,
+        'JPY': 0.085,
+        'CNY': 0.005
       }
-
-      // API에서 새 환율 가져오기
-      const newRate = await this.fetchFromProviders();
-      
-      // 변동률 확인
-      const lastRate = await this.getLastSavedRate();
-      if (lastRate) {
-        const changePercent = Math.abs((newRate - lastRate) / lastRate * 100);
-        logger.info(`Exchange rate change: ${changePercent.toFixed(2)}%`);
-        
-        // 급격한 변동 경고 (10% 이상)
-        if (changePercent > 10) {
-          logger.warn(`Large exchange rate change detected: ${changePercent.toFixed(2)}%`);
-        }
-      }
-
-      // 저장 및 캐시
-      await this.saveRate(newRate, 'api');
-      await this.setCacheRate(newRate);
-      
-      logger.info(`Exchange rate updated: ${newRate}`);
-      return newRate;
-    } catch (error) {
-      logger.error('Failed to update exchange rate:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 환율 이력 조회
-   */
-  async getRateHistory(days: number = 30): Promise<any[]> {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    return ExchangeRate.find({
-      createdAt: { $gte: startDate }
-    })
-    .sort({ createdAt: -1 })
-    .limit(100)
-    .lean();
-  }
-
-  /**
-   * Private Methods
-   */
-  private async getManualRate(): Promise<number | null> {
-    const manualRate = await ExchangeRate.findOne({
-      isManual: true,
-      isActive: true,
-      validUntil: { $gte: new Date() }
-    }).lean();
-
-    return manualRate?.rate || null;
-  }
-
-  private async getLastSavedRate(): Promise<number | null> {
-    const lastRate = await ExchangeRate.findOne({
-      baseCurrency: 'USD',
-      targetCurrency: 'KRW'
-    })
-    .sort({ createdAt: -1 })
-    .lean();
-
-    return lastRate?.rate || null;
-  }
-
-  private async fetchFromProviders(): Promise<number> {
-    const sortedProviders = [...this.providers].sort((a, b) => a.priority - b.priority);
+    };
     
-    for (const provider of sortedProviders) {
-      try {
-        if (provider.requiresApiKey && !config.exchangeRate?.apiKey) {
-          logger.debug(`Skipping ${provider.name} - API key required`);
-          continue;
-        }
-
-        logger.debug(`Fetching from ${provider.name}...`);
-        
-        const url = provider.requiresApiKey 
-          ? `${provider.url}&access_key=${config.exchangeRate.apiKey}`
-          : provider.url;
-
-        const response = await retry(
-          async () => {
-            const res = await axios.get(url, { timeout: 5000 });
-            return res.data;
-          },
-          {
-            retries: 2,
-            minTimeout: 1000,
-            maxTimeout: 3000,
-            onRetry: (error, attempt) => {
-              logger.debug(`Retry attempt ${attempt} for ${provider.name}:`, error.message);
-            }
-          }
-        );
-
-        const rate = provider.parser(response);
-        
-        if (rate && rate > 0 && rate < 10000) { // 유효성 검사
-          logger.info(`Successfully fetched rate from ${provider.name}: ${rate}`);
-          return rate;
-        }
-      } catch (error: any) {
-        logger.warn(`Failed to fetch from ${provider.name}:`, error.message);
-      }
+    if (fallbackRates[base] && fallbackRates[base][target]) {
+      return fallbackRates[base][target];
     }
-
-    throw new Error('All exchange rate providers failed');
+    
+    // If no specific rate found, return default
+    return this.defaultRate;
   }
 
-  private async saveRate(rate: number, source: string): Promise<void> {
-    await ExchangeRate.create({
-      rate,
-      source,
-      isActive: true,
-      isManual: false,
-      baseCurrency: 'USD',
-      targetCurrency: 'KRW',
-      validUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      metadata: {
-        fetchedAt: new Date(),
-        provider: source
-      }
-    });
+  /**
+   * Save rate to database
+   */
+  private async saveRate(base: string, target: string, rate: number): Promise<void> {
+    try {
+      await ExchangeRate.findOneAndUpdate(
+        { base, target },
+        {
+          base,
+          target,
+          rate,
+          date: new Date(),
+          source: this.apiUrl
+        },
+        { upsert: true, new: true }
+      );
+    } catch (error) {
+      logger.error('Failed to save exchange rate:', error);
+    }
   }
 
-  private async setCacheRate(rate: number): Promise<void> {
-    await this.redis.setex(this.cacheKey, this.cacheTTL, rate.toString());
+  /**
+   * Check if rate is still valid (less than 24 hours old)
+   */
+  private isRateValid(date: Date): boolean {
+    const now = new Date();
+    const diffHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+    return diffHours < 24;
+  }
+
+  /**
+   * Convert amount between currencies
+   */
+  async convert(
+    amount: number,
+    from: string = 'USD',
+    to: string = 'KRW'
+  ): Promise<number> {
+    const rate = await this.getRate(from, to);
+    return amount * rate;
+  }
+
+  /**
+   * Get multiple rates
+   */
+  async getRates(pairs: Array<{ base: string; target: string }>): Promise<Record<string, number>> {
+    const rates: Record<string, number> = {};
+    
+    for (const pair of pairs) {
+      const key = `${pair.base}/${pair.target}`;
+      rates[key] = await this.getRate(pair.base, pair.target);
+    }
+    
+    return rates;
+  }
+
+  /**
+   * Get historical rates
+   */
+  async getHistoricalRates(
+    base: string,
+    target: string,
+    days: number = 30
+  ): Promise<ExchangeRateData[]> {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      const rates = await ExchangeRate.find({
+        base,
+        target,
+        date: { $gte: startDate }
+      }).sort({ date: 1 }).lean();
+      
+      return rates.map(rate => ({
+        base: rate.base,
+        target: rate.target,
+        rate: rate.rate,
+        date: rate.date,
+        source: rate.source
+      }));
+    } catch (error) {
+      logger.error('Failed to get historical rates:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Calculate price with margin
+   */
+  calculatePriceWithMargin(
+    basePrice: number,
+    exchangeRate: number,
+    margin: number = 0.1
+  ): number {
+    const convertedPrice = basePrice * exchangeRate;
+    const priceWithMargin = convertedPrice * (1 + margin);
+    
+    // Round to nearest 10 KRW
+    return Math.round(priceWithMargin / 10) * 10;
+  }
+
+  /**
+   * Clean old rates
+   */
+  async cleanOldRates(days: number = 90): Promise<void> {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      
+      const result = await ExchangeRate.deleteMany({
+        date: { $lt: cutoffDate }
+      });
+      
+      logger.info(`Cleaned ${result.deletedCount} old exchange rates`);
+    } catch (error) {
+      logger.error('Failed to clean old rates:', error);
+    }
+  }
+
+  /**
+   * Cleanup service
+   */
+  async cleanup(): Promise<void> {
+    // Clear all cached rates
+    const keys = await this.redis.keys('exchange_rate:*');
+    if (keys.length > 0) {
+      await this.redis.del(...keys);
+    }
+    
+    logger.info('ExchangeRateService cleanup completed');
   }
 }
+
+export default ExchangeRateService;
