@@ -1,141 +1,228 @@
 // packages/backend/src/utils/shutdown.ts
+import mongoose from 'mongoose';
 import { logger } from './logger.js';
+import { closeRedis } from '../config/redis.js';
 
-export interface ShutdownHandler {
+interface ShutdownHandler {
   name: string;
   handler: () => Promise<void>;
-  timeout?: number;
+  priority: number;
+  timeout: number;
 }
 
-class GracefulShutdownManager {
+class ShutdownManager {
   private handlers: ShutdownHandler[] = [];
   private isShuttingDown = false;
-  private shutdownTimeout = 30000; // 30 seconds default
+  private shutdownPromise?: Promise<void>;
 
   /**
-   * Register a shutdown handler
+   * Register shutdown handler
    */
-  register(handler: ShutdownHandler): void {
+  registerHandler(handler: ShutdownHandler): void {
     this.handlers.push(handler);
+    // Sort by priority (higher priority first)
+    this.handlers.sort((a, b) => b.priority - a.priority);
+    
     logger.debug(`Registered shutdown handler: ${handler.name}`);
   }
 
   /**
-   * Execute all shutdown handlers
+   * Execute graceful shutdown
    */
-  async shutdown(timeout: number = this.shutdownTimeout): Promise<void> {
+  async shutdown(signal: string): Promise<void> {
     if (this.isShuttingDown) {
       logger.warn('Shutdown already in progress');
-      return;
+      return this.shutdownPromise;
     }
 
     this.isShuttingDown = true;
-    logger.info('🛑 Starting graceful shutdown...');
+    logger.info(`🛑 Graceful shutdown initiated (${signal})`);
 
-    const shutdownPromises = this.handlers.map(async (handler) => {
-      const handlerTimeout = handler.timeout || timeout;
-      
+    this.shutdownPromise = this.executeShutdown();
+    return this.shutdownPromise;
+  }
+
+  private async executeShutdown(): Promise<void> {
+    const startTime = Date.now();
+    const results: Array<{ name: string; success: boolean; error?: any }> = [];
+
+    // Execute handlers in priority order
+    for (const handler of this.handlers) {
       try {
+        logger.info(`Executing shutdown handler: ${handler.name}`);
+        
         await this.executeWithTimeout(
           handler.handler(),
-          handlerTimeout,
-          `Shutdown handler '${handler.name}' timed out after ${handlerTimeout}ms`
+          handler.timeout,
+          handler.name
         );
-        logger.info(`✅ ${handler.name} shutdown completed`);
+        
+        results.push({ name: handler.name, success: true });
+        logger.info(`✅ ${handler.name} completed`);
       } catch (error) {
-        logger.error(`❌ ${handler.name} shutdown failed:`, error);
+        results.push({ name: handler.name, success: false, error });
+        logger.error(`❌ ${handler.name} failed:`, error);
       }
-    });
+    }
 
-    try {
-      await Promise.allSettled(shutdownPromises);
-      logger.info('✅ All shutdown handlers completed');
-    } catch (error) {
-      logger.error('Error during shutdown:', error);
+    const duration = Date.now() - startTime;
+    const successful = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+
+    logger.info(`Shutdown completed in ${duration}ms (${successful} successful, ${failed} failed)`);
+
+    // Log failed handlers
+    if (failed > 0) {
+      logger.error('Failed shutdown handlers:', 
+        results.filter(r => !r.success).map(r => ({
+          name: r.name,
+          error: r.error?.message
+        }))
+      );
     }
   }
 
-  /**
-   * Execute a promise with timeout
-   */
-  private async executeWithTimeout<T>(
-    promise: Promise<T>,
+  private async executeWithTimeout(
+    promise: Promise<void>,
     timeout: number,
-    timeoutMessage: string
-  ): Promise<T> {
-    return Promise.race([
-      promise,
-      new Promise<T>((_, reject) =>
-        setTimeout(() => reject(new Error(timeoutMessage)), timeout)
-      )
-    ]);
+    name: string
+  ): Promise<void> {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${name} timed out after ${timeout}ms`));
+      }, timeout);
+    });
+
+    return Promise.race([promise, timeoutPromise]);
   }
 
   /**
    * Check if shutdown is in progress
    */
-  isShuttingDownNow(): boolean {
+  isShutdownInProgress(): boolean {
     return this.isShuttingDown;
   }
 }
 
 // Create singleton instance
-const shutdownManager = new GracefulShutdownManager();
+const shutdownManager = new ShutdownManager();
 
-/**
- * Register a cleanup handler
- */
-export function registerShutdownHandler(
-  name: string,
-  handler: () => Promise<void>,
-  timeout?: number
-): void {
-  shutdownManager.register({ name, handler, timeout });
-}
+// Register default handlers
+shutdownManager.registerHandler({
+  name: 'Active Connections',
+  priority: 100,
+  timeout: 10000,
+  handler: async () => {
+    // Wait for active connections to complete
+    // This would be implemented based on your connection tracking
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+});
+
+shutdownManager.registerHandler({
+  name: 'MongoDB',
+  priority: 80,
+  timeout: 5000,
+  handler: async () => {
+    if (mongoose.connection.readyState === 1) {
+      await mongoose.connection.close();
+      logger.info('MongoDB connection closed');
+    }
+  }
+});
+
+shutdownManager.registerHandler({
+  name: 'Redis',
+  priority: 70,
+  timeout: 5000,
+  handler: async () => {
+    await closeRedis();
+    logger.info('Redis connection closed');
+  }
+});
+
+shutdownManager.registerHandler({
+  name: 'Process Cleanup',
+  priority: 10,
+  timeout: 3000,
+  handler: async () => {
+    // Any final cleanup
+    logger.info('Process cleanup completed');
+  }
+});
 
 /**
  * Execute graceful shutdown
  */
-export async function gracefulShutdown(
-  customHandler?: () => Promise<void>,
-  timeout?: number
-): Promise<void> {
-  if (customHandler) {
-    await customHandler();
-  }
-  
-  await shutdownManager.shutdown(timeout);
-  
-  // Force exit after timeout
-  const forceExitTimeout = timeout || 30000;
-  const forceExitTimer = setTimeout(() => {
-    logger.error('Forced shutdown after timeout');
-    process.exit(1);
-  }, forceExitTimeout + 5000);
-
-  // Clear timer if shutdown completes
-  forceExitTimer.unref();
+export async function gracefulShutdown(): Promise<void> {
+  await shutdownManager.shutdown('manual');
 }
 
 /**
- * Check if application is shutting down
+ * Register shutdown handlers for signals
  */
-export function isShuttingDown(): boolean {
-  return shutdownManager.isShuttingDownNow();
+export function registerShutdownHandlers(customHandler?: () => Promise<void>): void {
+  if (customHandler) {
+    shutdownManager.registerHandler({
+      name: 'Custom Handler',
+      priority: 90,
+      timeout: 10000,
+      handler: customHandler
+    });
+  }
+
+  // Handle different signals
+  const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGUSR2'];
+  
+  signals.forEach(signal => {
+    process.once(signal, async () => {
+      logger.info(`Received ${signal} signal`);
+      
+      try {
+        await shutdownManager.shutdown(signal);
+        process.exit(0);
+      } catch (error) {
+        logger.error('Shutdown failed:', error);
+        process.exit(1);
+      }
+    });
+  });
+
+  // Handle uncaught errors
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception:', error);
+    
+    shutdownManager.shutdown('uncaughtException').finally(() => {
+      process.exit(1);
+    });
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    
+    shutdownManager.shutdown('unhandledRejection').finally(() => {
+      process.exit(1);
+    });
+  });
+
+  logger.info('Shutdown handlers registered');
 }
 
-// Register default handlers
-registerShutdownHandler(
-  'Active Connections',
-  async () => {
-    // Close keep-alive connections
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  },
-  5000
-);
+/**
+ * Register a custom shutdown handler
+ */
+export function addShutdownHandler(
+  name: string,
+  handler: () => Promise<void>,
+  priority: number = 50,
+  timeout: number = 5000
+): void {
+  shutdownManager.registerHandler({
+    name,
+    handler,
+    priority,
+    timeout
+  });
+}
 
-export default {
-  registerShutdownHandler,
-  gracefulShutdown,
-  isShuttingDown
-};
+export { shutdownManager };

@@ -1,344 +1,490 @@
 // packages/backend/src/services/naver/NaverAuthService.ts
-import { Redis } from 'ioredis';
-import axios, { AxiosError } from 'axios';
-import bcrypt from 'bcryptjs';  // ✅ ES 모듈에서 올바른 import 방식
-import { config } from '@/config';
-import { logger } from '@/utils/logger';
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
+import bcrypt from 'bcryptjs';
+import { BaseService, ServiceConfig } from '../base/BaseService.js';
+import { config } from '../../config/index.js';
+import { logger } from '../../utils/logger.js';
+import { createHash } from 'crypto';
 
 export interface NaverToken {
   access_token: string;
   expires_in: number;
   token_type: string;
+  issued_at?: number;
 }
 
-export class NaverAuthService {
-  private redis: Redis;
-  private tokenKey = 'naver:auth:token';
-  private clientId: string;
-  private clientSecret: string;
-  private apiBaseUrl: string;
+export interface NaverAuthConfig {
+  clientId: string;
+  clientSecret: string;
+  apiBaseUrl: string;
+  storeId: string;
+  tokenCacheTTL?: number;
+  maxRetries?: number;
+  timeout?: number;
+}
 
-  constructor(redis: Redis) {
-    this.redis = redis;
-    
-    // 환경 변수 직접 읽기 - 하드코딩으로 강제 설정
-    this.clientId = '42g71Rui1jMS5KKHDyDhIO';
-    this.clientSecret = '$2a$04$dqVRQvyZ./Bu0m4BDZh6eu'; // 전체 값 하드코딩
-    this.apiBaseUrl = 'https://api.commerce.naver.com';
-    
-    logger.warn('Using hardcoded Naver credentials - This is temporary!');
-    
-    // 환경 변수 검증
-    this.validateConfig();
+export class NaverAuthService extends BaseService {
+  private tokenCacheKey = 'naver:auth:token';
+  private authConfig: NaverAuthConfig;
+  private axiosInstance: AxiosInstance;
+  private tokenRefreshPromise: Promise<NaverToken> | null = null;
+
+  constructor(redis?: any, customConfig?: Partial<NaverAuthConfig>) {
+    super({
+      name: 'NaverAuthService',
+      version: '2.0.0',
+      redis,
+      config: customConfig
+    });
+
+    // Initialize configuration
+    this.authConfig = {
+      clientId: customConfig?.clientId || config.naver.clientId,
+      clientSecret: customConfig?.clientSecret || config.naver.clientSecret,
+      apiBaseUrl: customConfig?.apiBaseUrl || config.naver.apiBaseUrl,
+      storeId: customConfig?.storeId || config.naver.storeId,
+      tokenCacheTTL: customConfig?.tokenCacheTTL || 3000, // 50 minutes (token expires in 60)
+      maxRetries: customConfig?.maxRetries || 3,
+      timeout: customConfig?.timeout || 30000
+    };
+
+    // Create axios instance
+    this.axiosInstance = axios.create({
+      baseURL: this.authConfig.apiBaseUrl,
+      timeout: this.authConfig.timeout,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+
+    this.setupAxiosInterceptors();
   }
 
   /**
-   * 환경 변수 검증
+   * Initialize service
    */
-  private validateConfig(): void {
-    if (!this.clientId) {
-      throw new Error('NAVER_CLIENT_ID is not configured');
-    }
-    if (!this.clientSecret) {
-      throw new Error('NAVER_CLIENT_SECRET is not configured');
-    }
-    if (!this.apiBaseUrl) {
-      throw new Error('NAVER_API_BASE_URL is not configured');
-    }
+  protected async onInitialize(): Promise<void> {
+    this.validateConfiguration();
     
-    logger.info('Naver Auth Service initialized', {
-      clientId: this.clientId,
-      apiBaseUrl: this.apiBaseUrl,
+    // Test authentication on initialization
+    try {
+      await this.getToken();
+      logger.info('Naver authentication test successful');
+    } catch (error) {
+      logger.warn('Naver authentication test failed, will retry on first request:', error);
+    }
+  }
+
+  /**
+   * Cleanup service
+   */
+  protected async onCleanup(): Promise<void> {
+    // Clear token cache
+    if (this.redis) {
+      await this.redis.del(this.tokenCacheKey);
+    }
+  }
+
+  /**
+   * Validate configuration
+   */
+  private validateConfiguration(): void {
+    const required = ['clientId', 'clientSecret', 'apiBaseUrl', 'storeId'];
+    const missing = required.filter(key => !this.authConfig[key as keyof NaverAuthConfig]);
+
+    if (missing.length > 0) {
+      throw new Error(`Missing required Naver configuration: ${missing.join(', ')}`);
+    }
+
+    // Validate client secret format
+    if (!this.isValidClientSecret(this.authConfig.clientSecret)) {
+      logger.warn('Naver client secret may be invalid');
+    }
+
+    logger.info('Naver Auth Service configuration validated', {
+      clientId: this.authConfig.clientId,
+      apiBaseUrl: this.authConfig.apiBaseUrl,
+      storeId: this.authConfig.storeId,
       secretType: this.detectSecretType(),
-      secretLength: this.clientSecret.length,
-      secretPreview: this.clientSecret.substring(0, 10) + '...'
+      secretLength: this.authConfig.clientSecret.length
     });
   }
 
   /**
-   * Client Secret 타입 감지
+   * Setup axios interceptors
    */
-  private detectSecretType(): string {
-    if (this.clientSecret.startsWith('$2a$') || this.clientSecret.startsWith('$2b$')) {
-      return 'bcrypt';
-    }
-    return 'plain';
-  }
-
-  /**
-   * 네이버 전자서명 생성 - bcrypt salt 방식
-   */
-  private async generateSignature(timestamp: string): Promise<string> {
-    try {
-      const password = `${this.clientId}_${timestamp}`;
-      
-      logger.debug('Generating Naver signature', {
-        clientId: this.clientId,
-        timestamp: timestamp,
-        passwordFormat: `${this.clientId}_${timestamp}`,
-        secretType: this.detectSecretType(),
-        secretLength: this.clientSecret.length,
-        secretPreview: this.clientSecret.substring(0, 15) + '...'
-      });
-      
-      // Client Secret이 bcrypt salt 형식인지 확인
-      if (this.clientSecret.startsWith('$2a$') || this.clientSecret.startsWith('$2b$')) {
-        logger.info('Using bcrypt signature method with salt');
-        
-        try {
-          // bcrypt.hash 메서드 사용 (ES 모듈 default export)
-          const hashed = await bcrypt.hash(password, this.clientSecret);
-          
-          // Base64 인코딩
-          const signature = Buffer.from(hashed, 'utf-8').toString('base64');
-          
-          logger.debug('Bcrypt signature generated successfully', {
-            passwordLength: password.length,
-            saltUsed: this.clientSecret.substring(0, 10) + '...',
-            hashedLength: hashed.length,
-            hashedPreview: hashed.substring(0, 20) + '...',
-            signatureLength: signature.length,
-            signaturePreview: signature.substring(0, 20) + '...'
-          });
-          
-          return signature;
-        } catch (bcryptError: any) {
-          logger.error('Bcrypt hashing failed:', {
-            error: bcryptError.message,
-            secretFormat: this.clientSecret.substring(0, 10),
-            secretLength: this.clientSecret.length
-          });
-          throw new Error(`Bcrypt hashing failed: ${bcryptError.message}`);
-        }
-      } else {
-        // 일반 시크릿인 경우 에러
-        logger.error('Invalid client secret format - must be bcrypt salt', {
-          secretFormat: this.clientSecret.substring(0, 10),
-          expectedFormat: '$2a$04$...'
+  private setupAxiosInterceptors(): void {
+    // Request interceptor
+    this.axiosInstance.interceptors.request.use(
+      (config) => {
+        logger.debug('Naver API request:', {
+          method: config.method,
+          url: config.url,
+          params: config.params
         });
-        throw new Error('Client secret must be in bcrypt salt format ($2a$04$...)');
+        return config;
+      },
+      (error) => {
+        logger.error('Naver API request error:', error);
+        return Promise.reject(error);
       }
-    } catch (error: any) {
-      logger.error('Failed to generate signature:', error);
-      throw new Error(`Signature generation failed: ${error.message}`);
-    }
-  }
+    );
 
-  /**
-   * 액세스 토큰 발급/갱신
-   */
-  async getAccessToken(): Promise<string> {
-    try {
-      // 캐시된 토큰 확인
-      const cachedToken = await this.checkCachedToken();
-      if (cachedToken) {
-        return cachedToken;
-      }
+    // Response interceptor
+    this.axiosInstance.interceptors.response.use(
+      (response) => {
+        logger.debug('Naver API response:', {
+          status: response.status,
+          url: response.config.url
+        });
+        return response;
+      },
+      async (error: AxiosError) => {
+        const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
 
-      // 새 토큰 발급 - 재시도 로직 포함
-      let lastError: any = null;
-      const maxRetries = 3;
-      
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          const token = await this.requestNewToken(attempt);
-          return token;
-        } catch (error: any) {
-          lastError = error;
-          logger.warn(`Token request attempt ${attempt} failed`, {
-            error: error.message,
-            attempt
-          });
-          
-          if (attempt < maxRetries) {
-            // 재시도 전 대기 (exponential backoff)
-            await this.sleep(Math.pow(2, attempt) * 1000);
+        // Log error details
+        logger.error('Naver API error response:', {
+          status: error.response?.status,
+          data: error.response?.data,
+          url: originalRequest?.url
+        });
+
+        // Handle 401 errors (token expired)
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          originalRequest._retry = true;
+
+          try {
+            // Clear cached token
+            await this.clearCachedToken();
+            
+            // Get new token
+            const token = await this.getToken();
+            
+            // Retry original request with new token
+            if (originalRequest.headers) {
+              originalRequest.headers['Authorization'] = `Bearer ${token.access_token}`;
+            }
+            
+            return this.axiosInstance(originalRequest);
+          } catch (refreshError) {
+            logger.error('Token refresh failed:', refreshError);
+            throw refreshError;
           }
         }
+
+        throw error;
       }
-      
-      throw lastError || new Error('Failed to obtain access token after retries');
-    } catch (error: any) {
-      logger.error('Failed to get access token', {
-        error: error.message,
-        stack: error.stack
-      });
-      throw error;
-    }
+    );
   }
 
   /**
-   * 캐시된 토큰 확인
+   * Check if client secret is valid
    */
-  private async checkCachedToken(): Promise<string | null> {
+  private isValidClientSecret(secret: string): boolean {
+    // Check if it's a bcrypt salt format
+    if (secret.startsWith('$2a$') || secret.startsWith('$2b$')) {
+      return secret.length >= 29;
+    }
+    
+    // Check if it's a regular secret
+    return secret.length >= 16;
+  }
+
+  /**
+   * Detect client secret type
+   */
+  private detectSecretType(): 'bcrypt' | 'plain' | 'unknown' {
+    const secret = this.authConfig.clientSecret;
+    
+    if (secret.startsWith('$2a$') || secret.startsWith('$2b$')) {
+      return 'bcrypt';
+    }
+    
+    if (secret.length >= 16 && /^[a-zA-Z0-9]+$/.test(secret)) {
+      return 'plain';
+    }
+    
+    return 'unknown';
+  }
+
+  /**
+   * Generate signature for Naver API
+   */
+  private async generateSignature(timestamp: string): Promise<string> {
+    const secretType = this.detectSecretType();
+    const password = `${this.authConfig.clientId}_${timestamp}`;
+    
+    logger.debug('Generating Naver signature', {
+      clientId: this.authConfig.clientId,
+      timestamp,
+      secretType,
+      passwordFormat: password
+    });
+
     try {
-      const cachedToken = await this.redis.get(this.tokenKey);
-      
-      if (cachedToken) {
-        const tokenData: NaverToken = JSON.parse(cachedToken);
-        const ttl = await this.redis.ttl(this.tokenKey);
+      if (secretType === 'bcrypt') {
+        // Use bcrypt salt method
+        const hashed = bcrypt.hashSync(password, this.authConfig.clientSecret);
+        const signature = Buffer.from(hashed).toString('base64');
         
-        // 토큰 유효시간이 30분 이상 남은 경우 재사용
-        if (ttl > 1800) {
-          logger.debug('Using cached Naver token', { ttl });
-          return tokenData.access_token;
-        }
+        logger.debug('Generated bcrypt signature', {
+          signatureLength: signature.length,
+          signaturePreview: signature.substring(0, 20) + '...'
+        });
+        
+        return signature;
+      } else {
+        // Use HMAC SHA256 method as fallback
+        const hmac = createHash('sha256');
+        hmac.update(password);
+        hmac.update(this.authConfig.clientSecret);
+        const signature = hmac.digest('base64');
+        
+        logger.debug('Generated HMAC signature', {
+          signatureLength: signature.length,
+          signaturePreview: signature.substring(0, 20) + '...'
+        });
+        
+        return signature;
       }
-      
-      return null;
     } catch (error) {
-      logger.warn('Failed to check cached token', error);
-      return null;
+      logger.error('Signature generation failed:', error);
+      throw new Error(`Failed to generate signature: ${(error as Error).message}`);
     }
   }
 
   /**
-   * 새 토큰 요청
+   * Get access token
    */
-  private async requestNewToken(attempt: number = 1): Promise<string> {
+  async getToken(forceRefresh: boolean = false): Promise<NaverToken> {
+    return this.executeWithMetrics(
+      async () => {
+        // Check cache first
+        if (!forceRefresh) {
+          const cached = await this.getCachedToken();
+          if (cached) {
+            logger.debug('Using cached Naver token');
+            return cached;
+          }
+        }
+
+        // Prevent multiple simultaneous token requests
+        if (this.tokenRefreshPromise) {
+          logger.debug('Token refresh already in progress, waiting...');
+          return await this.tokenRefreshPromise;
+        }
+
+        try {
+          this.tokenRefreshPromise = this.fetchNewToken();
+          const token = await this.tokenRefreshPromise;
+          
+          // Cache the token
+          await this.cacheToken(token);
+          
+          return token;
+        } finally {
+          this.tokenRefreshPromise = null;
+        }
+      },
+      'getToken'
+    );
+  }
+
+  /**
+   * Fetch new token from Naver API
+   */
+  private async fetchNewToken(): Promise<NaverToken> {
     const timestamp = Date.now().toString();
     const signature = await this.generateSignature(timestamp);
 
-    // URL 인코딩된 폼 데이터 생성
-    const formData = new URLSearchParams();
-    formData.append('client_id', this.clientId);
-    formData.append('timestamp', timestamp);
-    formData.append('client_secret_sign', signature);
-    formData.append('grant_type', 'client_credentials');
-    formData.append('type', 'SELF');
-
-    logger.info(`Requesting Naver access token (attempt ${attempt})`, {
-      url: `${this.apiBaseUrl}/external/v1/oauth2/token`,
-      clientId: this.clientId,
+    const params = new URLSearchParams({
+      client_id: this.authConfig.clientId,
       timestamp: timestamp,
-      formDataLength: formData.toString().length,
-      signaturePreview: signature.substring(0, 20) + '...'
+      client_secret_sign: signature,
+      grant_type: 'client_credentials',
+      type: 'SELF'
     });
 
+    logger.info('Requesting new Naver access token');
+
     try {
-      const response = await axios.post(
-        `${this.apiBaseUrl}/external/v1/oauth2/token`,
-        formData.toString(),
+      const response = await this.axiosInstance.post(
+        '/external/v1/oauth2/token',
+        params.toString(),
         {
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            'User-Agent': 'Hallyu-Sync/1.0'
-          },
-          timeout: 30000,
-          maxRedirects: 5,
-          validateStatus: (status) => status < 500
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
         }
       );
 
-      logger.debug('Naver API response received', {
-        status: response.status,
-        statusText: response.statusText,
-        hasData: !!response.data,
-        hasAccessToken: !!response.data?.access_token
+      const token: NaverToken = {
+        ...response.data,
+        issued_at: Date.now()
+      };
+
+      logger.info('Successfully obtained Naver access token', {
+        expiresIn: token.expires_in,
+        tokenType: token.token_type
       });
 
-      // 응답 처리
-      if (response.status === 200 && response.data?.access_token) {
-        const tokenData = response.data;
-        
-        // 토큰 캐싱 (만료 시간의 90%만 캐싱)
-        const expiresIn = tokenData.expires_in || 10800;
-        const cacheDuration = Math.floor(expiresIn * 0.9);
-        
-        // Redis 캐싱
-        try {
-          await this.redis.setex(
-            this.tokenKey,
-            cacheDuration,
-            JSON.stringify(tokenData)
-          );
-        } catch (cacheError) {
-          logger.warn('Failed to cache token, but continuing:', cacheError);
-        }
+      this.emit('token:obtained', { expiresIn: token.expires_in });
 
-        logger.info('Naver token obtained successfully', {
-          tokenType: tokenData.token_type,
-          expiresIn: expiresIn,
-          cachedFor: cacheDuration
-        });
-        
-        return tokenData.access_token;
-      }
+      return token;
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      
+      logger.error('Failed to obtain Naver access token', {
+        status: axiosError.response?.status,
+        data: axiosError.response?.data,
+        message: axiosError.message
+      });
 
-      // 에러 처리
-      this.handleTokenError(response);
-      
-      throw new Error(`Unexpected response: ${response.status} ${response.statusText}`);
-      
-    } catch (error: any) {
-      if (axios.isAxiosError(error)) {
-        this.handleAxiosError(error);
-      }
-      throw error;
+      this.emit('token:failed', { error: axiosError.message });
+
+      throw new Error(
+        `Naver authentication failed: ${axiosError.response?.data || axiosError.message}`
+      );
     }
   }
 
   /**
-   * 토큰 응답 에러 처리
+   * Get cached token
    */
-  private handleTokenError(response: any): void {
-    const status = response.status;
-    const data = response.data;
-    
-    logger.error('Naver API token request failed', {
-      status,
-      data,
-      clientId: this.clientId,
-      clientSecretFormat: this.clientSecret.substring(0, 10) + '...'
+  private async getCachedToken(): Promise<NaverToken | null> {
+    if (!this.redis) return null;
+
+    try {
+      const cached = await this.redis.get(this.tokenCacheKey);
+      if (!cached) return null;
+
+      const token: NaverToken = JSON.parse(cached);
+      
+      // Check if token is still valid
+      if (this.isTokenValid(token)) {
+        return token;
+      }
+
+      // Token expired, clear cache
+      await this.clearCachedToken();
+      return null;
+    } catch (error) {
+      logger.error('Error getting cached token:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Cache token
+   */
+  private async cacheToken(token: NaverToken): Promise<void> {
+    if (!this.redis) return;
+
+    try {
+      const ttl = Math.min(
+        token.expires_in - 600, // Expire 10 minutes before actual expiry
+        this.authConfig.tokenCacheTTL!
+      );
+
+      await this.redis.setex(
+        this.tokenCacheKey,
+        ttl,
+        JSON.stringify(token)
+      );
+
+      logger.debug(`Cached Naver token with TTL ${ttl}s`);
+    } catch (error) {
+      logger.error('Error caching token:', error);
+    }
+  }
+
+  /**
+   * Clear cached token
+   */
+  private async clearCachedToken(): Promise<void> {
+    if (!this.redis) return;
+
+    try {
+      await this.redis.del(this.tokenCacheKey);
+      logger.debug('Cleared cached Naver token');
+    } catch (error) {
+      logger.error('Error clearing cached token:', error);
+    }
+  }
+
+  /**
+   * Check if token is valid
+   */
+  private isTokenValid(token: NaverToken): boolean {
+    if (!token || !token.access_token) return false;
+
+    // Check if token has expired
+    if (token.issued_at && token.expires_in) {
+      const expiresAt = token.issued_at + (token.expires_in * 1000);
+      const now = Date.now();
+      const bufferTime = 60000; // 1 minute buffer
+
+      return now < (expiresAt - bufferTime);
+    }
+
+    // If no issued_at, assume token is valid (will be refreshed on 401)
+    return true;
+  }
+
+  /**
+   * Create authenticated axios instance
+   */
+  async createAuthenticatedClient(): Promise<AxiosInstance> {
+    const token = await this.getToken();
+
+    const client = axios.create({
+      baseURL: this.authConfig.apiBaseUrl,
+      timeout: this.authConfig.timeout,
+      headers: {
+        'Authorization': `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json'
+      }
     });
-    
-    switch (status) {
-      case 400:
-        if (data?.code === 'INVALID_SIGNATURE') {
-          throw new Error('Invalid signature. Check NAVER_CLIENT_SECRET');
+
+    // Add response interceptor for auto-retry on 401
+    client.interceptors.response.use(
+      (response) => response,
+      async (error: AxiosError) => {
+        const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          originalRequest._retry = true;
+
+          // Get new token
+          const newToken = await this.getToken(true);
+          
+          // Retry with new token
+          if (originalRequest.headers) {
+            originalRequest.headers['Authorization'] = `Bearer ${newToken.access_token}`;
+          }
+          
+          return client(originalRequest);
         }
-        throw new Error(`Bad request: ${data?.message || 'Invalid parameters'}`);
-      case 401:
-        throw new Error('Authentication failed');
-      case 403:
-        throw new Error('Access forbidden');
-      case 404:
-        throw new Error('Token endpoint not found');
-      case 429:
-        throw new Error('Rate limit exceeded');
-      default:
-        throw new Error(`Token request failed: ${status}`);
-    }
+
+        throw error;
+      }
+    );
+
+    return client;
   }
 
   /**
-   * Axios 에러 처리
+   * Get health details
    */
-  private handleAxiosError(error: AxiosError): void {
-    if (error.code === 'ECONNREFUSED') {
-      throw new Error('Cannot connect to Naver API');
-    } else if (error.code === 'ETIMEDOUT') {
-      throw new Error('Request timeout');
-    } else if (error.response) {
-      this.handleTokenError(error.response);
-    } else {
-      throw new Error(`Network error: ${error.message}`);
-    }
-  }
-
-  /**
-   * 대기 헬퍼 함수
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * 토큰 캐시 삭제 (디버깅용)
-   */
-  async clearTokenCache(): Promise<void> {
-    await this.redis.del(this.tokenKey);
-    logger.info('Naver token cache cleared');
+  protected async getHealthDetails(): Promise<any> {
+    const cachedToken = await this.getCachedToken();
+    
+    return {
+      hasValidToken: cachedToken !== null && this.isTokenValid(cachedToken),
+      clientId: this.authConfig.clientId,
+      apiBaseUrl: this.authConfig.apiBaseUrl,
+      storeId: this.authConfig.storeId,
+      secretType: this.detectSecretType()
+    };
   }
 }

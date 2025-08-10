@@ -6,11 +6,104 @@ import { dirname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-// .env 파일 로드 (프로젝트 루트에서)
+
+// Load .env file from backend package root
 dotenv.config({ path: resolve(__dirname, '../../.env') });
 
-// 환경 변수 값 가져오기 헬퍼 함수
-function getEnvValue(key: string, defaultValue?: string): string {
+// Environment type
+export type Environment = 'development' | 'production' | 'test';
+
+// Configuration interface
+export interface Config {
+  env: Environment;
+  isDevelopment: boolean;
+  isProduction: boolean;
+  isTest: boolean;
+  
+  server: {
+    port: number;
+    wsPort: number;
+    host: string;
+  };
+  
+  mongodb: {
+    uri: string;
+    options: {
+      useNewUrlParser: boolean;
+      useUnifiedTopology: boolean;
+    };
+  };
+  
+  redis: {
+    host: string;
+    port: number;
+    password?: string;
+    db: number;
+  };
+  
+  jwt: {
+    secret: string;
+    expiresIn: string;
+    refreshExpiresIn: string;
+  };
+  
+  encryption: {
+    key: string;
+  };
+  
+  naver: {
+    clientId: string;
+    clientSecret: string;
+    apiBaseUrl: string;
+    storeId: string;
+    webhookSecret?: string;
+  };
+  
+  shopify: {
+    storeDomain: string;
+    accessToken?: string;
+    apiVersion: string;
+    apiKey?: string;
+    apiSecret?: string;
+    webhookSecret?: string;
+  };
+  
+  api: {
+    prefix: string;
+    rateLimit: {
+      windowMs: number;
+      maxRequests: number;
+    };
+  };
+  
+  aws: {
+    region: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    s3Bucket?: string;
+    sqsQueueUrl?: string;
+  };
+  
+  exchangeRate: {
+    apiKey?: string;
+    apiUrl: string;
+  };
+  
+  misc: {
+    corsOrigin: string | string[];
+    logLevel: string;
+    logDir: string;
+  };
+  
+  features: {
+    enableShopify: boolean;
+    enableClustering: boolean;
+    workerCount: number;
+  };
+}
+
+// Helper function to get environment variable
+function getEnv(key: string, defaultValue?: string): string {
   const value = process.env[key];
   if (value === undefined && defaultValue === undefined) {
     throw new Error(`Environment variable ${key} is not defined`);
@@ -18,194 +111,207 @@ function getEnvValue(key: string, defaultValue?: string): string {
   return value || defaultValue || '';
 }
 
-// bcrypt salt 값 확인 및 복원
+// Helper function to get optional environment variable
+function getOptionalEnv(key: string, defaultValue?: string): string | undefined {
+  return process.env[key] || defaultValue;
+}
+
+// Helper function to get boolean environment variable
+function getBoolEnv(key: string, defaultValue: boolean = false): boolean {
+  const value = process.env[key];
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === 'true';
+}
+
+// Helper function to get integer environment variable
+function getIntEnv(key: string, defaultValue: number): number {
+  const value = process.env[key];
+  if (value === undefined) return defaultValue;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+// Helper function to handle Naver Client Secret
 function getNaverClientSecret(): string {
   const secret = process.env.NAVER_CLIENT_SECRET || '';
   
-  // 환경변수가 잘려있는 경우 체크
-  if (secret && !secret.startsWith('$2a$')) {
-    console.warn('NAVER_CLIENT_SECRET appears to be truncated or invalid');
-    // 완전한 값 반환 (테스트 스크립트에서 작동하는 값)
+  // Check if it's a valid bcrypt salt
+  if (secret.startsWith('$2a$') || secret.startsWith('$2b$')) {
+    if (secret.length >= 29) {
+      return secret;
+    }
+    console.warn('NAVER_CLIENT_SECRET appears to be truncated, using default value');
     return '$2a$04$dqVRQvyZ./Bu0m4BDZh6eu';
   }
   
-  // $2a$로 시작하지만 너무 짧은 경우 (잘린 경우)
-  if (secret.startsWith('$2a$') && secret.length < 29) {
-    console.warn(`NAVER_CLIENT_SECRET is too short (${secret.length} chars), using full value`);
+  // If not bcrypt format, return as is or use default
+  if (!secret) {
+    console.warn('NAVER_CLIENT_SECRET not set, using default value');
     return '$2a$04$dqVRQvyZ./Bu0m4BDZh6eu';
   }
   
-  // 정상적인 경우
-  if (secret.startsWith('$2a$') && secret.length >= 29) {
-    return secret;
-  }
-  
-  // 기본값 반환
-  console.warn('Using default NAVER_CLIENT_SECRET');
-  return '$2a$04$dqVRQvyZ./Bu0m4BDZh6eu';
+  return secret;
 }
 
-export const config = {
-  // 환경 설정
-  env: process.env.NODE_ENV || 'development',
+// Build configuration object
+export const config: Config = {
+  // Environment
+  env: (process.env.NODE_ENV || 'development') as Environment,
   isDevelopment: process.env.NODE_ENV === 'development',
   isProduction: process.env.NODE_ENV === 'production',
+  isTest: process.env.NODE_ENV === 'test',
   
-  // 서버 설정
+  // Server configuration
   server: {
-    port: parseInt(process.env.PORT || '3000', 10),
-    wsPort: parseInt(process.env.WS_PORT || '3001', 10),
-    host: process.env.HOST || 'localhost',
+    port: getIntEnv('PORT', 3000),
+    wsPort: getIntEnv('WS_PORT', 3001),
+    host: getEnv('HOST', 'localhost'),
   },
   
-  // MongoDB 설정
+  // MongoDB configuration
   mongodb: {
-    uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/ERP_NAVER',
+    uri: getEnv('MONGODB_URI', 'mongodb://localhost:27017/hallyu-fomaholic'),
     options: {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     },
   },
   
-  // Redis 설정
+  // Redis configuration
   redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-    password: process.env.REDIS_PASSWORD,
-    db: parseInt(process.env.REDIS_DB || '0', 10),
+    host: getEnv('REDIS_HOST', 'localhost'),
+    port: getIntEnv('REDIS_PORT', 6379),
+    password: getOptionalEnv('REDIS_PASSWORD'),
+    db: getIntEnv('REDIS_DB', 0),
   },
   
-  // JWT 설정
+  // JWT configuration
   jwt: {
-    secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production',
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+    secret: getEnv('JWT_SECRET', 'your-super-secret-jwt-key-change-this-in-production'),
+    expiresIn: getEnv('JWT_EXPIRES_IN', '7d'),
+    refreshExpiresIn: getEnv('JWT_REFRESH_EXPIRES_IN', '30d'),
   },
   
-  // 암호화 설정
+  // Encryption configuration
   encryption: {
-    key: process.env.ENCRYPTION_KEY || 'your-encryption-key-32-characters',
+    key: getEnv('ENCRYPTION_KEY', 'your-encryption-key-32-characters'),
   },
   
-  // 네이버 Commerce API 설정
+  // Naver Commerce API configuration
   naver: {
-    clientId: process.env.NAVER_CLIENT_ID || '42g71Rui1jMS5KKHDyDhIO',
-    clientSecret: getNaverClientSecret(), // 헬퍼 함수 사용
-    apiBaseUrl: process.env.NAVER_API_URL || 'https://api.commerce.naver.com',
-    storeId: process.env.NAVER_STORE_ID || 'ncp_1o1cu7_01',
-    webhookSecret: process.env.NAVER_WEBHOOK_SECRET,
+    clientId: getEnv('NAVER_CLIENT_ID', '42g71Rui1jMS5KKHDyDhIO'),
+    clientSecret: getNaverClientSecret(),
+    apiBaseUrl: getEnv('NAVER_API_URL', 'https://api.commerce.naver.com'),
+    storeId: getEnv('NAVER_STORE_ID', 'ncp_1o1cu7_01'),
+    webhookSecret: getOptionalEnv('NAVER_WEBHOOK_SECRET'),
   },
   
-  // Shopify API 설정
+  // Shopify API configuration
   shopify: {
-    storeDomain: process.env.SHOPIFY_SHOP_DOMAIN || 'hallyusuperstore19.myshopify.com',
-    accessToken: process.env.SHOPIFY_ACCESS_TOKEN,
-    apiVersion: process.env.SHOPIFY_API_VERSION || '2025-04',
-    apiKey: process.env.SHOPIFY_API_KEY,
-    apiSecret: process.env.SHOPIFY_API_SECRET,
-    webhookSecret: process.env.SHOPIFY_WEBHOOK_SECRET,
+    storeDomain: getEnv('SHOPIFY_SHOP_DOMAIN', 'hallyusuperstore19.myshopify.com'),
+    accessToken: getOptionalEnv('SHOPIFY_ACCESS_TOKEN'),
+    apiVersion: getEnv('SHOPIFY_API_VERSION', '2025-04'),
+    apiKey: getOptionalEnv('SHOPIFY_API_KEY'),
+    apiSecret: getOptionalEnv('SHOPIFY_API_SECRET'),
+    webhookSecret: getOptionalEnv('SHOPIFY_WEBHOOK_SECRET'),
   },
   
-  // API 설정
+  // API configuration
   api: {
-    prefix: process.env.API_PREFIX || '/api/v1',
+    prefix: getEnv('API_PREFIX', '/api/v1'),
     rateLimit: {
-      windowMs: parseInt(process.env.RATE_LIMIT_WINDOW || '900000', 10), // 15분
-      max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+      windowMs: getIntEnv('RATE_LIMIT_WINDOW_MS', 900000), // 15 minutes
+      maxRequests: getIntEnv('RATE_LIMIT_MAX_REQUESTS', 100),
     },
   },
   
-  // 로깅 설정
-  logging: {
-    level: process.env.LOG_LEVEL || 'info',
-    format: process.env.LOG_FORMAT || 'json',
-    directory: process.env.LOG_DIRECTORY || 'logs',
+  // AWS configuration
+  aws: {
+    region: getEnv('AWS_REGION', 'ap-northeast-2'),
+    accessKeyId: getOptionalEnv('AWS_ACCESS_KEY_ID'),
+    secretAccessKey: getOptionalEnv('AWS_SECRET_ACCESS_KEY'),
+    s3Bucket: getOptionalEnv('AWS_S3_BUCKET'),
+    sqsQueueUrl: getOptionalEnv('AWS_SQS_QUEUE_URL'),
   },
   
-  // 동기화 설정
-  sync: {
-    batchSize: parseInt(process.env.SYNC_BATCH_SIZE || '50', 10),
-    interval: parseInt(process.env.SYNC_INTERVAL || '300000', 10), // 5분
-    retryAttempts: parseInt(process.env.SYNC_RETRY_ATTEMPTS || '3', 10),
-    retryDelay: parseInt(process.env.SYNC_RETRY_DELAY || '5000', 10),
+  // Exchange Rate API configuration
+  exchangeRate: {
+    apiKey: getOptionalEnv('EXCHANGE_RATE_API_KEY'),
+    apiUrl: getEnv('EXCHANGE_RATE_API_URL', 'https://api.exchangerate-api.com/v4/latest/KRW'),
   },
   
-  // 웹훅 설정
-  webhook: {
-    maxRetries: parseInt(process.env.WEBHOOK_MAX_RETRIES || '3', 10),
-    timeout: parseInt(process.env.WEBHOOK_TIMEOUT || '10000', 10),
-  },
-  
-  // 캐시 설정
-  cache: {
-    ttl: parseInt(process.env.CACHE_TTL || '3600', 10), // 1시간
-    checkPeriod: parseInt(process.env.CACHE_CHECK_PERIOD || '600', 10), // 10분
-  },
-  
-  // 기타 설정
+  // Miscellaneous configuration
   misc: {
-    bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS || '10', 10),
-    corsOrigin: process.env.CORS_ORIGIN || '*',
-    uploadDir: process.env.UPLOAD_DIR || 'uploads',
-    maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10), // 10MB
+    corsOrigin: process.env.CORS_ORIGIN ? 
+      process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()) : 
+      ['http://localhost:5173'],
+    logLevel: getEnv('LOG_LEVEL', 'debug'),
+    logDir: getEnv('LOG_DIR', './logs'),
+  },
+  
+  // Feature flags
+  features: {
+    enableShopify: getBoolEnv('ENABLE_SHOPIFY', true),
+    enableClustering: getBoolEnv('ENABLE_CLUSTERING', false),
+    workerCount: getIntEnv('WORKER_COUNT', 4),
   },
 };
 
-/**
- * 설정 검증 함수
- * 필수 환경 변수와 설정 값들이 올바른지 확인
- */
-export function validateConfig(): void {
+// Configuration validation function
+export function validateConfig(): string[] {
   const errors: string[] = [];
+  const warnings: string[] = [];
   
-  // 프로덕션 환경에서 필수 환경 변수 체크
+  // Critical validations for production
   if (config.isProduction) {
-    // JWT Secret 검증
-    if (config.jwt.secret === 'your-super-secret-jwt-key-change-this-in-production') {
-      errors.push('JWT_SECRET must be changed in production environment');
+    // JWT Secret validation
+    if (config.jwt.secret === 'your-super-secret-jwt-key-change-this-in-production' || 
+        config.jwt.secret.length < 32) {
+      errors.push('JWT_SECRET must be changed and at least 32 characters in production');
     }
     
-    // 암호화 키 검증
-    if (config.encryption.key === 'your-encryption-key-32-characters') {
-      errors.push('ENCRYPTION_KEY must be changed in production environment');
+    // Encryption key validation
+    if (config.encryption.key === 'your-encryption-key-32-characters' || 
+        config.encryption.key.length !== 32) {
+      errors.push('ENCRYPTION_KEY must be exactly 32 characters in production');
     }
     
-    // MongoDB URI 검증
-    if (config.mongodb.uri === 'mongodb://localhost:27017/ERP_NAVER') {
-      console.warn('Warning: Using default MongoDB URI in production');
+    // MongoDB URI validation
+    if (config.mongodb.uri.includes('localhost')) {
+      warnings.push('Using localhost MongoDB in production');
     }
     
-    // CORS Origin 검증
+    // CORS validation
     if (config.misc.corsOrigin === '*') {
-      console.warn('Warning: CORS is set to allow all origins in production');
+      warnings.push('CORS is set to allow all origins in production');
     }
   }
   
-  // 네이버 API 설정 검증
+  // Naver API configuration validation
   if (!config.naver.clientId) {
     errors.push('NAVER_CLIENT_ID is required');
   }
   
   if (!config.naver.clientSecret || config.naver.clientSecret.length < 29) {
-    console.warn('Warning: NAVER_CLIENT_SECRET may be invalid or too short');
+    warnings.push('NAVER_CLIENT_SECRET may be invalid or too short');
   }
   
-  // Shopify API 설정 검증 (선택적)
-  if (process.env.ENABLE_SHOPIFY === 'true') {
+  if (!config.naver.storeId) {
+    errors.push('NAVER_STORE_ID is required');
+  }
+  
+  // Shopify API configuration validation (if enabled)
+  if (config.features.enableShopify) {
     if (!config.shopify.accessToken) {
       errors.push('SHOPIFY_ACCESS_TOKEN is required when ENABLE_SHOPIFY is true');
     }
     
-    if (!config.shopify.apiKey) {
-      errors.push('SHOPIFY_API_KEY is required when ENABLE_SHOPIFY is true');
-    }
-    
-    if (!config.shopify.apiSecret) {
-      errors.push('SHOPIFY_API_SECRET is required when ENABLE_SHOPIFY is true');
+    if (!config.shopify.storeDomain) {
+      errors.push('SHOPIFY_SHOP_DOMAIN is required when ENABLE_SHOPIFY is true');
     }
   }
   
-  // 포트 검증
+  // Port validation
   if (config.server.port < 1 || config.server.port > 65535) {
     errors.push(`Invalid PORT: ${config.server.port}. Must be between 1 and 65535`);
   }
@@ -214,30 +320,26 @@ export function validateConfig(): void {
     errors.push(`Invalid WS_PORT: ${config.server.wsPort}. Must be between 1 and 65535`);
   }
   
-  // Redis 설정 검증
+  // Redis port validation
   if (config.redis.port < 1 || config.redis.port > 65535) {
     errors.push(`Invalid REDIS_PORT: ${config.redis.port}. Must be between 1 and 65535`);
   }
   
-  // 에러가 있으면 throw
-  if (errors.length > 0) {
-    const errorMessage = 'Configuration validation failed:\n' + errors.map(e => `  - ${e}`).join('\n');
-    throw new Error(errorMessage);
-  }
+  // Log warnings
+  warnings.forEach(warning => console.warn(`⚠️  ${warning}`));
   
-  // 설정 검증 성공
-  console.log('✅ Configuration validated successfully');
+  return errors;
 }
 
-// 개발 환경에서 설정 출력 (민감한 정보는 마스킹)
+// Log configuration on startup (with sensitive data masked)
 if (config.isDevelopment) {
-  console.log('Configuration loaded:', {
+  console.log('📋 Configuration loaded:', {
     env: config.env,
     server: config.server,
     naver: {
       clientId: config.naver.clientId,
-      clientSecretFormat: config.naver.clientSecret.substring(0, 10) + '...',
       clientSecretLength: config.naver.clientSecret.length,
+      clientSecretPreview: config.naver.clientSecret.substring(0, 10) + '...',
       apiBaseUrl: config.naver.apiBaseUrl,
       storeId: config.naver.storeId,
     },
@@ -246,6 +348,7 @@ if (config.isDevelopment) {
       apiVersion: config.shopify.apiVersion,
       hasAccessToken: !!config.shopify.accessToken,
     },
+    features: config.features,
   });
 }
 

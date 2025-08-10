@@ -1,74 +1,56 @@
 // packages/backend/src/models/types.ts
 
-// Re-export all interfaces from models
+// Re-export all model interfaces
+export type { IBaseDocument, IBaseModel } from './base/BaseModel.js';
 export type { IUser } from './User.js';
 export type { IProductMapping } from './ProductMapping.js';
-export type { ISyncJob } from './SyncJob.js';
+export type { ISyncJob, ISyncError } from './SyncJob.js';
+export type { ISettings } from './Settings.js';
 export type { IActivity } from './Activity.js';
 export type { ISession } from './Session.js';
 export type { ISystemLog } from './SystemLog.js';
-export type { IWebhookLog } from './WebhookLog.js';
-export type { IExchangeRate } from './ExchangeRate.js';
 export type { IInventoryTransaction } from './InventoryTransaction.js';
 export type { IPriceHistory } from './PriceHistory.js';
+export type { IExchangeRate } from './ExchangeRate.js';
 export type { INotification } from './Notification.js';
 export type { IOrderSyncStatus } from './OrderSyncStatus.js';
-export type { ISetting } from './Setting.js';
+export type { IWebhookLog } from './WebhookLog.js';
+export type { ISyncHistory } from './SyncHistory.js';
+export type { IPriceSyncJob } from './PriceSyncJob.js';
+export type { ISyncActivity } from './SyncActivity.js';
+export type { IApiRequest } from './ApiRequest.js';
+export type { IToken } from './Token.js';
 
-// Common types used across models
+// Common types
 export interface PaginationOptions {
-  page?: number;
-  limit?: number;
-  sort?: string;
-  order?: 'asc' | 'desc';
+  page: number;
+  limit: number;
+  sort?: any;
+  populate?: string | string[];
 }
 
-export interface QueryFilters {
-  startDate?: Date;
-  endDate?: Date;
-  status?: string;
-  type?: string;
-  search?: string;
+export interface PaginationResult<T> {
+  docs: T[];
+  total: number;
+  page: number;
+  pages: number;
+  limit: number;
+  hasNext: boolean;
+  hasPrev: boolean;
 }
 
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
-  pagination?: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
+export interface QueryOptions {
+  lean?: boolean;
+  populate?: string | string[];
+  select?: string;
+  sort?: any;
 }
 
-export interface SyncStatus {
-  status: 'idle' | 'syncing' | 'completed' | 'failed';
-  lastSyncAt?: Date;
-  nextSyncAt?: Date;
-  progress?: number;
-  message?: string;
-}
-
-export interface InventoryStatus {
-  sku: string;
-  naverStock: number;
-  shopifyStock: number;
-  difference: number;
-  status: 'synced' | 'mismatch' | 'warning' | 'out_of_stock';
-  lastSyncedAt?: Date;
-}
-
-export interface PriceStatus {
-  sku: string;
-  naverPrice: number;
-  shopifyPrice: number;
-  exchangeRate: number;
-  margin: number;
-  difference: number;
-  differencePercent: number;
-  status: 'synced' | 'mismatch' | 'needs_update';
-  lastUpdated?: Date;
+export interface BulkWriteResult {
+  acknowledged: boolean;
+  insertedCount: number;
+  matchedCount: number;
+  modifiedCount: number;
+  deletedCount: number;
+  upsertedCount: number;
 }

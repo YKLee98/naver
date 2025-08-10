@@ -1,21 +1,31 @@
 // packages/backend/src/config/redis.ts
 import Redis from 'ioredis';
-import { logger } from '../utils/logger';
+import { logger } from '../utils/logger.js';
+import { config } from './index.js';
 
-let redisClient: Redis | any = null;
+let redisClient: Redis | MockRedis | null = null;
 
-// MockRedis 클래스 (Redis 연결 실패 시 사용)
-class MockRedis {
+/**
+ * MockRedis class for development/testing when Redis is not available
+ */
+export class MockRedis {
   private store: Map<string, any> = new Map();
   private ttls: Map<string, number> = new Map();
+  private hashes: Map<string, Map<string, string>> = new Map();
+  public status: string = 'ready';
 
   async get(key: string): Promise<string | null> {
     this.checkTTL(key);
     return this.store.get(key) || null;
   }
 
-  async set(key: string, value: string): Promise<'OK'> {
+  async set(key: string, value: string, mode?: string, duration?: number): Promise<'OK'> {
     this.store.set(key, value);
+    
+    if (mode === 'EX' && duration) {
+      this.ttls.set(key, Date.now() + (duration * 1000));
+    }
+    
     return 'OK';
   }
 
@@ -25,16 +35,25 @@ class MockRedis {
     return 'OK';
   }
 
-  async del(key: string): Promise<number> {
-    const existed = this.store.has(key);
-    this.store.delete(key);
-    this.ttls.delete(key);
-    return existed ? 1 : 0;
+  async del(...keys: string[]): Promise<number> {
+    let count = 0;
+    for (const key of keys) {
+      if (this.store.has(key)) {
+        this.store.delete(key);
+        this.ttls.delete(key);
+        count++;
+      }
+    }
+    return count;
   }
 
-  async exists(key: string): Promise<number> {
-    this.checkTTL(key);
-    return this.store.has(key) ? 1 : 0;
+  async exists(...keys: string[]): Promise<number> {
+    let count = 0;
+    for (const key of keys) {
+      this.checkTTL(key);
+      if (this.store.has(key)) count++;
+    }
+    return count;
   }
 
   async expire(key: string, seconds: number): Promise<number> {
@@ -59,24 +78,136 @@ class MockRedis {
   async flushall(): Promise<'OK'> {
     this.store.clear();
     this.ttls.clear();
+    this.hashes.clear();
     return 'OK';
   }
 
+  // Hash operations
+  async hget(key: string, field: string): Promise<string | null> {
+    const hash = this.hashes.get(key);
+    if (!hash) return null;
+    return hash.get(field) || null;
+  }
+
+  async hset(key: string, field: string, value: string): Promise<number> {
+    let hash = this.hashes.get(key);
+    if (!hash) {
+      hash = new Map();
+      this.hashes.set(key, hash);
+    }
+    const existed = hash.has(field);
+    hash.set(field, value);
+    return existed ? 0 : 1;
+  }
+
+  async hgetall(key: string): Promise<Record<string, string>> {
+    const hash = this.hashes.get(key);
+    if (!hash) return {};
+    return Object.fromEntries(hash);
+  }
+
+  async hdel(key: string, ...fields: string[]): Promise<number> {
+    const hash = this.hashes.get(key);
+    if (!hash) return 0;
+    
+    let count = 0;
+    for (const field of fields) {
+      if (hash.delete(field)) count++;
+    }
+    return count;
+  }
+
+  // List operations
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    const list = this.store.get(key);
+    if (!Array.isArray(list)) return [];
+    const end = stop === -1 ? list.length : stop + 1;
+    return list.slice(start, end);
+  }
+
+  async rpush(key: string, ...values: string[]): Promise<number> {
+    let list = this.store.get(key);
+    if (!Array.isArray(list)) {
+      list = [];
+    }
+    list.push(...values);
+    this.store.set(key, list);
+    return list.length;
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    let list = this.store.get(key);
+    if (!Array.isArray(list)) {
+      list = [];
+    }
+    list.unshift(...values);
+    this.store.set(key, list);
+    return list.length;
+  }
+
+  async llen(key: string): Promise<number> {
+    const list = this.store.get(key);
+    if (!Array.isArray(list)) return 0;
+    return list.length;
+  }
+
+  // Set operations
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    let set = this.store.get(key);
+    if (!(set instanceof Set)) {
+      set = new Set();
+    }
+    const prevSize = set.size;
+    members.forEach(member => set.add(member));
+    this.store.set(key, set);
+    return set.size - prevSize;
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    const set = this.store.get(key);
+    if (!(set instanceof Set)) return [];
+    return Array.from(set);
+  }
+
+  async sismember(key: string, member: string): Promise<number> {
+    const set = this.store.get(key);
+    if (!(set instanceof Set)) return 0;
+    return set.has(member) ? 1 : 0;
+  }
+
+  // Utility methods
   private checkTTL(key: string): void {
     const expiry = this.ttls.get(key);
     if (expiry && expiry < Date.now()) {
       this.store.delete(key);
       this.ttls.delete(key);
+      this.hashes.delete(key);
     }
   }
 
-  quit(): Promise<'OK'> {
-    return Promise.resolve('OK');
+  async quit(): Promise<'OK'> {
+    this.status = 'end';
+    return 'OK';
+  }
+
+  async info(): Promise<string> {
+    return `# Mock Redis
+redis_version:mock
+redis_mode:standalone
+used_memory:${this.store.size}
+connected_clients:1`;
+  }
+
+  on(event: string, callback: Function): void {
+    // Mock event handler
+    if (event === 'ready') {
+      setTimeout(() => callback(), 0);
+    }
   }
 }
 
 /**
- * Redis 초기화 - 실제 Redis 연결 시도 후 실패 시 MockRedis 사용
+ * Initialize Redis connection
  */
 export async function initializeRedis(): Promise<Redis | MockRedis> {
   if (redisClient) {
@@ -84,16 +215,25 @@ export async function initializeRedis(): Promise<Redis | MockRedis> {
   }
 
   try {
-    // 실제 Redis 연결 시도
+    // Skip Redis in test environment
+    if (config.isTest) {
+      logger.info('🔧 Using MockRedis for test environment');
+      redisClient = new MockRedis();
+      return redisClient;
+    }
+
+    // Try to connect to actual Redis
+    logger.info('🔌 Connecting to Redis...');
+    
     const client = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      password: process.env.REDIS_PASSWORD,
-      db: parseInt(process.env.REDIS_DB || '0', 10),
+      host: config.redis.host,
+      port: config.redis.port,
+      password: config.redis.password,
+      db: config.redis.db,
       retryStrategy: (times: number) => {
         if (times > 3) {
-          logger.warn('Redis connection failed after 3 attempts');
-          return null; // 연결 포기
+          logger.warn('Redis connection failed after 3 attempts, falling back to MockRedis');
+          return null; // Stop retrying
         }
         const delay = Math.min(times * 50, 2000);
         return delay;
@@ -104,21 +244,25 @@ export async function initializeRedis(): Promise<Redis | MockRedis> {
       lazyConnect: false,
     });
 
-    // 연결 이벤트 핸들러
+    // Set up event handlers
     client.on('connect', () => {
-      logger.info('Redis client connected');
+      logger.info('✅ Redis client connected');
     });
 
     client.on('ready', () => {
-      logger.info('Redis client ready');
+      logger.info('✅ Redis client ready');
     });
 
     client.on('error', (err) => {
-      logger.error('Redis client error:', err);
+      logger.error('❌ Redis client error:', err);
     });
 
-    // 연결 테스트
-    await new Promise((resolve, reject) => {
+    client.on('end', () => {
+      logger.info('Redis client disconnected');
+    });
+
+    // Test the connection
+    await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Redis connection timeout'));
       }, 5000);
@@ -128,63 +272,68 @@ export async function initializeRedis(): Promise<Redis | MockRedis> {
         if (err) {
           reject(err);
         } else {
-          resolve(result);
+          resolve();
         }
       });
     });
 
     redisClient = client;
-    logger.info('Redis initialized successfully');
+    logger.info('✅ Redis initialized successfully');
     return client;
 
   } catch (error) {
-    logger.warn('Failed to connect to Redis, using in-memory cache instead:', error);
+    logger.warn('⚠️  Failed to connect to Redis, using MockRedis instead:', error);
     
-    // MockRedis 사용
-    const mockClient = new MockRedis();
-    redisClient = mockClient;
-    logger.info('Using in-memory cache (MockRedis) for development');
-    return mockClient;
+    // Use MockRedis as fallback
+    redisClient = new MockRedis();
+    logger.info('✅ MockRedis initialized for development');
+    return redisClient;
   }
 }
 
 /**
- * Redis 클라이언트 가져오기
+ * Get Redis client instance
  */
 export function getRedisClient(): Redis | MockRedis {
   if (!redisClient) {
     logger.warn('Redis not initialized, creating mock client');
-    const mockClient = new MockRedis();
-    redisClient = mockClient;
-    return mockClient;
+    redisClient = new MockRedis();
   }
   return redisClient;
 }
 
 /**
- * Redis 연결 종료
+ * Close Redis connection
  */
 export async function closeRedis(): Promise<void> {
   if (redisClient) {
-    if (redisClient instanceof Redis) {
-      await redisClient.quit();
-    }
+    await redisClient.quit();
     redisClient = null;
     logger.info('Redis connection closed');
   }
 }
 
 /**
- * Redis 연결 상태 확인
+ * Check if Redis is connected
  */
 export function isRedisConnected(): boolean {
   if (!redisClient) {
     return false;
   }
-  if (redisClient instanceof Redis) {
+  
+  if (redisClient instanceof MockRedis) {
     return redisClient.status === 'ready';
   }
-  return true; // MockRedis는 항상 연결됨
+  
+  return (redisClient as Redis).status === 'ready';
+}
+
+/**
+ * Get Redis info
+ */
+export async function getRedisInfo(): Promise<string> {
+  const client = getRedisClient();
+  return await client.info();
 }
 
 export default {
@@ -192,4 +341,6 @@ export default {
   getRedisClient,
   closeRedis,
   isRedisConnected,
+  getRedisInfo,
+  MockRedis,
 };

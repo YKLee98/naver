@@ -1,219 +1,714 @@
-// ===== 1. packages/backend/src/models/ProductMapping.ts =====
+// packages/backend/src/models/ProductMapping.ts
 import { Schema, model, Document } from 'mongoose';
+import { BaseModelHelper, IBaseDocument } from './base/BaseModel.js';
 
-export interface IProductMapping extends Document {
+// Product status enum
+export enum ProductStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+  DISCONTINUED = 'discontinued',
+  OUT_OF_STOCK = 'out_of_stock',
+  PENDING = 'pending'
+}
+
+// Sync status enum
+export enum ProductSyncStatus {
+  SYNCED = 'synced',
+  PENDING = 'pending',
+  ERROR = 'error',
+  SKIPPED = 'skipped'
+}
+
+// Platform enum
+export enum Platform {
+  NAVER = 'naver',
+  SHOPIFY = 'shopify'
+}
+
+// Price tier enum
+export enum PriceTier {
+  BUDGET = 'budget',
+  STANDARD = 'standard',
+  PREMIUM = 'premium',
+  LUXURY = 'luxury'
+}
+
+// Product mapping interface
+export interface IProductMapping extends IBaseDocument {
+  // Core identifiers
   sku: string;
+  barcode?: string;
   naverProductId: string;
   shopifyProductId: string;
   shopifyVariantId: string;
-  shopifyInventoryItemId?: string;  // Optional로 변경
-  shopifyLocationId?: string;  // Optional로 변경
+  shopifyInventoryItemId?: string;
+  shopifyLocationId?: string;
+  
+  // Product information
   productName: string;
-  vendor: string;
+  productNameKo?: string;
+  productNameEn?: string;
+  description?: string;
+  shortDescription?: string;
+  
+  // Categorization
+  category: string;
+  subcategory?: string;
+  tags: string[];
+  vendor?: string;
+  brand?: string;
+  collection?: string;
+  
+  // Status and sync
+  status: ProductStatus;
   isActive: boolean;
-  status: 'ACTIVE' | 'INACTIVE' | 'ERROR' | 'PENDING';  // PENDING 추가
-  lastSyncedAt?: Date;
-  syncStatus: 'synced' | 'pending' | 'error' | 'syncing';  // syncing 추가
-  syncError?: string;
-  priceMargin: number;
-  retryCount?: number;  // 추가
-  lastRetryAt?: Date;  // 추가
-  metadata: {
-    naverCategory?: string;
-    shopifyTags?: string[];
-    customFields?: Record<string, any>;
-    shopifyTitle?: string;
-    naverStatus?: string;
-    initialPrices?: {
-      naver: number;
-      shopify: number;
-    };
-    initialQuantities?: {
-      naver: number;
-      shopify: number;
-    };
-    autoSearchUsed?: boolean;  // 추가
-    searchConfidence?: number;  // 추가
-    searchResults?: any;  // 추가
-    createdBy?: string;  // 추가
+  syncStatus: {
+    inventory: ProductSyncStatus;
+    price: ProductSyncStatus;
+    product: ProductSyncStatus;
+    lastSyncAt?: Date;
+    lastError?: string;
   };
-  createdAt: Date;
-  updatedAt: Date;
+  
+  // Inventory
+  inventory: {
+    naver: {
+      available: number;
+      reserved: number;
+      safety: number;
+      lastUpdated?: Date;
+    };
+    shopify: {
+      available: number;
+      incoming: number;
+      committed: number;
+      lastUpdated?: Date;
+    };
+    sync: {
+      enabled: boolean;
+      bidirectional: boolean;
+      priorityPlatform: Platform;
+    };
+  };
+  
+  // Pricing
+  pricing: {
+    naver: {
+      regular: number;
+      sale?: number;
+      cost?: number;
+      margin?: number;
+      currency: string;
+      lastUpdated?: Date;
+    };
+    shopify: {
+      regular: number;
+      sale?: number;
+      compareAt?: number;
+      cost?: number;
+      margin?: number;
+      currency: string;
+      lastUpdated?: Date;
+    };
+    tier: PriceTier;
+    autoSync: boolean;
+    rules?: {
+      marginPercent?: number;
+      roundingStrategy?: 'up' | 'down' | 'nearest';
+      minPrice?: number;
+      maxPrice?: number;
+    };
+  };
+  
+  // Product details
+  details: {
+    weight?: number;
+    weightUnit?: string;
+    dimensions?: {
+      length?: number;
+      width?: number;
+      height?: number;
+      unit?: string;
+    };
+    requiresShipping: boolean;
+    taxable: boolean;
+    harmonizedCode?: string;
+    countryOfOrigin?: string;
+  };
+  
+  // Media
+  media: {
+    images: Array<{
+      url: string;
+      alt?: string;
+      position: number;
+      platform: Platform;
+    }>;
+    videos?: Array<{
+      url: string;
+      title?: string;
+      platform: Platform;
+    }>;
+  };
+  
+  // SEO
+  seo: {
+    metaTitle?: string;
+    metaDescription?: string;
+    keywords?: string[];
+    canonicalUrl?: string;
+  };
+  
+  // Analytics
+  analytics: {
+    views: number;
+    clicks: number;
+    conversions: number;
+    revenue: number;
+    lastViewedAt?: Date;
+    popularityScore?: number;
+  };
+  
+  // Metadata
+  metadata: {
+    createdBy?: string;
+    lastModifiedBy?: string;
+    importBatch?: string;
+    source?: string;
+    customFields?: Record<string, any>;
+  };
+  
+  // Instance methods
+  syncInventory(): Promise<void>;
+  syncPricing(): Promise<void>;
+  calculateMargin(): number;
+  updateAnalytics(event: string, value?: number): Promise<void>;
+  validateMapping(): boolean;
+  getDiscrepancies(): any;
 }
 
-const ProductMappingSchema = new Schema<IProductMapping>(
+// Product mapping schema
+const productMappingSchema = new Schema<IProductMapping>(
   {
+    // Core identifiers
     sku: {
       type: String,
-      required: true,
+      required: [true, 'SKU is required'],
       unique: true,
-      index: true,
-      trim: true,
       uppercase: true,
+      trim: true,
+      index: true
+    },
+    barcode: {
+      type: String,
+      sparse: true,
+      index: true
     },
     naverProductId: {
       type: String,
-      required: true,
-      index: true,
+      required: [true, 'Naver Product ID is required'],
+      index: true
     },
     shopifyProductId: {
       type: String,
-      required: true,
-      index: true,
+      required: [true, 'Shopify Product ID is required'],
+      index: true
     },
     shopifyVariantId: {
       type: String,
-      required: true,
-      unique: true,
-      index: true,
+      required: [true, 'Shopify Variant ID is required'],
+      index: true
     },
-    shopifyInventoryItemId: {
-      type: String,
-      required: false,  // 변경: true → false
-      index: true,
-      default: null,
-    },
-    shopifyLocationId: {
-      type: String,
-      required: false,  // 변경: true → false
-      default: null,
-    },
+    shopifyInventoryItemId: String,
+    shopifyLocationId: String,
+    
+    // Product information
     productName: {
       type: String,
-      required: true,
-      index: true,
+      required: [true, 'Product name is required'],
+      trim: true,
+      index: 'text' // Enable text search
     },
+    productNameKo: {
+      type: String,
+      trim: true
+    },
+    productNameEn: {
+      type: String,
+      trim: true
+    },
+    description: {
+      type: String,
+      maxlength: 5000
+    },
+    shortDescription: {
+      type: String,
+      maxlength: 500
+    },
+    
+    // Categorization
+    category: {
+      type: String,
+      required: [true, 'Category is required'],
+      index: true
+    },
+    subcategory: String,
+    tags: [{
+      type: String,
+      lowercase: true,
+      trim: true
+    }],
     vendor: {
       type: String,
-      required: true,
-      default: 'album',
-      index: true,
+      index: true
+    },
+    brand: {
+      type: String,
+      index: true
+    },
+    collection: String,
+    
+    // Status and sync
+    status: {
+      type: String,
+      enum: Object.values(ProductStatus),
+      default: ProductStatus.PENDING,
+      index: true
     },
     isActive: {
       type: Boolean,
       default: true,
-      index: true,
-    },
-    status: {
-      type: String,
-      enum: ['ACTIVE', 'INACTIVE', 'ERROR', 'PENDING'],
-      default: 'PENDING',  // 변경: 'ACTIVE' → 'PENDING'
-      index: true,
-    },
-    lastSyncedAt: {
-      type: Date,
-      index: true,
+      index: true
     },
     syncStatus: {
-      type: String,
-      enum: ['synced', 'pending', 'error', 'syncing'],
-      default: 'pending',
-      index: true,
+      inventory: {
+        type: String,
+        enum: Object.values(ProductSyncStatus),
+        default: ProductSyncStatus.PENDING
+      },
+      price: {
+        type: String,
+        enum: Object.values(ProductSyncStatus),
+        default: ProductSyncStatus.PENDING
+      },
+      product: {
+        type: String,
+        enum: Object.values(ProductSyncStatus),
+        default: ProductSyncStatus.PENDING
+      },
+      lastSyncAt: Date,
+      lastError: String
     },
-    syncError: String,
-    priceMargin: {
-      type: Number,
-      default: 1.15,
-      min: 1,
-      max: 2,
+    
+    // Inventory
+    inventory: {
+      naver: {
+        available: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        reserved: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        safety: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        lastUpdated: Date
+      },
+      shopify: {
+        available: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        incoming: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        committed: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        lastUpdated: Date
+      },
+      sync: {
+        enabled: {
+          type: Boolean,
+          default: true
+        },
+        bidirectional: {
+          type: Boolean,
+          default: false
+        },
+        priorityPlatform: {
+          type: String,
+          enum: Object.values(Platform),
+          default: Platform.NAVER
+        }
+      }
     },
-    retryCount: {
-      type: Number,
-      default: 0,
+    
+    // Pricing
+    pricing: {
+      naver: {
+        regular: {
+          type: Number,
+          required: true,
+          min: 0
+        },
+        sale: {
+          type: Number,
+          min: 0
+        },
+        cost: {
+          type: Number,
+          min: 0
+        },
+        margin: Number,
+        currency: {
+          type: String,
+          default: 'KRW'
+        },
+        lastUpdated: Date
+      },
+      shopify: {
+        regular: {
+          type: Number,
+          required: true,
+          min: 0
+        },
+        sale: {
+          type: Number,
+          min: 0
+        },
+        compareAt: {
+          type: Number,
+          min: 0
+        },
+        cost: {
+          type: Number,
+          min: 0
+        },
+        margin: Number,
+        currency: {
+          type: String,
+          default: 'USD'
+        },
+        lastUpdated: Date
+      },
+      tier: {
+        type: String,
+        enum: Object.values(PriceTier),
+        default: PriceTier.STANDARD
+      },
+      autoSync: {
+        type: Boolean,
+        default: true
+      },
+      rules: {
+        marginPercent: {
+          type: Number,
+          min: 0,
+          max: 100
+        },
+        roundingStrategy: {
+          type: String,
+          enum: ['up', 'down', 'nearest'],
+          default: 'nearest'
+        },
+        minPrice: {
+          type: Number,
+          min: 0
+        },
+        maxPrice: {
+          type: Number,
+          min: 0
+        }
+      }
     },
-    lastRetryAt: Date,
+    
+    // Product details
+    details: {
+      weight: Number,
+      weightUnit: {
+        type: String,
+        default: 'g'
+      },
+      dimensions: {
+        length: Number,
+        width: Number,
+        height: Number,
+        unit: {
+          type: String,
+          default: 'cm'
+        }
+      },
+      requiresShipping: {
+        type: Boolean,
+        default: true
+      },
+      taxable: {
+        type: Boolean,
+        default: true
+      },
+      harmonizedCode: String,
+      countryOfOrigin: String
+    },
+    
+    // Media
+    media: {
+      images: [{
+        url: {
+          type: String,
+          required: true
+        },
+        alt: String,
+        position: {
+          type: Number,
+          default: 0
+        },
+        platform: {
+          type: String,
+          enum: Object.values(Platform)
+        }
+      }],
+      videos: [{
+        url: {
+          type: String,
+          required: true
+        },
+        title: String,
+        platform: {
+          type: String,
+          enum: Object.values(Platform)
+        }
+      }]
+    },
+    
+    // SEO
+    seo: {
+      metaTitle: {
+        type: String,
+        maxlength: 70
+      },
+      metaDescription: {
+        type: String,
+        maxlength: 160
+      },
+      keywords: [{
+        type: String,
+        lowercase: true
+      }],
+      canonicalUrl: String
+    },
+    
+    // Analytics
+    analytics: {
+      views: {
+        type: Number,
+        default: 0,
+        min: 0
+      },
+      clicks: {
+        type: Number,
+        default: 0,
+        min: 0
+      },
+      conversions: {
+        type: Number,
+        default: 0,
+        min: 0
+      },
+      revenue: {
+        type: Number,
+        default: 0,
+        min: 0
+      },
+      lastViewedAt: Date,
+      popularityScore: {
+        type: Number,
+        default: 0,
+        index: true
+      }
+    },
+    
+    // Metadata
     metadata: {
-      naverCategory: String,
-      shopifyTags: [String],
+      createdBy: String,
+      lastModifiedBy: String,
+      importBatch: String,
+      source: String,
       customFields: {
         type: Map,
-        of: Schema.Types.Mixed,
-      },
-      shopifyTitle: String,
-      naverStatus: String,
-      initialPrices: {
-        naver: Number,
-        shopify: Number,
-      },
-      initialQuantities: {
-        naver: Number,
-        shopify: Number,
-      },
-      autoSearchUsed: Boolean,
-      searchConfidence: Number,
-      searchResults: Schema.Types.Mixed,
-      createdBy: String,
-    },
+        of: Schema.Types.Mixed
+      }
+    }
   },
   {
-    timestamps: true,
-    collection: 'product_mappings',
-    versionKey: '__v',
+    collection: 'product_mappings'
   }
 );
 
-// 복합 인덱스
-ProductMappingSchema.index({ vendor: 1, isActive: 1, syncStatus: 1 });
-ProductMappingSchema.index({ syncStatus: 1, lastSyncedAt: 1 });
-ProductMappingSchema.index({ status: 1, vendor: 1 });
-ProductMappingSchema.index({ status: 'PENDING', retryCount: 1, lastRetryAt: 1 });
+// Initialize base model features
+BaseModelHelper.initializeSchema(productMappingSchema);
 
-// TTL 인덱스 제거 (중요한 데이터 보호)
-// 삭제됨: TTL 인덱스
-
-// 가상 필드
-ProductMappingSchema.virtual('syncNeeded').get(function() {
-  if (!this.lastSyncedAt) return true;
-  const hoursSinceSync = (Date.now() - this.lastSyncedAt.getTime()) / (1000 * 60 * 60);
-  return hoursSinceSync > 1;
+// Additional indexes
+productMappingSchema.index({ category: 1, status: 1 });
+productMappingSchema.index({ vendor: 1, isActive: 1 });
+productMappingSchema.index({ 'pricing.tier': 1, status: 1 });
+productMappingSchema.index({ 'analytics.popularityScore': -1 });
+productMappingSchema.index({ 'syncStatus.lastSyncAt': -1 });
+productMappingSchema.index({ 
+  'inventory.naver.available': 1, 
+  'inventory.shopify.available': 1 
 });
 
-// 메서드
-ProductMappingSchema.methods.markSynced = function() {
-  this.lastSyncedAt = new Date();
-  this.syncStatus = 'synced';
-  this.syncError = undefined;
-  return this.save();
+// Text search index
+productMappingSchema.index({
+  productName: 'text',
+  productNameKo: 'text',
+  productNameEn: 'text',
+  description: 'text',
+  tags: 'text'
+});
+
+// Instance methods
+productMappingSchema.methods.syncInventory = async function(): Promise<void> {
+  // Implementation would go here
+  this.syncStatus.inventory = ProductSyncStatus.SYNCED;
+  this.syncStatus.lastSyncAt = new Date();
+  await this.save();
 };
 
-ProductMappingSchema.methods.markError = function(error: string) {
-  this.syncStatus = 'error';
-  this.syncError = error;
-  this.status = 'ERROR';
-  return this.save();
+productMappingSchema.methods.syncPricing = async function(): Promise<void> {
+  // Implementation would go here
+  this.syncStatus.price = ProductSyncStatus.SYNCED;
+  this.syncStatus.lastSyncAt = new Date();
+  await this.save();
 };
 
-ProductMappingSchema.methods.markPending = function() {
-  this.status = 'PENDING';
-  this.isActive = false;
-  return this.save();
+productMappingSchema.methods.calculateMargin = function(): number {
+  const cost = this.pricing.shopify.cost || 0;
+  const price = this.pricing.shopify.sale || this.pricing.shopify.regular;
+  
+  if (cost === 0 || price === 0) return 0;
+  
+  return ((price - cost) / price) * 100;
 };
 
-// 정적 메서드
-ProductMappingSchema.statics.findActiveBySku = function(sku: string) {
-  return this.findOne({ sku: sku.toUpperCase(), isActive: true });
-};
-
-ProductMappingSchema.statics.findByVendor = function(vendor: string, options: any = {}) {
-  const query: any = { vendor, isActive: true };
-  if (options.syncStatus) {
-    query.syncStatus = options.syncStatus;
+productMappingSchema.methods.updateAnalytics = async function(
+  event: string,
+  value: number = 1
+): Promise<void> {
+  switch (event) {
+    case 'view':
+      this.analytics.views += value;
+      this.analytics.lastViewedAt = new Date();
+      break;
+    case 'click':
+      this.analytics.clicks += value;
+      break;
+    case 'conversion':
+      this.analytics.conversions += value;
+      break;
+    case 'revenue':
+      this.analytics.revenue += value;
+      break;
   }
-  return this.find(query);
+  
+  // Update popularity score
+  this.analytics.popularityScore = 
+    (this.analytics.views * 0.1) +
+    (this.analytics.clicks * 0.3) +
+    (this.analytics.conversions * 0.6);
+  
+  await this.save();
 };
 
-ProductMappingSchema.statics.findPendingMappings = function(limit = 10) {
+productMappingSchema.methods.validateMapping = function(): boolean {
+  // Check required fields
+  if (!this.sku || !this.naverProductId || !this.shopifyProductId) {
+    return false;
+  }
+  
+  // Check pricing consistency
+  if (this.pricing.naver.regular <= 0 || this.pricing.shopify.regular <= 0) {
+    return false;
+  }
+  
+  return true;
+};
+
+productMappingSchema.methods.getDiscrepancies = function(): any {
+  const discrepancies: any = {};
+  
+  // Check inventory discrepancies
+  const inventoryDiff = Math.abs(
+    this.inventory.naver.available - this.inventory.shopify.available
+  );
+  
+  if (inventoryDiff > 0) {
+    discrepancies.inventory = {
+      naver: this.inventory.naver.available,
+      shopify: this.inventory.shopify.available,
+      difference: inventoryDiff
+    };
+  }
+  
+  // Check price discrepancies (considering exchange rate)
+  // This would need actual exchange rate calculation
+  
+  return discrepancies;
+};
+
+// Static methods
+productMappingSchema.statics.findActiveMappings = async function() {
   return this.find({
-    status: 'PENDING',
-    retryCount: { $lt: 5 },
-    $or: [
-      { lastRetryAt: { $lt: new Date(Date.now() - 30 * 60 * 1000) } },
-      { lastRetryAt: { $exists: false } }
-    ]
-  }).limit(limit);
+    isActive: true,
+    status: ProductStatus.ACTIVE,
+    _deleted: { $ne: true }
+  });
 };
 
-export const ProductMapping = model<IProductMapping>(
-  'ProductMapping',
-  ProductMappingSchema
-);
+productMappingSchema.statics.findByPlatformId = async function(
+  platform: Platform,
+  id: string
+) {
+  const query: any = { _deleted: { $ne: true } };
+  
+  if (platform === Platform.NAVER) {
+    query.naverProductId = id;
+  } else if (platform === Platform.SHOPIFY) {
+    query.shopifyProductId = id;
+  }
+  
+  return this.findOne(query);
+};
+
+productMappingSchema.statics.findBySku = async function(sku: string) {
+  return this.findOne({
+    sku: sku.toUpperCase(),
+    _deleted: { $ne: true }
+  });
+};
+
+productMappingSchema.statics.findOutOfStock = async function() {
+  return this.find({
+    $or: [
+      { 'inventory.naver.available': 0 },
+      { 'inventory.shopify.available': 0 }
+    ],
+    isActive: true,
+    _deleted: { $ne: true }
+  });
+};
+
+// Create and export model
+export const ProductMapping = model<IProductMapping>('ProductMapping', productMappingSchema);

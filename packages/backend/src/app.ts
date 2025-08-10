@@ -4,29 +4,28 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
-import cookieParser from 'cookie-parser';
-import { rateLimit } from 'express-rate-limit';
-import { ServiceContainer } from './services/ServiceContainer.js';
-import { setupApiRoutes } from './routes/api.routes.js';
-import { setupHealthRoutes } from './routes/health.routes.js';
-import { setupAuthRoutes } from './routes/auth.routes.js';
-import { setupWebhookRoutes } from './routes/webhook.routes.js';
-import { setupSettingsRoutes } from './routes/settings.routes.js';
-import { setupDashboardRoutes } from './routes/dashboard.routes.js';
-import { errorHandler } from './middlewares/error.middleware.js';
-import { requestLogger } from './middlewares/logger.middleware.js';
-import { logger } from './utils/logger.js';
+import rateLimit from 'express-rate-limit';
+import mongoSanitize from 'express-mongo-sanitize';
+import hpp from 'hpp';
+import { createServer, Server as HttpServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import swaggerUi from 'swagger-ui-express';
 import { config } from './config/index.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { logger, stream } from './utils/logger.js';
+import { ServiceContainer } from './services/ServiceContainer.js';
+import { errorHandler } from './middlewares/errorHandler.js';
+import { notFoundHandler } from './middlewares/notFoundHandler.js';
+import { requestLogger } from './middlewares/requestLogger.js';
+import { setupRoutes } from './routes/index.js';
+import { setupSocketHandlers } from './websocket/index.js';
+import { swaggerSpec } from './config/swagger.js';
 
 export class App {
   private app: Application;
+  private httpServer?: HttpServer;
+  private io?: SocketIOServer;
   private services: ServiceContainer;
-  private io?: any;
+  private isInitialized = false;
 
   constructor(services: ServiceContainer) {
     this.app = express();
@@ -34,74 +33,50 @@ export class App {
   }
 
   async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      logger.warn('App is already initialized');
+      return;
+    }
+
     try {
-      // Basic middleware
-      this.setupBasicMiddleware();
-      
-      // Security middleware
+      // Setup middleware
       this.setupSecurityMiddleware();
+      this.setupCommonMiddleware();
+      this.setupLoggingMiddleware();
       
-      // Routes
+      // Setup routes
       await this.setupRoutes();
       
-      // Error handling
+      // Setup WebSocket
+      this.setupWebSocket();
+      
+      // Setup error handling
       this.setupErrorHandling();
       
-      logger.info('✅ Express application initialized successfully');
+      this.isInitialized = true;
+      logger.info('✅ App initialized successfully');
     } catch (error) {
-      logger.error('Failed to initialize Express application:', error);
+      logger.error('Failed to initialize app:', error);
       throw error;
     }
-  }
-
-  private setupBasicMiddleware(): void {
-    // Body parsing
-    this.app.use(express.json({ limit: '50mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-    
-    // Cookie parsing
-    this.app.use(cookieParser());
-    
-    // Compression
-    this.app.use(compression());
-    
-    // Request logging
-    if (process.env.NODE_ENV !== 'test') {
-      this.app.use(morgan('combined', {
-        stream: {
-          write: (message: string) => logger.http(message.trim())
-        }
-      }));
-    }
-    
-    // Custom request logger
-    this.app.use(requestLogger);
-    
-    // Static files (if needed)
-    this.app.use('/static', express.static(path.join(__dirname, '../public')));
   }
 
   private setupSecurityMiddleware(): void {
     // Helmet for security headers
     this.app.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-          imgSrc: ["'self'", "data:", "https:"],
-        },
-      },
+      contentSecurityPolicy: config.isProduction ? undefined : false,
       crossOriginEmbedderPolicy: false,
     }));
-    
+
     // CORS configuration
-    const corsOptions = {
-      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-        const allowedOrigins = config.misc?.corsOrigin?.split(',') || ['http://localhost:5173'];
-        
-        // Allow requests with no origin (like mobile apps or Postman)
+    this.app.use(cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, Postman, etc)
         if (!origin) return callback(null, true);
+        
+        const allowedOrigins = Array.isArray(config.misc.corsOrigin) 
+          ? config.misc.corsOrigin 
+          : [config.misc.corsOrigin];
         
         if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
           callback(null, true);
@@ -110,241 +85,224 @@ export class App {
         }
       },
       credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
       exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page'],
-    };
-    
-    this.app.use(cors(corsOptions));
-    
+    }));
+
     // Rate limiting
     const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
+      windowMs: config.api.rateLimit.windowMs,
+      max: config.api.rateLimit.maxRequests,
       message: 'Too many requests from this IP, please try again later.',
       standardHeaders: true,
       legacyHeaders: false,
+      handler: (req, res) => {
+        logger.warn(`Rate limit exceeded for IP: ${req.ip}`);
+        res.status(429).json({
+          error: 'Too many requests',
+          message: 'Rate limit exceeded. Please try again later.',
+          retryAfter: Math.ceil(config.api.rateLimit.windowMs / 1000)
+        });
+      }
     });
     
-    // Apply rate limiting to API routes
     this.app.use('/api/', limiter);
-    
-    // Stricter rate limiting for auth routes
-    const authLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 5,
-      message: 'Too many authentication attempts, please try again later.',
+
+    // Prevent MongoDB injection attacks
+    this.app.use(mongoSanitize({
+      replaceWith: '_',
+      onSanitize: ({ req, key }) => {
+        logger.warn(`Sanitized MongoDB injection attempt in ${key} from IP: ${req.ip}`);
+      }
+    }));
+
+    // Prevent HTTP Parameter Pollution
+    this.app.use(hpp({
+      whitelist: ['sort', 'page', 'limit', 'filter']
+    }));
+
+    // Custom security headers
+    this.app.use((req, res, next) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'DENY');
+      res.setHeader('X-XSS-Protection', '1; mode=block');
+      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+      
+      if (config.isProduction) {
+        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      }
+      
+      next();
     });
+  }
+
+  private setupCommonMiddleware(): void {
+    // Body parsing
+    this.app.use(express.json({
+      limit: '10mb',
+      verify: (req: any, res, buf) => {
+        req.rawBody = buf.toString('utf-8');
+      }
+    }));
     
-    this.app.use('/auth/login', authLimiter);
-    this.app.use('/auth/register', authLimiter);
+    this.app.use(express.urlencoded({
+      extended: true,
+      limit: '10mb'
+    }));
+
+    // Compression
+    this.app.use(compression({
+      filter: (req, res) => {
+        if (req.headers['x-no-compression']) {
+          return false;
+        }
+        return compression.filter(req, res);
+      },
+      level: 6
+    }));
+
+    // Request ID
+    this.app.use((req: Request, res: Response, next: NextFunction) => {
+      req.id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      res.setHeader('X-Request-Id', req.id);
+      next();
+    });
+
+    // Trust proxy
+    if (config.isProduction) {
+      this.app.set('trust proxy', 1);
+    }
+  }
+
+  private setupLoggingMiddleware(): void {
+    // Morgan HTTP logger
+    const morganFormat = config.isDevelopment 
+      ? 'dev' 
+      : ':remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" :response-time ms';
+    
+    this.app.use(morgan(morganFormat, {
+      stream,
+      skip: (req, res) => {
+        // Skip health check logs
+        return req.url === '/health' && res.statusCode === 200;
+      }
+    }));
+
+    // Custom request logger
+    this.app.use(requestLogger);
   }
 
   private async setupRoutes(): Promise<void> {
-    // Health check routes (no auth required)
-    const healthRoutes = setupHealthRoutes();
-    this.app.use('/health', healthRoutes);
-    logger.info('✅ Health routes registered at /health');
-    
-    // Auth routes
-    const authRoutes = setupAuthRoutes(this.services.authController);
-    this.app.use('/auth', authRoutes);
-    logger.info('✅ Auth routes registered at /auth');
-    
-    // Webhook routes (no auth but with signature validation)
-    const webhookRoutes = setupWebhookRoutes(this.services);
-    this.app.use('/webhooks', webhookRoutes);
-    logger.info('✅ Webhook routes registered at /webhooks');
-    
-    // API routes (with auth)
-    const apiRoutes = setupApiRoutes(this.services);
-    this.app.use('/api/v1', apiRoutes);
-    logger.info('✅ API routes registered at /api/v1');
-    
-    // Dashboard routes (optional)
-    try {
-      const dashboardRoutes = setupDashboardRoutes(this.services);
-      this.app.use('/dashboard', dashboardRoutes);
-      logger.info('✅ Dashboard routes registered at /dashboard');
-    } catch (error) {
-      logger.warn('Dashboard routes not available:', error);
-    }
-    
-    // Settings routes (optional)
-    try {
-      const settingsRoutes = setupSettingsRoutes(this.services);
-      this.app.use('/settings', settingsRoutes);
-      logger.info('✅ Settings routes registered at /settings');
-    } catch (error) {
-      logger.warn('Settings routes not available:', error);
-    }
-    
-    // Root route
-    this.app.get('/', (req, res) => {
-      res.json({
-        name: 'Hallyu ERP Backend',
-        version: process.env.npm_package_version || '1.0.0',
-        status: 'running',
-        timestamp: new Date().toISOString(),
-        endpoints: {
-          health: '/health',
-          api: '/api/v1',
-          auth: '/auth',
-          webhooks: '/webhooks',
-          dashboard: '/dashboard',
-          settings: '/settings'
-        }
-      });
+    // API documentation
+    this.app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+      customCss: '.swagger-ui .topbar { display: none }',
+      customSiteTitle: 'Hallyu Fomaholic API Documentation'
+    }));
+
+    // Health check
+    this.app.get('/health', async (req, res) => {
+      try {
+        const health = await this.services.getHealthStatus();
+        res.status(health.status === 'healthy' ? 200 : 503).json(health);
+      } catch (error) {
+        res.status(503).json({
+          status: 'unhealthy',
+          error: (error as Error).message
+        });
+      }
     });
+
+    // Metrics endpoint
+    this.app.get('/metrics', async (req, res) => {
+      try {
+        const metrics = await this.services.getMetrics();
+        res.json(metrics);
+      } catch (error) {
+        res.status(500).json({
+          error: 'Failed to get metrics'
+        });
+      }
+    });
+
+    // API routes
+    setupRoutes(this.app, this.services);
+
+    // Static files (if needed)
+    if (config.isDevelopment) {
+      this.app.use('/uploads', express.static('uploads'));
+    }
+  }
+
+  private setupWebSocket(): void {
+    this.httpServer = createServer(this.app);
+    
+    this.io = new SocketIOServer(this.httpServer, {
+      cors: {
+        origin: config.misc.corsOrigin,
+        credentials: true
+      },
+      transports: ['websocket', 'polling'],
+      pingTimeout: 60000,
+      pingInterval: 25000
+    });
+
+    // Setup WebSocket handlers
+    setupSocketHandlers(this.io, this.services);
+
+    // Attach to services that need WebSocket
+    this.services.setWebSocket(this.io);
+
+    logger.info('✅ WebSocket server initialized');
   }
 
   private setupErrorHandling(): void {
     // 404 handler
-    this.app.use((req, res, next) => {
-      res.status(404).json({
-        success: false,
-        error: 'Route not found',
-        path: req.originalUrl,
-        method: req.method
-      });
-    });
-    
+    this.app.use(notFoundHandler);
+
     // Global error handler
     this.app.use(errorHandler);
-    
-    // Unhandled rejection handler
-    this.app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-      logger.error('Unhandled error:', err);
-      
-      const isDev = process.env.NODE_ENV === 'development';
-      
-      res.status(err.status || 500).json({
-        success: false,
-        error: isDev ? err.message : 'Internal server error',
-        ...(isDev && { stack: err.stack }),
-        ...(isDev && { details: err }),
-      });
-    });
-  }
-
-  async initializeWebSocket(server: any): Promise<void> {
-    try {
-      const { Server } = await import('socket.io');
-      
-      this.io = new Server(server, {
-        cors: {
-          origin: config.misc?.corsOrigin?.split(',') || ['http://localhost:5173'],
-          methods: ['GET', 'POST'],
-          credentials: true
-        },
-        transports: ['websocket', 'polling'],
-        pingTimeout: 60000,
-        pingInterval: 25000
-      });
-
-      // Attach WebSocket to service container
-      this.services.setWebSocket(this.io);
-
-      // WebSocket middleware for authentication
-      this.io.use(async (socket: any, next: any) => {
-        try {
-          const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
-          
-          if (!token) {
-            return next(new Error('Authentication required'));
-          }
-          
-          // TODO: Verify JWT token and attach user to socket
-          // const user = await verifyToken(token);
-          // socket.userId = user.id;
-          
-          next();
-        } catch (error) {
-          next(new Error('Authentication failed'));
-        }
-      });
-
-      // Connection handler
-      this.io.on('connection', (socket: any) => {
-        logger.info(`WebSocket client connected: ${socket.id}`);
-        
-        // Join user-specific room
-        if (socket.userId) {
-          socket.join(`user:${socket.userId}`);
-        }
-
-        // Handle disconnection
-        socket.on('disconnect', (reason: string) => {
-          logger.info(`WebSocket client disconnected: ${socket.id}, reason: ${reason}`);
-        });
-
-        // Subscribe to channels
-        socket.on('subscribe', (channels: string | string[]) => {
-          const channelList = Array.isArray(channels) ? channels : [channels];
-          channelList.forEach(channel => {
-            socket.join(channel);
-            logger.debug(`Client ${socket.id} subscribed to ${channel}`);
-          });
-        });
-
-        // Unsubscribe from channels
-        socket.on('unsubscribe', (channels: string | string[]) => {
-          const channelList = Array.isArray(channels) ? channels : [channels];
-          channelList.forEach(channel => {
-            socket.leave(channel);
-            logger.debug(`Client ${socket.id} unsubscribed from ${channel}`);
-          });
-        });
-
-        // Handle ping/pong for keep-alive
-        socket.on('ping', () => {
-          socket.emit('pong', { timestamp: Date.now() });
-        });
-      });
-
-      // Setup WebSocket event handlers
-      await this.setupWebSocketHandlers();
-
-      logger.info('✅ WebSocket server initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize WebSocket:', error);
-      // Don't throw - WebSocket is optional
-    }
-  }
-
-  private async setupWebSocketHandlers(): Promise<void> {
-    if (!this.io) return;
-
-    try {
-      // Import WebSocket event handlers
-      const { registerInventoryEvents } = await import('./websocket/events/inventory.events.js');
-      const { registerSyncEvents } = await import('./websocket/events/sync.events.js');
-      const { registerPriceEvents } = await import('./websocket/events/price.events.js');
-      const { registerNotificationEvents } = await import('./websocket/events/notification.events.js');
-
-      this.io.on('connection', (socket: any) => {
-        // Register event handlers for each socket
-        registerInventoryEvents(this.io, socket);
-        registerSyncEvents(this.io, socket);
-        registerPriceEvents(this.io, socket);
-        registerNotificationEvents(this.io, socket);
-      });
-
-      logger.info('✅ WebSocket event handlers registered');
-    } catch (error) {
-      logger.warn('Some WebSocket event handlers not available:', error);
-    }
   }
 
   getApp(): Application {
     return this.app;
   }
 
-  getIO(): any {
+  getHttpServer(): HttpServer | undefined {
+    return this.httpServer;
+  }
+
+  getSocketServer(): SocketIOServer | undefined {
     return this.io;
   }
 
-  getServices(): ServiceContainer {
-    return this.services;
+  listen(port: number, callback?: () => void): HttpServer {
+    if (!this.httpServer) {
+      this.httpServer = createServer(this.app);
+    }
+    
+    return this.httpServer.listen(port, callback);
+  }
+
+  close(callback?: () => void): void {
+    if (this.httpServer) {
+      this.httpServer.close(callback);
+    }
+    
+    if (this.io) {
+      this.io.close();
+    }
+  }
+}
+
+// Extend Express Request type
+declare global {
+  namespace Express {
+    interface Request {
+      id?: string;
+      rawBody?: string;
+      user?: any;
+      startTime?: number;
+    }
   }
 }

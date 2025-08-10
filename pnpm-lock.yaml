@@ -62,12 +62,18 @@ importers:
       express:
         specifier: ^5.1.0
         version: 5.1.0
+      express-mongo-sanitize:
+        specifier: ^2.2.0
+        version: 2.2.0
       express-validator:
         specifier: ^7.2.1
         version: 7.2.1
       helmet:
         specifier: ^8.1.0
         version: 8.1.0
+      hpp:
+        specifier: ^0.2.3
+        version: 0.2.3
       ioredis:
         specifier: ^5.6.1
         version: 5.6.1
@@ -3855,6 +3861,10 @@ packages:
     peerDependencies:
       express: ^4.16.2
 
+  express-mongo-sanitize@2.2.0:
+    resolution: {integrity: sha512-PZBs5nwhD6ek9ZuP+W2xmpvcrHwXZxD5GdieX2dsjPbAbH4azOkrHbycBud2QRU+YQF1CT+pki/lZGedHgo/dQ==}
+    engines: {node: '>=10'}
+
   express-rate-limit@7.5.1:
     resolution: {integrity: sha512-7iN8iPMDzOMHPUYllBEsQdWVB6fPDMPqwjBaFrgr4Jgr/+okjvzAy+UHlYYL/Vs0OsOrMkwS6PJDkFlJwoxUnw==}
     engines: {node: '>= 16'}
@@ -4295,6 +4305,10 @@ packages:
   hosted-git-info@7.0.2:
     resolution: {integrity: sha512-puUZAUKT5m8Zzvs72XWy3HtvVbTWljRE66cP60bxJzAqf2DgICo7lYTY2IHUmLnNpjYvw5bvmoHvPc0QO2a62w==}
     engines: {node: ^16.14.0 || >=18.0.0}
+
+  hpp@0.2.3:
+    resolution: {integrity: sha512-4zDZypjQcxK/8pfFNR7jaON7zEUpXZxz4viyFmqjb3kWNWAHsLEUmWXcdn25c5l76ISvnD6hbOGO97cXUI3Ryw==}
+    engines: {node: '>=0.10.0'}
 
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
@@ -11223,6 +11237,8 @@ snapshots:
     dependencies:
       express: 4.21.2
 
+  express-mongo-sanitize@2.2.0: {}
+
   express-rate-limit@7.5.1(express@4.21.2):
     dependencies:
       express: 4.21.2
@@ -11760,6 +11776,11 @@ snapshots:
   hosted-git-info@7.0.2:
     dependencies:
       lru-cache: 10.4.3
+
+  hpp@0.2.3:
+    dependencies:
+      lodash: 4.17.21
+      type-is: 1.6.18
 
   html-escaper@2.0.2: {}
 

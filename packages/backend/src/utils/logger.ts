@@ -1,170 +1,173 @@
 // packages/backend/src/utils/logger.ts
 import winston from 'winston';
+import DailyRotateFile from 'winston-daily-rotate-file';
+import { config } from '../config/index.js';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
-// ES 모듈에서 __dirname 대체
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// 로그 디렉토리 생성
-const logDir = path.join(__dirname, '../../logs');
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true });
-}
+// Log levels
+const levels = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  http: 3,
+  verbose: 4,
+  debug: 5,
+  silly: 6
+};
 
-// 순환 참조를 안전하게 처리하는 stringify 함수
-function safeStringify(obj: any): string {
-  const seen = new WeakSet();
-  return JSON.stringify(obj, (key, value) => {
-    // undefined, function, symbol은 건너뛰기
-    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
-      return undefined;
-    }
-    
-    // 에러 객체 특별 처리
-    if (value instanceof Error) {
-      return {
-        name: value.name,
-        message: value.message,
-        stack: value.stack
-      };
-    }
-    
-    // 순환 참조 처리
-    if (typeof value === 'object' && value !== null) {
-      if (seen.has(value)) {
-        return '[Circular Reference]';
-      }
-      seen.add(value);
-      
-      // 특정 객체 타입 단순화
-      if (value.constructor && value.constructor.name) {
-        const className = value.constructor.name;
-        if (['TLSSocket', 'Socket', 'ClientRequest', 'IncomingMessage', 'HTTPParser'].includes(className)) {
-          return `[${className} Object]`;
-        }
-      }
-    }
-    
-    return value;
-  }, 2);
-}
+// Log colors
+const colors = {
+  error: 'red',
+  warn: 'yellow',
+  info: 'green',
+  http: 'magenta',
+  verbose: 'cyan',
+  debug: 'blue',
+  silly: 'grey'
+};
 
-// 안전한 타임스탬프 포맷팅 함수
-function formatTimestamp(timestamp: any): string {
-  try {
-    // timestamp가 없으면 현재 시간 사용
-    if (!timestamp) {
-      return new Date().toISOString().replace('T', ' ').split('.')[0];
-    }
-    
-    // timestamp가 유효한 Date 객체 또는 변환 가능한 값인지 확인
-    let date: Date;
-    
-    if (timestamp instanceof Date) {
-      date = timestamp;
-    } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
-      date = new Date(timestamp);
-    } else {
-      // 기타 유효하지 않은 타입인 경우 현재 시간 사용
-      return new Date().toISOString().replace('T', ' ').split('.')[0];
-    }
-    
-    // Invalid Date 체크
-    if (isNaN(date.getTime())) {
-      return new Date().toISOString().replace('T', ' ').split('.')[0];
-    }
-    
-    return date.toISOString().replace('T', ' ').split('.')[0];
-  } catch (error) {
-    // 모든 에러 상황에서 현재 시간 반환
-    return new Date().toISOString().replace('T', ' ').split('.')[0];
-  }
-}
+winston.addColors(colors);
 
-// 커스텀 포맷
-const customFormat = winston.format.printf((info) => {
-  const { timestamp, level, message, ...meta } = info;
-  const time = formatTimestamp(timestamp);
-  
-  let logMessage = `${time} [${level}]: ${message}`;
-  
-  // 메타데이터가 있으면 추가 (순환 참조 안전하게 처리)
-  if (Object.keys(meta).length > 0) {
-    try {
-      logMessage += ` ${safeStringify(meta)}`;
-    } catch (error) {
-      logMessage += ` [Failed to stringify metadata]`;
-    }
-  }
-  
-  return logMessage;
-});
+// Custom format
+const customFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.errors({ stack: true }),
+  winston.format.splat(),
+  winston.format.json()
+);
 
-// 로거 생성
-export const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'debug',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.splat(),
-    customFormat
-  ),
-  transports: [
-    // 콘솔 출력
+// Console format for development
+const consoleFormat = winston.format.combine(
+  winston.format.colorize({ all: true }),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.printf(({ timestamp, level, message, ...meta }) => {
+    let msg = `${timestamp} [${level}]: ${message}`;
+    
+    if (Object.keys(meta).length > 0) {
+      msg += ` ${JSON.stringify(meta, null, 2)}`;
+    }
+    
+    return msg;
+  })
+);
+
+// Create log directory
+const logDir = path.resolve(__dirname, '../../', config.misc.logDir);
+
+// Transport configurations
+const transports: winston.transport[] = [];
+
+// Console transport
+if (config.isDevelopment || config.isTest) {
+  transports.push(
     new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        customFormat
-      )
-    }),
-    // 파일 출력 (에러)
-    new winston.transports.File({
-      filename: path.join(logDir, 'error.log'),
-      level: 'error'
-    }),
-    // 파일 출력 (전체)
-    new winston.transports.File({
-      filename: path.join(logDir, 'combined.log')
+      format: consoleFormat,
+      level: config.misc.logLevel
     })
-  ]
-});
-
-// 개발 환경에서 더 자세한 로그
-if (process.env.NODE_ENV === 'development') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      customFormat
-    )
-  }));
+  );
 }
 
-// Morgan을 위한 stream 객체
+// File transports for production
+if (config.isProduction) {
+  // Error log file
+  transports.push(
+    new DailyRotateFile({
+      filename: path.join(logDir, 'error-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      zippedArchive: true,
+      maxSize: '20m',
+      maxFiles: '30d',
+      level: 'error',
+      format: customFormat
+    })
+  );
+
+  // Combined log file
+  transports.push(
+    new DailyRotateFile({
+      filename: path.join(logDir, 'combined-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      zippedArchive: true,
+      maxSize: '20m',
+      maxFiles: '14d',
+      format: customFormat
+    })
+  );
+
+  // Console for production (less verbose)
+  transports.push(
+    new winston.transports.Console({
+      format: winston.format.simple(),
+      level: 'info'
+    })
+  );
+}
+
+// Create logger instance
+const logger = winston.createLogger({
+  level: config.misc.logLevel || 'debug',
+  levels,
+  format: customFormat,
+  transports,
+  exitOnError: false
+});
+
+// Stream for Morgan
 export const stream = {
   write: (message: string) => {
-    // Morgan이 전달하는 메시지에서 줄바꿈 제거
-    logger.info(message.trim());
+    logger.http(message.trim());
   }
 };
 
-// 안전한 로깅 헬퍼 함수
-export function logSafe(level: string, message: string, meta?: any) {
-  try {
-    if (meta) {
-      logger.log(level, message, meta);
-    } else {
-      logger.log(level, message);
-    }
-  } catch (error) {
-    // 로깅 실패 시 기본 콘솔 사용
-    console.error('Logger failed:', error);
-    console.log(`[${level}] ${message}`);
+// Extend logger with custom methods
+export class Logger {
+  static error(message: string, meta?: any): void {
+    logger.error(message, meta);
+  }
+
+  static warn(message: string, meta?: any): void {
+    logger.warn(message, meta);
+  }
+
+  static info(message: string, meta?: any): void {
+    logger.info(message, meta);
+  }
+
+  static http(message: string, meta?: any): void {
+    logger.http(message, meta);
+  }
+
+  static verbose(message: string, meta?: any): void {
+    logger.verbose(message, meta);
+  }
+
+  static debug(message: string, meta?: any): void {
+    logger.debug(message, meta);
+  }
+
+  static silly(message: string, meta?: any): void {
+    logger.silly(message, meta);
+  }
+
+  // Performance logging
+  static performance(operation: string, duration: number, meta?: any): void {
+    logger.info(`Performance: ${operation} took ${duration}ms`, meta);
+  }
+
+  // Audit logging
+  static audit(action: string, user: string, details?: any): void {
+    logger.info(`Audit: ${action} by ${user}`, details);
+  }
+
+  // Security logging
+  static security(event: string, details?: any): void {
+    logger.warn(`Security: ${event}`, details);
   }
 }
 
-// default export 추가 (호환성)
-export default logger;
+export { logger, Logger as default };

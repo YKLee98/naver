@@ -10,270 +10,321 @@ import { App } from './app.js';
 import { logger } from './utils/logger.js';
 import { validateConfig, config } from './config/index.js';
 import { setupCronJobs } from './cron/index.js';
-import { gracefulShutdown } from './utils/shutdown.js';
+import { gracefulShutdown, registerShutdownHandlers } from './utils/shutdown.js';
+import { HealthCheckService } from './services/HealthCheckService.js';
+import { MetricsCollector } from './utils/metrics.js';
 
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || 'localhost';
-const ENABLE_CLUSTER = process.env.CLUSTER_ENABLED === 'true';
-const WORKER_COUNT = Number(process.env.WORKER_COUNT) || os.cpus().length;
+const PORT = config.server.port;
+const HOST = config.server.host;
+const ENABLE_CLUSTER = config.features.enableClustering;
+const WORKER_COUNT = config.features.workerCount;
+
+interface ServerComponents {
+  app?: App;
+  httpServer?: any;
+  services?: ServiceContainer;
+  healthCheck?: HealthCheckService;
+  metrics?: MetricsCollector;
+}
 
 class Server {
-  private app?: App;
-  private httpServer?: any;
-  private services?: ServiceContainer;
+  private components: ServerComponents = {};
   private isShuttingDown = false;
+  private startTime: number = Date.now();
 
   async start(): Promise<void> {
-    const startTime = Date.now();
-
     try {
-      // 1. Validate configuration
-      logger.info('🔍 Validating configuration...');
-      const configErrors = validateConfig();
-      
-      if (configErrors.length > 0) {
-        logger.error('Configuration validation failed:', configErrors);
-        
-        // Check for critical errors
-        const criticalErrors = configErrors.filter(err => 
-          err.includes('NAVER_CLIENT_ID') || 
-          err.includes('NAVER_CLIENT_SECRET') || 
-          err.includes('SHOPIFY_STORE_DOMAIN') || 
-          err.includes('SHOPIFY_ACCESS_TOKEN') ||
-          err.includes('JWT_SECRET')
-        );
+      logger.info('🚀 Starting server...');
+      logger.info(`Environment: ${config.env}`);
+      logger.info(`Node version: ${process.version}`);
+      logger.info(`Process ID: ${process.pid}`);
 
-        if (criticalErrors.length > 0) {
-          logger.error('Critical configuration errors found. Cannot start server.');
-          logger.error('Please check your .env file and ensure all required variables are set.');
-          process.exit(1);
-        } else {
-          logger.warn('Non-critical configuration warnings. Server will start with limited functionality.');
-        }
-      } else {
-        logger.info('✅ Configuration validated successfully');
-      }
+      // 1. Validate configuration
+      await this.validateConfiguration();
 
       // 2. Setup clustering if enabled
       if (ENABLE_CLUSTER && cluster.isPrimary) {
-        this.setupClustering();
-        return;
+        return this.setupClustering();
       }
 
-      // 3. Connect to MongoDB
-      logger.info('🔌 Connecting to MongoDB...');
-      await connectDB();
+      // 3. Initialize infrastructure
+      await this.initializeInfrastructure();
 
-      // 4. Initialize Redis
-      logger.info('🔌 Initializing Redis...');
-      const redis = await initializeRedis();
+      // 4. Initialize services
+      await this.initializeServices();
 
-      // 5. Initialize Service Container
-      logger.info('📦 Initializing services...');
-      this.services = await ServiceContainer.initialize(redis);
+      // 5. Initialize application
+      await this.initializeApplication();
 
-      // 6. Initialize Express App
-      logger.info('🚀 Initializing Express app...');
-      this.app = new App(this.services);
-      await this.app.initialize();
+      // 6. Start HTTP server
+      await this.startHttpServer();
 
-      // 7. Create HTTP Server
-      this.httpServer = createServer(this.app.getApp());
-
-      // 8. Initialize WebSocket if enabled
-      if (process.env.ENABLE_WEBSOCKET === 'true') {
-        logger.info('🔌 Initializing WebSocket server...');
-        await this.app.initializeWebSocket(this.httpServer);
+      // 7. Setup cron jobs (only on primary worker or non-clustered)
+      if (!ENABLE_CLUSTER || (cluster.worker && cluster.worker.id === 1)) {
+        await this.setupCronJobs();
       }
 
-      // 9. Setup cron jobs (only in primary worker or non-clustered mode)
-      if (!ENABLE_CLUSTER || cluster.worker?.id === 1) {
-        logger.info('⏰ Setting up cron jobs...');
-        setupCronJobs(this.services);
-      }
+      // 8. Setup graceful shutdown
+      this.setupGracefulShutdown();
 
-      // 10. Start listening
-      await this.listen();
-
-      const elapsed = Date.now() - startTime;
-      this.logStartupSuccess(elapsed);
-
-      // Setup graceful shutdown
-      this.setupShutdownHandlers();
+      // 9. Log startup completion
+      const startupTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
+      logger.info(`✅ Server started successfully in ${startupTime}s`);
+      logger.info(`🌐 Server running at http://${HOST}:${PORT}`);
+      logger.info(`📚 API documentation at http://${HOST}:${PORT}/api-docs`);
+      logger.info(`❤️  Health check at http://${HOST}:${PORT}/health`);
+      logger.info(`📊 Metrics at http://${HOST}:${PORT}/metrics`);
 
     } catch (error) {
-      logger.error('Failed to start server:', error);
-      await this.cleanup();
+      logger.error('❌ Failed to start server:', error);
       process.exit(1);
     }
   }
 
+  private async validateConfiguration(): Promise<void> {
+    logger.info('🔍 Validating configuration...');
+    
+    const errors = validateConfig();
+    
+    if (errors.length > 0) {
+      const criticalErrors = errors.filter(err =>
+        err.includes('JWT_SECRET') ||
+        err.includes('ENCRYPTION_KEY') ||
+        err.includes('NAVER_CLIENT_ID') ||
+        err.includes('NAVER_CLIENT_SECRET')
+      );
+
+      if (criticalErrors.length > 0) {
+        logger.error('❌ Critical configuration errors:', criticalErrors);
+        throw new Error('Critical configuration errors found');
+      }
+
+      logger.warn('⚠️  Non-critical configuration warnings:', errors);
+    }
+
+    logger.info('✅ Configuration validated');
+  }
+
+  private async initializeInfrastructure(): Promise<void> {
+    logger.info('🔌 Initializing infrastructure...');
+
+    // Connect to MongoDB
+    await connectDB();
+    logger.info('✅ MongoDB connected');
+
+    // Initialize Redis
+    const redis = await initializeRedis();
+    this.components.services = await ServiceContainer.initialize(redis);
+    logger.info('✅ Redis initialized');
+
+    // Initialize metrics collector
+    this.components.metrics = new MetricsCollector();
+    logger.info('✅ Metrics collector initialized');
+
+    // Initialize health check service
+    this.components.healthCheck = new HealthCheckService(
+      redis,
+      this.components.services
+    );
+    logger.info('✅ Health check service initialized');
+  }
+
+  private async initializeServices(): Promise<void> {
+    logger.info('📦 Initializing services...');
+    
+    // Services are initialized in ServiceContainer
+    const services = this.components.services!;
+    
+    // Log available services
+    const availableServices = [
+      'naverAuthService',
+      'naverProductService',
+      'shopifyService',
+      'syncService',
+      'exchangeRateService'
+    ];
+
+    for (const service of availableServices) {
+      if (services.hasService(service as any)) {
+        logger.info(`✅ ${service} initialized`);
+      }
+    }
+  }
+
+  private async initializeApplication(): Promise<void> {
+    logger.info('🚀 Initializing Express application...');
+    
+    this.components.app = new App(this.components.services!);
+    await this.components.app.initialize();
+    
+    logger.info('✅ Express application initialized');
+  }
+
+  private async startHttpServer(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.components.httpServer = createServer(this.components.app!.getApp());
+      
+      this.components.httpServer.listen(PORT, HOST, () => {
+        logger.info(`✅ HTTP server listening on ${HOST}:${PORT}`);
+        resolve();
+      });
+
+      this.components.httpServer.on('error', (error: any) => {
+        if (error.syscall !== 'listen') {
+          reject(error);
+          return;
+        }
+
+        switch (error.code) {
+          case 'EACCES':
+            logger.error(`❌ Port ${PORT} requires elevated privileges`);
+            process.exit(1);
+            break;
+          case 'EADDRINUSE':
+            logger.error(`❌ Port ${PORT} is already in use`);
+            process.exit(1);
+            break;
+          default:
+            reject(error);
+        }
+      });
+    });
+  }
+
+  private async setupCronJobs(): Promise<void> {
+    logger.info('⏰ Setting up cron jobs...');
+    
+    await setupCronJobs(this.components.services!);
+    
+    logger.info('✅ Cron jobs scheduled');
+  }
+
   private setupClustering(): void {
-    logger.info(`🎯 Master process ${process.pid} is running`);
-    logger.info(`🔧 Forking ${WORKER_COUNT} workers...`);
+    logger.info(`🔄 Setting up cluster with ${WORKER_COUNT} workers...`);
 
     // Fork workers
     for (let i = 0; i < WORKER_COUNT; i++) {
-      cluster.fork();
+      const worker = cluster.fork();
+      logger.info(`Worker ${worker.process.pid} started`);
     }
 
     // Handle worker events
     cluster.on('exit', (worker, code, signal) => {
-      logger.error(`Worker ${worker.process.pid} died (${signal || code}). Restarting...`);
+      logger.error(`Worker ${worker.process.pid} died (${signal || code})`);
       
       if (!this.isShuttingDown) {
-        cluster.fork();
+        logger.info('Starting a new worker...');
+        const newWorker = cluster.fork();
+        logger.info(`Worker ${newWorker.process.pid} started`);
       }
     });
 
     cluster.on('online', (worker) => {
       logger.info(`Worker ${worker.process.pid} is online`);
     });
+
+    // Setup graceful shutdown for cluster
+    process.on('SIGTERM', () => this.shutdownCluster());
+    process.on('SIGINT', () => this.shutdownCluster());
   }
 
-  private async listen(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.httpServer!.listen(PORT, HOST as any, () => {
-        resolve();
-      }).on('error', reject);
-    });
-  }
-
-  private logStartupSuccess(elapsed: number): void {
-    const workerId = cluster.worker?.id ? ` (Worker ${cluster.worker.id})` : '';
+  private async shutdownCluster(): Promise<void> {
+    if (this.isShuttingDown) return;
     
-    logger.info(`
-╔════════════════════════════════════════════════════════════╗
-║                                                            ║
-║   🚀 Hallyu ERP Backend Server Started Successfully!      ║
-║                                                            ║
-╠════════════════════════════════════════════════════════════╣
-║   Environment : ${process.env.NODE_ENV?.padEnd(42)} ║
-║   Port        : ${PORT.toString().padEnd(42)} ║
-║   Host        : ${HOST.padEnd(42)} ║
-║   Process ID  : ${process.pid.toString().padEnd(42)} ║
-║   Worker      : ${workerId.padEnd(42)} ║
-║   Startup Time: ${`${elapsed}ms`.padEnd(42)} ║
-║                                                            ║
-╠════════════════════════════════════════════════════════════╣
-║   Services Status:                                        ║
-║   ✅ MongoDB    : Connected                               ║
-║   ✅ Redis      : Connected                               ║
-║   ✅ Naver API  : ${this.getServiceStatus('naver').padEnd(38)} ║
-║   ✅ Shopify API: ${this.getServiceStatus('shopify').padEnd(38)} ║
-║   ${process.env.ENABLE_WEBSOCKET === 'true' ? '✅' : '⚠️ '} WebSocket : ${process.env.ENABLE_WEBSOCKET === 'true' ? 'Enabled' : 'Disabled'}${' '.repeat(31)} ║
-║                                                            ║
-╠════════════════════════════════════════════════════════════╣
-║   API Documentation:                                      ║
-║   📚 Swagger UI : http://${HOST}:${PORT}/api-docs${' '.repeat(20)} ║
-║   🔧 Health Check: http://${HOST}:${PORT}/health${' '.repeat(22)} ║
-║                                                            ║
-╚════════════════════════════════════════════════════════════╝
-    `);
-  }
+    this.isShuttingDown = true;
+    logger.info('🛑 Shutting down cluster...');
 
-  private getServiceStatus(service: string): string {
-    if (!this.services) return 'Not initialized';
-    
-    switch (service) {
-      case 'naver':
-        return process.env.NAVER_CLIENT_ID ? 'Configured' : 'Not configured';
-      case 'shopify':
-        return process.env.SHOPIFY_ACCESS_TOKEN ? 'Configured' : 'Not configured';
-      default:
-        return 'Unknown';
+    // Disconnect all workers
+    for (const id in cluster.workers) {
+      const worker = cluster.workers[id];
+      if (worker) {
+        worker.disconnect();
+        
+        // Force kill after timeout
+        setTimeout(() => {
+          if (!worker.isDead()) {
+            worker.kill();
+          }
+        }, 10000);
+      }
     }
+
+    // Wait for all workers to exit
+    await new Promise<void>((resolve) => {
+      const checkWorkers = setInterval(() => {
+        if (Object.keys(cluster.workers!).length === 0) {
+          clearInterval(checkWorkers);
+          resolve();
+        }
+      }, 100);
+    });
+
+    logger.info('✅ All workers shut down');
+    process.exit(0);
   }
 
-  private setupShutdownHandlers(): void {
-    const shutdown = async (signal: string) => {
+  private setupGracefulShutdown(): void {
+    registerShutdownHandlers(async () => {
       if (this.isShuttingDown) return;
       
       this.isShuttingDown = true;
-      logger.info(`\n${signal} signal received, starting graceful shutdown...`);
-      
-      await gracefulShutdown(async () => {
-        await this.stop();
-      });
-    };
+      logger.info('🛑 Initiating graceful shutdown...');
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGUSR2', () => shutdown('SIGUSR2')); // For nodemon
-
-    // Handle uncaught errors
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception:', error);
-      shutdown('UNCAUGHT_EXCEPTION');
-    });
-
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      shutdown('UNHANDLED_REJECTION');
-    });
-  }
-
-  async stop(): Promise<void> {
-    logger.info('🛑 Stopping server...');
-
-    try {
-      // Close HTTP server
-      if (this.httpServer) {
-        await new Promise<void>((resolve) => {
-          this.httpServer.close(() => {
-            logger.info('✅ HTTP server closed');
-            resolve();
+      try {
+        // Stop accepting new connections
+        if (this.components.httpServer) {
+          await new Promise<void>((resolve) => {
+            this.components.httpServer.close(() => {
+              logger.info('✅ HTTP server closed');
+              resolve();
+            });
           });
-        });
+        }
+
+        // Cleanup services
+        if (this.components.services) {
+          await this.components.services.cleanup();
+          logger.info('✅ Services cleaned up');
+        }
+
+        // Close database connections
+        await gracefulShutdown();
+        logger.info('✅ Database connections closed');
+
+        // Log final metrics
+        if (this.components.metrics) {
+          const metrics = await this.components.metrics.getMetrics();
+          logger.info('📊 Final metrics:', metrics);
+        }
+
+        const uptime = ((Date.now() - this.startTime) / 1000).toFixed(2);
+        logger.info(`✅ Server shut down gracefully after ${uptime}s uptime`);
+        
+        process.exit(0);
+      } catch (error) {
+        logger.error('❌ Error during shutdown:', error);
+        process.exit(1);
       }
-
-      // Close WebSocket connections
-      if (this.app?.getIO()) {
-        this.app.getIO().close();
-        logger.info('✅ WebSocket server closed');
-      }
-
-      // Cleanup services
-      await this.cleanup();
-
-      logger.info('✅ Server stopped successfully');
-    } catch (error) {
-      logger.error('Error during server shutdown:', error);
-      throw error;
-    }
-  }
-
-  private async cleanup(): Promise<void> {
-    try {
-      if (this.services) {
-        await this.services.cleanup();
-      }
-
-      // Close database connections
-      const mongoose = await import('mongoose');
-      await mongoose.connection.close();
-      logger.info('✅ MongoDB connection closed');
-
-      // Close Redis connection
-      const { getRedisClient } = await import('./config/redis.js');
-      const redis = getRedisClient();
-      if (redis) {
-        await redis.quit();
-        logger.info('✅ Redis connection closed');
-      }
-    } catch (error) {
-      logger.error('Error during cleanup:', error);
-    }
+    });
   }
 }
 
-// Start the server
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const server = new Server();
-  server.start().catch((error) => {
-    logger.error('Failed to start server:', error);
-    process.exit(1);
-  });
-}
+// Error handlers
+process.on('uncaughtException', (error) => {
+  logger.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+// Start server
+const server = new Server();
+server.start().catch(error => {
+  logger.error('❌ Failed to start server:', error);
+  process.exit(1);
+});
 
 export { Server };
