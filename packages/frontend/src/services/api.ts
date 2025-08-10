@@ -90,27 +90,8 @@ class ApiService {
       async (error: AxiosError) => {
         const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
 
-        // 에러 로깅
-        console.error(`[API Error] ${originalRequest?.url}`, {
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          message: error.response?.data?.message || error.message,
-          data: error.response?.data
-        });
-
-        // 네트워크 오류 처리
-        if (!error.response) {
-          console.error('[API] Network error - no response received');
-          return Promise.reject({
-            ...error,
-            message: '네트워크 연결을 확인해주세요.'
-          });
-        }
-
-        // 401 Unauthorized 처리
         if (error.response?.status === 401 && !originalRequest._retry) {
           if (this.isRefreshing) {
-            // 이미 토큰 갱신 중이면 대기
             return new Promise((resolve, reject) => {
               this.failedQueue.push({ resolve, reject });
             }).then(token => {
@@ -127,75 +108,44 @@ class ApiService {
           const refreshToken = localStorage.getItem('refreshToken');
           
           if (!refreshToken) {
-            console.log('[API] No refresh token available, redirecting to login');
-            this.clearAuthAndRedirect();
+            this.isRefreshing = false;
+            window.location.href = '/login';
             return Promise.reject(error);
           }
 
           try {
-            console.log('[API] Attempting to refresh token...');
-            const response = await this.post('/auth/refresh', { refreshToken });
-            const { accessToken, refreshToken: newRefreshToken } = response;
+            const response = await this.instance.post('/auth/refresh', { refreshToken });
+            const { token } = response.data.data;
             
-            // 새 토큰 저장
-            if (accessToken) {
-              localStorage.setItem('authToken', accessToken);
-              localStorage.setItem('token', accessToken);
-            }
+            localStorage.setItem('authToken', token);
+            this.instance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
             
-            if (newRefreshToken) {
-              localStorage.setItem('refreshToken', newRefreshToken);
-            }
-            
-            console.log('[API] Token refreshed successfully');
-            
+            this.processQueue(null, token);
             this.isRefreshing = false;
-            this.processQueue(null, accessToken);
             
-            // 원래 요청 재시도
-            originalRequest.headers!.Authorization = `Bearer ${accessToken}`;
             return this.instance(originalRequest);
-            
-          } catch (refreshError) {
-            console.error('[API] Token refresh failed:', refreshError);
+          } catch (err) {
+            this.processQueue(err, null);
             this.isRefreshing = false;
-            this.processQueue(refreshError, null);
-            this.clearAuthAndRedirect();
-            return Promise.reject(refreshError);
+            
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('refreshToken');
+            window.location.href = '/login';
+            
+            return Promise.reject(err);
           }
         }
 
-        // 403 Forbidden
-        if (error.response?.status === 403) {
-          console.error('[API] 403 Forbidden - Access denied');
-        }
-
-        // 404 Not Found
-        if (error.response?.status === 404) {
-          console.error('[API] 404 Not Found - Resource not found');
-        }
-
-        // 500+ Server errors
-        if (error.response?.status >= 500) {
-          console.error('[API] Server error:', error.response.status);
-        }
+        console.error('[API Response Error]', {
+          url: error.config?.url,
+          status: error.response?.status,
+          message: error.message,
+          data: error.response?.data
+        });
 
         return Promise.reject(error);
       }
     );
-  }
-
-  private clearAuthAndRedirect(): void {
-    console.log('[API] Clearing auth data and redirecting to login');
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
-    
-    // 로그인 페이지로 리다이렉트 (현재 페이지가 로그인이 아닌 경우)
-    if (!window.location.pathname.includes('/login')) {
-      window.location.href = '/login';
-    }
   }
 
   // HTTP 메서드들
@@ -264,4 +214,9 @@ class ApiService {
 
 // 싱글톤 인스턴스 생성 및 export
 const apiService = new ApiService();
+
+// Named export로 api 제공 (dashboard.service.ts에서 사용)
+export const api = apiService;
+
+// Default export도 제공
 export default apiService;

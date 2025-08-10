@@ -1,222 +1,212 @@
-// packages/frontend/src/services/api.ts
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
-import { ApiResponse } from '@/types';
+// ===== 1. packages/frontend/src/services/api/dashboard.service.ts =====
+import { api } from '../api';
+import {
+  DashboardStats,
+  Activity,
+  ChartData,
+  Alert,
+  Widget,
+  DashboardConfig,
+  ExportRequest,
+  ExportStatus
+} from '@/types/models';
 
-class ApiService {
-  private instance: AxiosInstance;
-  private isRefreshing = false;
-  private failedQueue: Array<{
-    resolve: (value?: any) => void;
-    reject: (error?: any) => void;
-  }> = [];
-
-  constructor() {
-    // API 베이스 URL 설정
-    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
-    
-    console.log('[ApiService] Initializing with baseURL:', baseURL);
-    
-    this.instance = axios.create({
-      baseURL,
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    this.setupInterceptors();
+class DashboardService {
+  /**
+   * Get dashboard statistics
+   */
+  async getStatistics(): Promise<DashboardStats> {
+    const response = await api.get('/dashboard/statistics');
+    return response.data.data;
   }
 
-  private processQueue(error: any, token: string | null = null): void {
-    this.failedQueue.forEach(prom => {
-      if (error) {
-        prom.reject(error);
-      } else {
-        prom.resolve(token);
-      }
-    });
-    
-    this.failedQueue = [];
+  /**
+   * Get statistics by type
+   */
+  async getStatisticsByType(type: string): Promise<any> {
+    const response = await api.get(`/dashboard/statistics/${type}`);
+    return response.data.data;
   }
 
-  private setupInterceptors(): void {
-    // Request interceptor
-    this.instance.interceptors.request.use(
-      (config) => {
-        // 토큰 추가 (두 가지 키 모두 확인)
-        const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-        
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-          console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url} (with auth)`);
-        } else {
-          console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url} (no auth)`);
-        }
-
-        // 개발 환경에서 상세 로깅
-        if (import.meta.env.DEV) {
-          console.log('[API Request Details]', {
-            url: config.url,
-            method: config.method,
-            headers: config.headers,
-            data: config.data,
-            params: config.params
-          });
-        }
-        
-        return config;
-      },
-      (error) => {
-        console.error('[API Request Error]', error);
-        return Promise.reject(error);
-      }
-    );
-
-    // Response interceptor
-    this.instance.interceptors.response.use(
-      (response) => {
-        console.log(`[API Response] ${response.config.url}`, {
-          status: response.status,
-          statusText: response.statusText
-        });
-
-        // 개발 환경에서 응답 데이터 로깅
-        if (import.meta.env.DEV) {
-          console.log('[API Response Data]', response.data);
-        }
-
-        return response;
-      },
-      async (error: AxiosError) => {
-        const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
-
-        if (error.response?.status === 401 && !originalRequest._retry) {
-          if (this.isRefreshing) {
-            return new Promise((resolve, reject) => {
-              this.failedQueue.push({ resolve, reject });
-            }).then(token => {
-              originalRequest.headers!.Authorization = `Bearer ${token}`;
-              return this.instance(originalRequest);
-            }).catch(err => {
-              return Promise.reject(err);
-            });
-          }
-
-          originalRequest._retry = true;
-          this.isRefreshing = true;
-
-          const refreshToken = localStorage.getItem('refreshToken');
-          
-          if (!refreshToken) {
-            this.isRefreshing = false;
-            window.location.href = '/login';
-            return Promise.reject(error);
-          }
-
-          try {
-            const response = await this.instance.post('/auth/refresh', { refreshToken });
-            const { token } = response.data.data;
-            
-            localStorage.setItem('authToken', token);
-            this.instance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-            
-            this.processQueue(null, token);
-            this.isRefreshing = false;
-            
-            return this.instance(originalRequest);
-          } catch (err) {
-            this.processQueue(err, null);
-            this.isRefreshing = false;
-            
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('refreshToken');
-            window.location.href = '/login';
-            
-            return Promise.reject(err);
-          }
-        }
-
-        console.error('[API Response Error]', {
-          url: error.config?.url,
-          status: error.response?.status,
-          message: error.message,
-          data: error.response?.data
-        });
-
-        return Promise.reject(error);
-      }
-    );
+  /**
+   * Get recent activities
+   */
+  async getRecentActivities(params?: {
+    limit?: number;
+    offset?: number;
+    type?: string;
+  }): Promise<{ activities: Activity[]; pagination: any }> {
+    const response = await api.get('/dashboard/activities', { params });
+    return response.data.data;
   }
 
-  // HTTP 메서드들
-  async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.instance.get<ApiResponse<T>>(url, config);
-    return response.data.data!;
+  /**
+   * Get activity by ID
+   */
+  async getActivityById(id: string): Promise<Activity> {
+    const response = await api.get(`/dashboard/activities/${id}`);
+    return response.data.data;
   }
 
-  async post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.instance.post<ApiResponse<T>>(url, data, config);
-    return response.data.data!;
+  /**
+   * Get price chart data
+   */
+  async getPriceChartData(params?: {
+    period?: string;
+    sku?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/price', { params });
+    return response.data.data;
   }
 
-  async put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.instance.put<ApiResponse<T>>(url, data, config);
-    return response.data.data!;
+  /**
+   * Get inventory chart data
+   */
+  async getInventoryChartData(params?: {
+    period?: string;
+    sku?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/inventory', { params });
+    return response.data.data;
   }
 
-  async patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.instance.patch<ApiResponse<T>>(url, data, config);
-    return response.data.data!;
+  /**
+   * Get sync chart data
+   */
+  async getSyncChartData(params?: {
+    period?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/sync', { params });
+    return response.data.data;
   }
 
-  async delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.instance.delete<ApiResponse<T>>(url, config);
-    return response.data.data!;
+  /**
+   * Get sales chart data
+   */
+  async getSalesChartData(params?: {
+    period?: string;
+    platform?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/sales', { params });
+    return response.data.data;
   }
 
-  // 파일 업로드
-  async upload<T = any>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.instance.post<ApiResponse<T>>(url, formData, {
-      ...config,
-      headers: {
-        ...config?.headers,
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data.data!;
+  /**
+   * Get performance chart data
+   */
+  async getPerformanceChartData(params?: {
+    metric?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/performance', { params });
+    return response.data.data;
   }
 
-  // 파일 다운로드
-  async download(url: string, config?: AxiosRequestConfig): Promise<Blob> {
-    const response = await this.instance.get(url, {
-      ...config,
-      responseType: 'blob',
+  /**
+   * Get alerts
+   */
+  async getAlerts(params?: {
+    status?: string;
+    severity?: string;
+  }): Promise<Alert[]> {
+    const response = await api.get('/dashboard/alerts', { params });
+    return response.data.data;
+  }
+
+  /**
+   * Get alert by ID
+   */
+  async getAlertById(id: string): Promise<Alert> {
+    const response = await api.get(`/dashboard/alerts/${id}`);
+    return response.data.data;
+  }
+
+  /**
+   * Dismiss alert
+   */
+  async dismissAlert(id: string): Promise<void> {
+    await api.post(`/dashboard/alerts/${id}/dismiss`);
+  }
+
+  /**
+   * Acknowledge alert
+   */
+  async acknowledgeAlert(id: string): Promise<void> {
+    await api.post(`/dashboard/alerts/${id}/acknowledge`);
+  }
+
+  /**
+   * Get widgets
+   */
+  async getWidgets(): Promise<Widget[]> {
+    const response = await api.get('/dashboard/widgets');
+    return response.data.data;
+  }
+
+  /**
+   * Get widget data
+   */
+  async getWidgetData(widgetId: string): Promise<any> {
+    const response = await api.get(`/dashboard/widgets/${widgetId}`);
+    return response.data.data;
+  }
+
+  /**
+   * Refresh widget
+   */
+  async refreshWidget(widgetId: string): Promise<any> {
+    const response = await api.post(`/dashboard/widgets/${widgetId}/refresh`);
+    return response.data.data;
+  }
+
+  /**
+   * Get dashboard configuration
+   */
+  async getDashboardConfig(): Promise<DashboardConfig> {
+    const response = await api.get('/dashboard/config');
+    return response.data.data;
+  }
+
+  /**
+   * Update dashboard configuration
+   */
+  async updateDashboardConfig(config: Partial<DashboardConfig>): Promise<DashboardConfig> {
+    const response = await api.put('/dashboard/config', config);
+    return response.data.data;
+  }
+
+  /**
+   * Reset dashboard configuration
+   */
+  async resetDashboardConfig(): Promise<DashboardConfig> {
+    const response = await api.post('/dashboard/config/reset');
+    return response.data.data;
+  }
+
+  /**
+   * Export dashboard data
+   */
+  async exportDashboardData(request: ExportRequest): Promise<{ exportId: string; status: string }> {
+    const response = await api.post('/dashboard/export', request);
+    return response.data.data;
+  }
+
+  /**
+   * Get export status
+   */
+  async getExportStatus(exportId: string): Promise<ExportStatus> {
+    const response = await api.get(`/dashboard/export/${exportId}/status`);
+    return response.data.data;
+  }
+
+  /**
+   * Download export
+   */
+  async downloadExport(exportId: string): Promise<Blob> {
+    const response = await api.get(`/dashboard/export/${exportId}/download`, {
+      responseType: 'blob'
     });
     return response.data;
   }
-
-  // Axios 인스턴스 직접 접근 (필요시)
-  getAxiosInstance(): AxiosInstance {
-    return this.instance;
-  }
-
-  // 헬스 체크
-  async healthCheck(): Promise<boolean> {
-    try {
-      await this.get('/health');
-      return true;
-    } catch (error) {
-      console.error('[API] Health check failed:', error);
-      return false;
-    }
-  }
 }
 
-// 싱글톤 인스턴스 생성 및 export
-const apiService = new ApiService();
-
-// Named export로 api 제공 (dashboard.service.ts에서 사용)
-export const api = apiService;
-
-// Default export도 제공
-export default apiService;
+export const dashboardService = new DashboardService()

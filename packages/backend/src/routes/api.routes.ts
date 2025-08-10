@@ -1,16 +1,17 @@
 // packages/backend/src/routes/api.routes.ts
 import { Router } from 'express';
-import { authMiddleware } from '../middlewares/index.js';
+import { authMiddleware } from '../middlewares/auth.middleware.js';
 import { logger } from '../utils/logger.js';
-import { getRedisClient } from '../config/redis.js';
 
 // Controllers
-import { ProductController } from '../controllers/ProductController.js';
-import { InventoryController } from '../controllers/InventoryController.js';
-import { SyncController } from '../controllers/SyncController.js';
-import { MappingController } from '../controllers/MappingController.js';
-import { DashboardController } from '../controllers/DashboardController.js';
-import { AnalyticsController } from '../controllers/AnalyticsController.js';
+import { 
+  ProductController,
+  InventoryController,
+  SyncController,
+  MappingController,
+  DashboardController,
+  AnalyticsController
+} from '../controllers/index.js';
 
 // Services
 import { 
@@ -25,22 +26,23 @@ import {
 import { 
   SyncService,
   InventorySyncService,
-  MappingService
+  MappingService,
+  PriceSyncService
 } from '../services/sync/index.js';
+import { getRedisClient } from '../config/redis.js';
 
 /**
- * Setup API routes with proper error handling
+ * Setup API Routes with proper error handling and logging
  */
 export function setupApiRoutes(): Router {
   const router = Router();
   const protectedRouter = Router();
-  
-  // Apply auth middleware to protected routes
-  protectedRouter.use(authMiddleware);
 
   try {
-    // Initialize services
+    // Initialize Redis
     const redis = getRedisClient();
+    
+    // Initialize Services
     const naverAuthService = new NaverAuthService(redis);
     const naverProductService = new NaverProductService(naverAuthService);
     const naverOrderService = new NaverOrderService(naverAuthService);
@@ -64,7 +66,13 @@ export function setupApiRoutes(): Router {
       shopifyGraphQLService
     );
 
-    // Initialize controllers
+    const priceSyncService = new PriceSyncService(
+      naverProductService,
+      shopifyBulkService,
+      redis
+    );
+
+    // Initialize Controllers
     const productController = new ProductController(
       naverProductService,
       shopifyGraphQLService
@@ -75,7 +83,12 @@ export function setupApiRoutes(): Router {
     const dashboardController = new DashboardController();
     const analyticsController = new AnalyticsController();
 
-    // Product routes
+    // Apply authentication middleware to protected routes
+    protectedRouter.use(authMiddleware);
+
+    // ============================================
+    // PRODUCT ROUTES
+    // ============================================
     protectedRouter.get('/products/search/naver', productController.searchNaverProducts.bind(productController));
     protectedRouter.get('/products/search/shopify', productController.searchShopifyProducts.bind(productController));
     protectedRouter.get('/products', productController.getMappedProducts.bind(productController));
@@ -85,7 +98,11 @@ export function setupApiRoutes(): Router {
     
     logger.info('✅ Product routes initialized');
 
-    // Inventory routes
+    // ============================================
+    // INVENTORY ROUTES - FIXED
+    // ============================================
+    // List all inventory status (this was missing!)
+    protectedRouter.get('/inventory/status', inventoryController.getAllInventoryStatus.bind(inventoryController));
     protectedRouter.get('/inventory', inventoryController.getAllInventoryStatus.bind(inventoryController));
     protectedRouter.get('/inventory/low-stock', inventoryController.getLowStockProducts.bind(inventoryController));
     protectedRouter.get('/inventory/discrepancies', inventoryController.getInventoryDiscrepancies.bind(inventoryController));
@@ -98,7 +115,9 @@ export function setupApiRoutes(): Router {
     
     logger.info('✅ Inventory routes initialized');
 
-    // Mapping routes
+    // ============================================
+    // MAPPING ROUTES
+    // ============================================
     protectedRouter.get('/mappings/export', mappingController.exportMappings.bind(mappingController));
     protectedRouter.get('/mappings/stats', mappingController.getMappingStats.bind(mappingController));
     protectedRouter.get('/mappings/search-by-sku', mappingController.searchProductsBySku.bind(mappingController));
@@ -119,7 +138,9 @@ export function setupApiRoutes(): Router {
     
     logger.info('✅ Mapping routes initialized');
 
-    // Sync routes
+    // ============================================
+    // SYNC ROUTES
+    // ============================================
     protectedRouter.post('/sync/full', syncController.performFullSync.bind(syncController));
     protectedRouter.get('/sync/status', syncController.getSyncStatus.bind(syncController));
     protectedRouter.get('/sync/settings', syncController.getSyncSettings.bind(syncController));
@@ -131,7 +152,9 @@ export function setupApiRoutes(): Router {
     
     logger.info('✅ Sync routes initialized');
 
-    // Dashboard routes
+    // ============================================
+    // DASHBOARD ROUTES - COMPLETE
+    // ============================================
     protectedRouter.get('/dashboard/statistics', dashboardController.getStatistics.bind(dashboardController));
     protectedRouter.get('/dashboard/statistics/:type', dashboardController.getStatisticsByType.bind(dashboardController));
     protectedRouter.get('/dashboard/activities', dashboardController.getRecentActivities.bind(dashboardController));
@@ -157,7 +180,9 @@ export function setupApiRoutes(): Router {
     
     logger.info('✅ Dashboard routes initialized');
 
-    // Analytics routes (if controller exists)
+    // ============================================
+    // ANALYTICS ROUTES (optional)
+    // ============================================
     try {
       protectedRouter.get('/analytics/overview', analyticsController.getOverview.bind(analyticsController));
       protectedRouter.get('/analytics/performance', analyticsController.getPerformanceMetrics.bind(analyticsController));
@@ -178,22 +203,52 @@ export function setupApiRoutes(): Router {
   // Add all protected routes to main router
   router.use('/', protectedRouter);
 
-  // Add health check endpoint (no auth)
+  // ============================================
+  // PUBLIC ROUTES (no auth required)
+  // ============================================
+  
+  // Health check endpoint
   router.get('/health', (req, res) => {
     res.json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      environment: process.env.NODE_ENV || 'development'
+      environment: process.env.NODE_ENV || 'development',
+      version: process.env.npm_package_version || '1.0.0'
     });
   });
 
-  // Add status endpoint (no auth)
+  // Status endpoint
   router.get('/status', (req, res) => {
     res.json({
       status: 'operational',
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || '1.0.0'
+      services: {
+        database: 'connected',
+        redis: 'connected',
+        api: 'running'
+      }
+    });
+  });
+
+  // Version endpoint
+  router.get('/version', (req, res) => {
+    res.json({
+      version: process.env.npm_package_version || '1.0.0',
+      apiVersion: 'v1',
+      nodeVersion: process.version
+    });
+  });
+
+  // Error handling for undefined routes
+  router.use('*', (req, res) => {
+    logger.warn(`404 - Route not found: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({
+      success: false,
+      error: 'Route not found',
+      message: `The requested endpoint ${req.originalUrl} does not exist`,
+      method: req.method,
+      timestamp: new Date().toISOString()
     });
   });
 
