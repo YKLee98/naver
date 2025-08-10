@@ -185,3 +185,60 @@ export interface SyncJob {
   createdAt: string;
   updatedAt: string;
 }
+export interface ChartData {
+  labels: string[];
+  datasets: Array<{
+    label: string;
+    data: number[];
+    backgroundColor?: string;
+    borderColor?: string;
+    borderWidth?: number;
+  }>;
+}
+
+export interface Alert {
+  id: string;
+  type: 'error' | 'warning' | 'info';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  message: string;
+  timestamp: string;
+  status: 'active' | 'acknowledged' | 'dismissed';
+  metadata?: Record<string, any>;
+}
+
+export interface Widget {
+  id: string;
+  type: string;
+  title: string;
+  position: { x: number; y: number; w: number; h: number };
+  config: Record<string, any>;
+  data?: any;
+}
+
+export interface DashboardConfig {
+  userId: string;
+  layout: any[];
+  widgets: Widget[];
+  theme: 'light' | 'dark';
+  refreshInterval: number;
+  preferences: Record<string, any>;
+}
+
+export interface ExportRequest {
+  format: 'json' | 'csv' | 'excel' | 'pdf';
+  type: 'all' | 'products' | 'inventory' | 'sync' | 'pricing';
+  dateRange?: {
+    start: string;
+    end: string;
+  };
+}
+
+export interface ExportStatus {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  message?: string;
+  url?: string;
+  expiresAt?: string;
+}

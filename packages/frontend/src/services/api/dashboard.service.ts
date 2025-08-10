@@ -1,148 +1,213 @@
-// packages/frontend/src/services/api/dashboard.service.ts
-import { apiClient } from './config';
-import { AxiosResponse } from 'axios';
-
-export interface DashboardStats {
-  totalInventory: number;
-  todaySales: number;
-  syncStatus: 'normal' | 'warning' | 'error';
-  alertCount: number;
-  inventoryValue: number;
-  lowStockCount: number;
-  outOfStockCount: number;
-  syncSuccessRate: number;
-}
-
-export interface ActivityItem {
-  id: string;
-  timestamp: string;
-  type: 'order' | 'sync' | 'price' | 'alert';
-  message: string;
-  status: 'success' | 'warning' | 'error';
-  details?: string;
-}
-
-export interface ChartDataPoint {
-  time: string;
-  value: number;
-  [key: string]: any;
-}
-
-export interface InventoryDistribution {
-  name: string;
-  value: number;
-  percentage: number;
-}
+// ===== 1. packages/frontend/src/services/api/dashboard.service.ts =====
+import { api } from '../api';
+import {
+  DashboardStats,
+  Activity,
+  ChartData,
+  Alert,
+  Widget,
+  DashboardConfig,
+  ExportRequest,
+  ExportStatus
+} from '@/types/models';
 
 class DashboardService {
   /**
-   * 대시보드 통계 조회
+   * Get dashboard statistics
    */
-  async getStatistics(): Promise<AxiosResponse<{ success: boolean; data: DashboardStats }>> {
-    return apiClient.get('/dashboard/statistics');
+  async getStatistics(): Promise<DashboardStats> {
+    const response = await api.get('/dashboard/statistics');
+    return response.data.data;
   }
 
   /**
-   * 최근 활동 조회
+   * Get statistics by type
+   */
+  async getStatisticsByType(type: string): Promise<any> {
+    const response = await api.get(`/dashboard/statistics/${type}`);
+    return response.data.data;
+  }
+
+  /**
+   * Get recent activities
    */
   async getRecentActivities(params?: {
     limit?: number;
-    types?: string[];
-  }): Promise<AxiosResponse<{ success: boolean; data: { activities: ActivityItem[]; total: number } }>> {
-    return apiClient.get('/dashboard/activities', { params });
+    offset?: number;
+    type?: string;
+  }): Promise<{ activities: Activity[]; pagination: any }> {
+    const response = await api.get('/dashboard/activities', { params });
+    return response.data.data;
   }
 
   /**
-   * 판매 차트 데이터 조회
+   * Get activity by ID
    */
-  async getSalesChartData(params?: {
-    period?: 'hour' | 'day' | 'week' | 'month';
-    startDate?: string;
-    endDate?: string;
-  }): Promise<AxiosResponse<{ success: boolean; data: ChartDataPoint[] }>> {
-    return apiClient.get('/dashboard/charts/price', { params });
+  async getActivityById(id: string): Promise<Activity> {
+    const response = await api.get(`/dashboard/activities/${id}`);
+    return response.data.data;
   }
 
   /**
-   * 재고 차트 데이터 조회
+   * Get price chart data
+   */
+  async getPriceChartData(params?: {
+    period?: string;
+    sku?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/price', { params });
+    return response.data.data;
+  }
+
+  /**
+   * Get inventory chart data
    */
   async getInventoryChartData(params?: {
-    groupBy?: 'category' | 'vendor' | 'status';
-  }): Promise<AxiosResponse<{ success: boolean; data: InventoryDistribution[] }>> {
-    return apiClient.get('/dashboard/charts/inventory', { params });
+    period?: string;
+    sku?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/inventory', { params });
+    return response.data.data;
   }
 
   /**
-   * 동기화 현황 조회
+   * Get sync chart data
    */
-  async getSyncStatus(): Promise<AxiosResponse<{ 
-    success: boolean; 
-    data: {
-      status: 'normal' | 'warning' | 'error';
-      lastSync: string;
-      successRate: number;
-      recentErrors: Array<{
-        timestamp: string;
-        error: string;
-        sku?: string;
-      }>;
-    }
-  }>> {
-    return apiClient.get('/sync/status');
+  async getSyncChartData(params?: {
+    period?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/sync', { params });
+    return response.data.data;
   }
 
   /**
-   * 알림 목록 조회
+   * Get sales chart data
    */
-  async getNotifications(params?: {
-    unreadOnly?: boolean;
-    limit?: number;
-  }): Promise<AxiosResponse<{ 
-    success: boolean; 
-    data: {
-      notifications: Array<{
-        id: string;
-        type: string;
-        title: string;
-        message: string;
-        timestamp: string;
-        read: boolean;
-        severity: 'info' | 'warning' | 'error';
-      }>;
-      unreadCount: number;
-    }
-  }>> {
-    return apiClient.get('/notifications', { params });
+  async getSalesChartData(params?: {
+    period?: string;
+    platform?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/sales', { params });
+    return response.data.data;
   }
 
   /**
-   * 알림 읽음 처리
+   * Get performance chart data
    */
-  async markNotificationAsRead(notificationId: string): Promise<AxiosResponse<{ success: boolean }>> {
-    return apiClient.put(`/notifications/${notificationId}/read`);
+  async getPerformanceChartData(params?: {
+    metric?: string;
+  }): Promise<ChartData> {
+    const response = await api.get('/dashboard/charts/performance', { params });
+    return response.data.data;
   }
 
   /**
-   * 모든 알림 읽음 처리
+   * Get alerts
    */
-  async markAllNotificationsAsRead(): Promise<AxiosResponse<{ success: boolean }>> {
-    return apiClient.put('/notifications/read-all');
+  async getAlerts(params?: {
+    status?: string;
+    severity?: string;
+  }): Promise<Alert[]> {
+    const response = await api.get('/dashboard/alerts', { params });
+    return response.data.data;
   }
 
   /**
-   * 빠른 통계 조회 (위젯용)
+   * Get alert by ID
    */
-  async getQuickStats(): Promise<AxiosResponse<{ 
-    success: boolean; 
-    data: {
-      totalSku: number;
-      activeSync: number;
-      todayOrders: number;
-      pendingAlerts: number;
-    }
-  }>> {
-    return apiClient.get('/dashboard/quick-stats');
+  async getAlertById(id: string): Promise<Alert> {
+    const response = await api.get(`/dashboard/alerts/${id}`);
+    return response.data.data;
+  }
+
+  /**
+   * Dismiss alert
+   */
+  async dismissAlert(id: string): Promise<void> {
+    await api.post(`/dashboard/alerts/${id}/dismiss`);
+  }
+
+  /**
+   * Acknowledge alert
+   */
+  async acknowledgeAlert(id: string): Promise<void> {
+    await api.post(`/dashboard/alerts/${id}/acknowledge`);
+  }
+
+  /**
+   * Get widgets
+   */
+  async getWidgets(): Promise<Widget[]> {
+    const response = await api.get('/dashboard/widgets');
+    return response.data.data;
+  }
+
+  /**
+   * Get widget data
+   */
+  async getWidgetData(widgetId: string): Promise<any> {
+    const response = await api.get(`/dashboard/widgets/${widgetId}`);
+    return response.data.data;
+  }
+
+  /**
+   * Refresh widget
+   */
+  async refreshWidget(widgetId: string): Promise<any> {
+    const response = await api.post(`/dashboard/widgets/${widgetId}/refresh`);
+    return response.data.data;
+  }
+
+  /**
+   * Get dashboard configuration
+   */
+  async getDashboardConfig(): Promise<DashboardConfig> {
+    const response = await api.get('/dashboard/config');
+    return response.data.data;
+  }
+
+  /**
+   * Update dashboard configuration
+   */
+  async updateDashboardConfig(config: Partial<DashboardConfig>): Promise<DashboardConfig> {
+    const response = await api.put('/dashboard/config', config);
+    return response.data.data;
+  }
+
+  /**
+   * Reset dashboard configuration
+   */
+  async resetDashboardConfig(): Promise<DashboardConfig> {
+    const response = await api.post('/dashboard/config/reset');
+    return response.data.data;
+  }
+
+  /**
+   * Export dashboard data
+   */
+  async exportDashboardData(request: ExportRequest): Promise<{ exportId: string; status: string }> {
+    const response = await api.post('/dashboard/export', request);
+    return response.data.data;
+  }
+
+  /**
+   * Get export status
+   */
+  async getExportStatus(exportId: string): Promise<ExportStatus> {
+    const response = await api.get(`/dashboard/export/${exportId}/status`);
+    return response.data.data;
+  }
+
+  /**
+   * Download export
+   */
+  async downloadExport(exportId: string): Promise<Blob> {
+    const response = await api.get(`/dashboard/export/${exportId}/download`, {
+      responseType: 'blob'
+    });
+    return response.data;
   }
 }
 
 export const dashboardService = new DashboardService();
+

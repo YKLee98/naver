@@ -1,73 +1,18 @@
-// packages/backend/src/routes/api.routes.ts
+// ===== 4. packages/backend/src/routes/api.routes.ts =====
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/index.js';
 import { logger } from '../utils/logger.js';
 import { getRedisClient } from '../config/redis.js';
 
 /**
- * Setup API routes with dynamic loading and error handling
+ * Setup API routes dynamically with proper error handling
  */
 export async function setupApiRoutes(): Promise<Router> {
   const router = Router();
   const protectedRouter = Router();
-
+  
   // Apply auth middleware to protected routes
   protectedRouter.use(authMiddleware);
-
-  // Mapping routes
-  try {
-    const mappingModule = await import('../controllers/MappingController.js');
-    const MappingController = mappingModule.MappingController;
-    
-    if (MappingController) {
-      const syncModule = await import('../services/sync/index.js');
-      const naverModule = await import('../services/naver/index.js');
-      const shopifyModule = await import('../services/shopify/index.js');
-
-      const redis = getRedisClient();
-      const naverAuthService = new naverModule.NaverAuthService(redis);
-      const naverProductService = new naverModule.NaverProductService(naverAuthService);
-      const shopifyGraphQLService = new shopifyModule.ShopifyGraphQLService();
-
-      const mappingService = new syncModule.MappingService(
-        naverProductService,
-        shopifyGraphQLService
-      );
-      const mappingController = new MappingController(mappingService);
-
-      // 중요: 더 구체적인 라우트를 먼저 등록해야 함!
-      // Static routes first (더 구체적인 경로)
-      protectedRouter.get('/mappings/export', mappingController.exportMappings.bind(mappingController));
-      protectedRouter.get('/mappings/stats', mappingController.getMappingStats.bind(mappingController));
-      protectedRouter.get('/mappings/search-by-sku', mappingController.searchProductsBySku.bind(mappingController));
-      protectedRouter.get('/mappings/search/:sku', mappingController.searchProductsBySku.bind(mappingController));
-      protectedRouter.get('/mappings/sku/:sku', mappingController.getMappingBySku.bind(mappingController));
-      
-      // Then routes with parameters
-      protectedRouter.post('/mappings/auto-discover', mappingController.autoDiscoverMappings.bind(mappingController));
-      protectedRouter.post('/mappings/bulk', mappingController.bulkUploadMappings.bind(mappingController));
-      protectedRouter.post('/mappings/import', mappingController.importMappings.bind(mappingController));
-      protectedRouter.post('/mappings/validate', mappingController.validateMappingData.bind(mappingController));
-      
-      // General CRUD routes
-      protectedRouter.get('/mappings', mappingController.getAllMappings.bind(mappingController));
-      protectedRouter.post('/mappings', mappingController.createMapping.bind(mappingController));
-      
-      // ID-based routes last (가장 일반적인 패턴)
-      protectedRouter.get('/mappings/:id', mappingController.getMappingById.bind(mappingController));
-      protectedRouter.put('/mappings/:id', mappingController.updateMapping.bind(mappingController));
-      protectedRouter.delete('/mappings/:id', mappingController.deleteMapping.bind(mappingController));
-      protectedRouter.post('/mappings/:id/validate', mappingController.validateMapping.bind(mappingController));
-      protectedRouter.post('/mappings/:id/retry', mappingController.retryPendingMapping.bind(mappingController));
-      protectedRouter.post('/mappings/:id/sync', mappingController.syncMapping.bind(mappingController));
-      
-      logger.info('✅ Mapping routes initialized');
-    } else {
-      logger.warn('MappingController not available');
-    }
-  } catch (error: any) {
-    logger.error('Mapping routes setup error:', error.message);
-  }
 
   // Product routes
   try {
@@ -131,16 +76,15 @@ export async function setupApiRoutes(): Promise<Router> {
       const inventoryController = new InventoryController(inventorySyncService);
 
       // Static routes first
-      protectedRouter.get('/inventory/status', inventoryController.getAllInventoryStatus.bind(inventoryController));
       protectedRouter.get('/inventory/low-stock', inventoryController.getLowStockProducts.bind(inventoryController));
-      protectedRouter.get('/inventory/out-of-stock', inventoryController.getOutOfStockProducts.bind(inventoryController));
       protectedRouter.get('/inventory/discrepancies', inventoryController.getInventoryDiscrepancies.bind(inventoryController));
-      protectedRouter.post('/inventory/bulk-adjust', inventoryController.bulkAdjustInventory.bind(inventoryController));
+      protectedRouter.post('/inventory/sync-all', inventoryController.syncAllInventory.bind(inventoryController));
       
       // Parameter routes last
       protectedRouter.get('/inventory/:sku/status', inventoryController.getInventoryStatus.bind(inventoryController));
       protectedRouter.get('/inventory/:sku/history', inventoryController.getInventoryHistory.bind(inventoryController));
       protectedRouter.post('/inventory/:sku/adjust', inventoryController.adjustInventory.bind(inventoryController));
+      protectedRouter.post('/inventory/:sku/sync', inventoryController.syncInventory.bind(inventoryController));
       
       logger.info('✅ Inventory routes initialized');
     } else {
@@ -150,13 +94,68 @@ export async function setupApiRoutes(): Promise<Router> {
     logger.error('Inventory routes setup error:', error.message);
   }
 
+  // Mapping routes
+  try {
+    const mappingModule = await import('../controllers/MappingController.js');
+    const MappingController = mappingModule.MappingController;
+    
+    if (MappingController) {
+      const syncModule = await import('../services/sync/index.js');
+      const naverModule = await import('../services/naver/index.js');
+      const shopifyModule = await import('../services/shopify/index.js');
+
+      const redis = getRedisClient();
+      const naverAuthService = new naverModule.NaverAuthService(redis);
+      const naverProductService = new naverModule.NaverProductService(naverAuthService);
+      const shopifyGraphQLService = new shopifyModule.ShopifyGraphQLService();
+
+      const mappingService = new syncModule.MappingService(
+        naverProductService,
+        shopifyGraphQLService
+      );
+
+      const mappingController = new MappingController(mappingService);
+
+      // Static routes first (더 구체적인 경로)
+      protectedRouter.get('/mappings/export', mappingController.exportMappings.bind(mappingController));
+      protectedRouter.get('/mappings/stats', mappingController.getMappingStats.bind(mappingController));
+      protectedRouter.get('/mappings/search-by-sku', mappingController.searchProductsBySku.bind(mappingController));
+      protectedRouter.get('/mappings/search/:sku', mappingController.searchProductsBySku.bind(mappingController));
+      protectedRouter.get('/mappings/sku/:sku', mappingController.getMappingBySku.bind(mappingController));
+      
+      // Then routes with parameters
+      protectedRouter.post('/mappings/auto-discover', mappingController.autoDiscoverMappings.bind(mappingController));
+      protectedRouter.post('/mappings/bulk', mappingController.bulkUploadMappings.bind(mappingController));
+      protectedRouter.post('/mappings/import', mappingController.importMappings.bind(mappingController));
+      protectedRouter.post('/mappings/validate', mappingController.validateMappingData.bind(mappingController));
+      
+      // General CRUD routes
+      protectedRouter.get('/mappings', mappingController.getAllMappings.bind(mappingController));
+      protectedRouter.post('/mappings', mappingController.createMapping.bind(mappingController));
+      
+      // ID-based routes last (가장 일반적인 패턴)
+      protectedRouter.get('/mappings/:id', mappingController.getMappingById.bind(mappingController));
+      protectedRouter.put('/mappings/:id', mappingController.updateMapping.bind(mappingController));
+      protectedRouter.delete('/mappings/:id', mappingController.deleteMapping.bind(mappingController));
+      protectedRouter.post('/mappings/:id/validate', mappingController.validateMapping.bind(mappingController));
+      protectedRouter.post('/mappings/:id/retry', mappingController.retryPendingMapping.bind(mappingController));
+      protectedRouter.post('/mappings/:id/sync', mappingController.syncMapping.bind(mappingController));
+      
+      logger.info('✅ Mapping routes initialized');
+    } else {
+      logger.warn('MappingController not available');
+    }
+  } catch (error: any) {
+    logger.error('Mapping routes setup error:', error.message);
+  }
+
   // Sync routes
   try {
-    const syncControllerModule = await import('../controllers/SyncController.js');
-    const SyncController = syncControllerModule.SyncController;
+    const syncModule = await import('../controllers/SyncController.js');
+    const SyncController = syncModule.SyncController;
     
     if (SyncController) {
-      const syncModule = await import('../services/sync/index.js');
+      const syncServiceModule = await import('../services/sync/index.js');
       const naverModule = await import('../services/naver/index.js');
       const shopifyModule = await import('../services/shopify/index.js');
 
@@ -166,7 +165,7 @@ export async function setupApiRoutes(): Promise<Router> {
       const naverOrderService = new naverModule.NaverOrderService(naverAuthService);
       const shopifyBulkService = new shopifyModule.ShopifyBulkService();
 
-      const syncService = new syncModule.SyncService(
+      const syncService = new syncServiceModule.SyncService(
         naverProductService,
         naverOrderService,
         shopifyBulkService,

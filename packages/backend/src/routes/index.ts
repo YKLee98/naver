@@ -1,4 +1,4 @@
-// packages/backend/src/routes/index.ts
+// ===== 5. packages/backend/src/routes/index.ts =====
 import { Router } from 'express';
 import authRoutes from './auth.routes.js';
 
@@ -45,7 +45,7 @@ export async function setupRoutes(): Promise<Router> {
     const dashboardModule = await import('./dashboard.routes.js');
     const setupDashboardRoutes = dashboardModule.setupDashboardRoutes;
     if (typeof setupDashboardRoutes === 'function') {
-      const dashboardRouter = await setupDashboardRoutes();
+      const dashboardRouter = setupDashboardRoutes();
       router.use('/dashboard', dashboardRouter);
       console.log('✅ Dashboard routes registered at /dashboard');
     }

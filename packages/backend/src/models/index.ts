@@ -1,15 +1,16 @@
-// packages/backend/src/models/index.ts
-export { User } from './User';
-export { ProductMapping } from './ProductMapping';
-export { InventoryTransaction } from './InventoryTransaction';
-export { PriceHistory } from './PriceHistory';
-export { ExchangeRate } from './ExchangeRate';
-export { Activity } from './Activity';
-export * from './PriceSyncJob';
-export { PriceSyncRule } from './PriceSyncRule';
-export { SystemLog } from './SystemLog';
-export { Settings } from './Settings';
-export { OrderSyncStatus } from './OrderSyncStatus';
-export { SyncHistory } from './SyncHistory'; // 추가
-export { SyncActivity } from './SyncActivity';
-export { WebhookLog } from './WebhookLog';
+// ===== 1. packages/backend/src/models/index.ts =====
+// 모든 모델을 일관되게 export
+export { User } from './User.js';
+export { ProductMapping } from './ProductMapping.js';
+export { InventoryTransaction } from './InventoryTransaction.js';
+export { PriceHistory } from './PriceHistory.js';
+export { ExchangeRate } from './ExchangeRate.js';
+export { Activity } from './Activity.js';
+export { PriceSyncJob } from './PriceSyncJob.js'; 
+export { PriceSyncRule } from './PriceSyncRule.js';
+export { SystemLog } from './SystemLog.js';
+export { Settings } from './Settings.js';
+export { OrderSyncStatus } from './OrderSyncStatus.js';
+export { SyncHistory } from './SyncHistory.js';
+export { SyncActivity } from './SyncActivity.js';
+export { WebhookLog } from './WebhookLog.js';

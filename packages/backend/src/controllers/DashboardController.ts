@@ -1,18 +1,24 @@
 // packages/backend/src/controllers/DashboardController.ts
 import { Request, Response, NextFunction } from 'express';
-import { PriceSyncJob } from '../models/PriceSyncJob';
-import { InventoryTransaction } from '../models/InventoryTransaction';
-import { ProductMapping } from '../models/ProductMapping';
-import { PriceHistory } from '../models/PriceHistory';
-import { Activity } from '../models/Activity';
-import { logger } from '../utils/logger';
-import { getRedisClient } from '../config/redis';
+import { 
+  PriceSyncJob,
+  InventoryTransaction,
+  ProductMapping,
+  PriceHistory,
+  Activity 
+} from '../models/index.js';  // ✅ index.js에서 한번에 import
+import { logger } from '../utils/logger.js';
+import { getRedisClient } from '../config/redis.js';
 
-class DashboardControllerClass {
+export class DashboardController {
   private redis: any;
 
   constructor() {
-    this.redis = getRedisClient();
+    try {
+      this.redis = getRedisClient();
+    } catch (error) {
+      logger.warn('Redis not available for DashboardController');
+    }
   }
 
   /**
@@ -79,20 +85,19 @@ class DashboardControllerClass {
         case 'sync':
           data = await this.getSyncStatistics();
           break;
-        case 'price':
-          data = await this.getPriceStatistics();
+        case 'pricing':
+          data = await this.getPricingStatistics();
           break;
         default:
           res.status(400).json({
             success: false,
-            error: `Invalid statistics type: ${type}`
+            error: 'Invalid statistics type'
           });
           return;
       }
 
       res.json({
         success: true,
-        type,
         data
       });
     } catch (error) {
@@ -105,18 +110,30 @@ class DashboardControllerClass {
    */
   getRecentActivities = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const limit = parseInt(req.query.limit as string) || 20;
-      const offset = parseInt(req.query.offset as string) || 0;
+      const { limit = 50, offset = 0, type } = req.query;
 
-      const activities = await this.fetchRecentActivities(limit, offset);
+      const query: any = {};
+      if (type) {
+        query.type = type;
+      }
+
+      const activities = await Activity.find(query)
+        .sort({ createdAt: -1 })
+        .limit(Number(limit))
+        .skip(Number(offset))
+        .lean();
+
+      const total = await Activity.countDocuments(query);
 
       res.json({
         success: true,
-        data: activities,
-        pagination: {
-          limit,
-          offset,
-          total: await this.getActivityCount()
+        data: {
+          activities,
+          pagination: {
+            limit: Number(limit),
+            offset: Number(offset),
+            total
+          }
         }
       });
     } catch (error) {
@@ -130,10 +147,8 @@ class DashboardControllerClass {
   getActivityById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { id } = req.params;
-      
-      // Try to find in different collections
-      const activity = await this.findActivityById(id);
-      
+      const activity = await Activity.findById(id);
+
       if (!activity) {
         res.status(404).json({
           success: false,
@@ -224,7 +239,7 @@ class DashboardControllerClass {
    */
   getPerformanceChartData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { metric = 'all' } = req.query;
+      const { metric = 'response_time' } = req.query;
       const data = await this.generatePerformanceChartData(metric as string);
 
       res.json({
@@ -385,12 +400,11 @@ class DashboardControllerClass {
   updateDashboardConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const userId = (req as any).user?.id;
-      const config = req.body;
-      const updated = await this.saveDashboardConfig(userId, config);
+      const config = await this.saveDashboardConfig(userId, req.body);
 
       res.json({
         success: true,
-        data: updated
+        data: config
       });
     } catch (error) {
       next(error);
@@ -502,25 +516,25 @@ class DashboardControllerClass {
 
   private async getLowStockCount(): Promise<number> {
     try {
-      const threshold = 10;
-      const transactions = await InventoryTransaction.aggregate([
-        {
-          $sort: { createdAt: -1 }
-        },
-        {
-          $group: {
-            _id: '$sku',
-            latestQuantity: { $first: '$newQuantity' }
-          }
-        },
-        {
-          $match: {
-            latestQuantity: { $lt: threshold }
-          }
+      const cacheKey = 'dashboard:lowStockCount';
+      
+      if (this.redis) {
+        const cached = await this.redis.get(cacheKey);
+        if (cached) {
+          return parseInt(cached);
         }
-      ]);
+      }
 
-      return transactions.length;
+      const mappings = await ProductMapping.find({ 
+        isActive: true,
+        'inventory.shopify': { $lt: 10 }
+      }).countDocuments();
+
+      if (this.redis) {
+        await this.redis.setex(cacheKey, 300, mappings.toString());
+      }
+
+      return mappings;
     } catch (error) {
       logger.error('Error getting low stock count:', error);
       return 0;
@@ -529,14 +543,14 @@ class DashboardControllerClass {
 
   private async calculateSyncSuccessRate(): Promise<number> {
     try {
-      const recentJobs = await PriceSyncJob.find()
-        .sort({ createdAt: -1 })
-        .limit(100);
+      const recentJobs = await PriceSyncJob.find({
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      }).select('status');
 
-      if (recentJobs.length === 0) return 0;
+      if (recentJobs.length === 0) return 100;
 
-      const successfulJobs = recentJobs.filter(job => job.status === 'completed').length;
-      return Math.round((successfulJobs / recentJobs.length) * 100);
+      const successCount = recentJobs.filter(job => job.status === 'completed').length;
+      return Math.round((successCount / recentJobs.length) * 100);
     } catch (error) {
       logger.error('Error calculating sync success rate:', error);
       return 0;
@@ -544,55 +558,70 @@ class DashboardControllerClass {
   }
 
   private async getProductStatistics(): Promise<any> {
-    // Implement product statistics logic
-    return {
-      total: 0,
-      active: 0,
-      inactive: 0,
-      byCategory: []
-    };
+    const [total, active, synced, outOfSync] = await Promise.all([
+      ProductMapping.countDocuments(),
+      ProductMapping.countDocuments({ isActive: true }),
+      ProductMapping.countDocuments({ syncStatus: 'synced' }),
+      ProductMapping.countDocuments({ syncStatus: 'out_of_sync' })
+    ]);
+
+    return { total, active, synced, outOfSync };
   }
 
   private async getInventoryStatistics(): Promise<any> {
-    // Implement inventory statistics logic
+    const [totalProducts, lowStock, outOfStock] = await Promise.all([
+      ProductMapping.countDocuments({ isActive: true }),
+      ProductMapping.countDocuments({ 
+        isActive: true,
+        'inventory.shopify': { $gt: 0, $lt: 10 }
+      }),
+      ProductMapping.countDocuments({ 
+        isActive: true,
+        'inventory.shopify': 0
+      })
+    ]);
+
     return {
-      totalValue: 0,
-      averageStock: 0,
-      turnoverRate: 0
+      totalProducts,
+      lowStock,
+      outOfStock,
+      healthy: totalProducts - lowStock - outOfStock
     };
   }
 
   private async getSyncStatistics(): Promise<any> {
-    // Implement sync statistics logic
+    const recentJobs = await PriceSyncJob.find({
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    }).sort({ createdAt: -1 });
+
     return {
-      totalSyncs: 0,
-      successRate: 0,
-      averageDuration: 0
+      todayJobs: recentJobs.length,
+      successRate: await this.calculateSyncSuccessRate(),
+      lastSync: recentJobs[0]?.createdAt || null,
+      status: recentJobs[0]?.status || 'idle'
     };
   }
 
-  private async getPriceStatistics(): Promise<any> {
-    // Implement price statistics logic
+  private async getPricingStatistics(): Promise<any> {
+    const priceHistories = await PriceHistory.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          avgPriceChange: { $avg: '$priceChange' },
+          totalChanges: { $sum: 1 }
+        }
+      }
+    ]);
+
     return {
-      averageMargin: 0,
-      priceChanges: 0,
-      discounts: 0
+      avgPriceChange: priceHistories[0]?.avgPriceChange || 0,
+      totalChanges: priceHistories[0]?.totalChanges || 0
     };
-  }
-
-  private async fetchRecentActivities(limit: number, offset: number): Promise<any[]> {
-    // Implement activity fetching logic
-    return [];
-  }
-
-  private async getActivityCount(): Promise<number> {
-    // Implement activity count logic
-    return 0;
-  }
-
-  private async findActivityById(id: string): Promise<any> {
-    // Implement activity finding logic
-    return null;
   }
 
   private async generatePriceChartData(period: string, sku?: string): Promise<any> {
@@ -699,6 +728,3 @@ class DashboardControllerClass {
   }
 }
 
-// CommonJS export
-
-export { DashboardControllerClass as DashboardController };
