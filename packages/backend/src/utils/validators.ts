@@ -1,7 +1,35 @@
 // packages/backend/src/utils/validators.ts
 
+/**
+ * SKU 유효성 검사 (유연한 규칙)
+ * @param sku SKU 문자열
+ * @returns 유효한 SKU인지 여부
+ */
+export const validateSKU = (sku: string): boolean => {
+  if (!sku || typeof sku !== 'string') return false;
+  
+  // 기본적인 검증만 수행
+  // - 최소 1자 이상
+  // - 최대 100자 이하
+  // - 공백만으로 이루어지지 않음
+  const trimmedSku = sku.trim();
+  
+  if (trimmedSku.length < 1 || trimmedSku.length > 100) {
+    return false;
+  }
+  
+  // 거의 모든 문자 허용 (영문, 숫자, 한글, 특수문자 등)
+  // 단, 제어 문자나 줄바꿈 문자는 제외
+  const invalidCharsRegex = /[\x00-\x1F\x7F\r\n\t]/;
+  if (invalidCharsRegex.test(trimmedSku)) {
+    return false;
+  }
+  
+  return true;
+};
 
- /* 상품 ID 유효성 검사
+/**
+ * 상품 ID 유효성 검사
  */
 export const validateProductId = (id: string, platform: 'naver' | 'shopify'): boolean => {
   if (!id || typeof id !== 'string') return false;
@@ -15,6 +43,49 @@ export const validateProductId = (id: string, platform: 'naver' | 'shopify'): bo
   }
   
   return false;
+};
+
+/**
+ * 네이버 상품 ID 유효성 검사
+ * @param id 네이버 상품 ID
+ * @returns 유효한 ID인지 여부
+ */
+export const validateNaverProductId = (id: string): boolean => {
+  if (!id || typeof id !== 'string') return false;
+  
+  // 네이버 상품 ID는 숫자 문자열
+  const idRegex = /^\d+$/;
+  return idRegex.test(id);
+};
+
+/**
+ * Shopify 상품 ID 유효성 검사
+ * @param id Shopify 상품 ID
+ * @returns 유효한 ID인지 여부
+ */
+export const validateShopifyProductId = (id: string): boolean => {
+  if (!id || typeof id !== 'string') return false;
+  
+  // Shopify 상품 ID 형식: gid://shopify/Product/숫자 또는 숫자만
+  const gidRegex = /^gid:\/\/shopify\/Product\/\d+$/;
+  const numericRegex = /^\d+$/;
+  
+  return gidRegex.test(id) || numericRegex.test(id);
+};
+
+/**
+ * Shopify Variant ID 유효성 검사
+ * @param id Shopify Variant ID
+ * @returns 유효한 ID인지 여부
+ */
+export const validateShopifyVariantId = (id: string): boolean => {
+  if (!id || typeof id !== 'string') return false;
+  
+  // Shopify Variant ID 형식: gid://shopify/ProductVariant/숫자 또는 숫자만
+  const gidRegex = /^gid:\/\/shopify\/ProductVariant\/\d+$/;
+  const numericRegex = /^\d+$/;
+  
+  return gidRegex.test(id) || numericRegex.test(id);
 };
 
 /**
@@ -100,145 +171,11 @@ export const validateEmail = (email: string): boolean => {
 };
 
 /**
- * 페이지네이션 파라미터 검사
- */
-export const validatePaginationParams = (page: number, limit: number): boolean => {
-  if (typeof page !== 'number' || typeof limit !== 'number') return false;
-  
-  return page >= 1 && limit >= 1 && limit <= 100;
-};
-
-/**
- * 정렬 파라미터 검사
- */
-export const validateSortParams = (sortBy: string, order: string, allowedFields: string[]): boolean => {
-  if (!sortBy || !order) return false;
-  
-  return allowedFields.includes(sortBy) && ['asc', 'desc'].includes(order.toLowerCase());
-};
-
-/**
- * 동기화 모드 검사
- */
-export const validateSyncMode = (mode: string): boolean => {
-  const validModes = ['auto', 'manual', 'realtime', 'scheduled'];
-  return validModes.includes(mode);
-};
-
-/**
- * 플랫폼 검사
- */
-export const validatePlatform = (platform: string): boolean => {
-  const validPlatforms = ['naver', 'shopify', 'both'];
-  return validPlatforms.includes(platform);
-};
-
-/**
- * 조정 타입 검사
- */
-export const validateAdjustType = (type: string): boolean => {
-  const validTypes = ['set', 'add', 'subtract'];
-  return validTypes.includes(type);
-};
-
-/**
- * 언어 코드 검사
- */
-export const validateLanguageCode = (code: string): boolean => {
-  return /^[a-z]{2}(-[A-Z]{2})?$/.test(code);
-};
-
-/**
- * 통화 코드 검사
- */
-export const validateCurrencyCode = (code: string): boolean => {
-  const validCurrencies = ['KRW', 'USD'];
-  return validCurrencies.includes(code);
-};
-
-/**
- * Webhook 이벤트 타입 검사
- */
-export const validateWebhookEvent = (event: string): boolean => {
-  const validEvents = [
-    'orders/create',
-    'orders/updated',
-    'orders/cancelled',
-    'products/create',
-    'products/update',
-    'products/delete',
-    'inventory_levels/update'
-  ];
-  return validEvents.includes(event);
-};
-
-/**
- * 파일 확장자 검사
- */
-export const validateFileExtension = (filename: string, allowedExtensions: string[]): boolean => {
-  if (!filename) return false;
-  
-  const extension = filename.split('.').pop()?.toLowerCase();
-  return allowedExtensions.includes(extension || '');
-};
-
-/**
- * 파일 크기 검사 (바이트)
- */
-export const validateFileSize = (size: number, maxSize: number): boolean => {
-  return size > 0 && size <= maxSize;
-};
-
-/**
- * 배치 크기 검사
- */
-export const validateBatchSize = (size: number): boolean => {
-  // 1-1000개로 제한
-  return Number.isInteger(size) && size >= 1 && size <= 1000;
-};
-
-/**
- * 시간대 검사
- */
-export const validateTimezone = (timezone: string): boolean => {
-  try {
-    // Intl API를 사용하여 유효성 검사
-    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Cron 표현식 검사
- */
-export const validateCronExpression = (expression: string): boolean => {
-  // 간단한 cron 표현식 검사 (5개 필드)
-  const cronPattern = /^(\*|([0-9]|[1-5][0-9])) (\*|([0-9]|1[0-9]|2[0-3])) (\*|([1-9]|[12][0-9]|3[01])) (\*|([1-9]|1[0-2])) (\*|[0-6])$/;
-  return cronPattern.test(expression);
-};
-
-/**
- * IP 주소 검사
- */
-export const validateIpAddress = (ip: string): boolean => {
-  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
-  const ipv6Pattern = /^([\da-fA-F]{1,4}:){7}[\da-fA-F]{1,4}$/;
-  
-  if (ipv4Pattern.test(ip)) {
-    // IPv4 각 옥텟이 0-255 범위인지 확인
-    const octets = ip.split('.');
-    return octets.every(octet => parseInt(octet) >= 0 && parseInt(octet) <= 255);
-  }
-  
-  return ipv6Pattern.test(ip);
-};
-
-/**
- * URL 검사
+ * URL 유효성 검사
  */
 export const validateUrl = (url: string): boolean => {
+  if (!url || typeof url !== 'string') return false;
+  
   try {
     new URL(url);
     return true;
@@ -248,16 +185,34 @@ export const validateUrl = (url: string): boolean => {
 };
 
 /**
- * 객체 필수 필드 검사
+ * 전화번호 유효성 검사 (한국)
  */
-export const validateRequiredFields = <T extends object>(
-  obj: T,
-  requiredFields: (keyof T)[]
-): { isValid: boolean; missingFields: string[] } => {
-  const missingFields = requiredFields.filter(field => !obj[field]);
+export const validatePhoneNumber = (phone: string): boolean => {
+  if (!phone || typeof phone !== 'string') return false;
   
-  return {
-    isValid: missingFields.length === 0,
-    missingFields: missingFields as string[]
-  };
+  // 한국 전화번호 형식: 010-xxxx-xxxx, 02-xxxx-xxxx 등
+  const phonePattern = /^0\d{1,2}-?\d{3,4}-?\d{4}$/;
+  return phonePattern.test(phone.replace(/\s/g, ''));
+};
+
+/**
+ * 우편번호 유효성 검사 (한국)
+ */
+export const validatePostalCode = (code: string): boolean => {
+  if (!code || typeof code !== 'string') return false;
+  
+  // 한국 우편번호: 5자리 숫자
+  const postalPattern = /^\d{5}$/;
+  return postalPattern.test(code.replace(/\s/g, ''));
+};
+
+/**
+ * 사업자등록번호 유효성 검사
+ */
+export const validateBusinessNumber = (number: string): boolean => {
+  if (!number || typeof number !== 'string') return false;
+  
+  // 사업자등록번호: xxx-xx-xxxxx
+  const bizPattern = /^\d{3}-?\d{2}-?\d{5}$/;
+  return bizPattern.test(number.replace(/\s/g, ''));
 };

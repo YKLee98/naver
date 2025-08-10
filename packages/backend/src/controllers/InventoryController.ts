@@ -2,6 +2,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { InventorySyncService } from '../services/sync/index.js';
 import { logger } from '../utils/logger.js';
+import { ProductMapping, InventoryTransaction } from '../models/index.js';
 
 export class InventoryController {
   private inventorySyncService: InventorySyncService;
@@ -13,7 +14,7 @@ export class InventoryController {
   /**
    * Get all inventory status
    */
-  async getAllInventoryStatus(req: Request, res: Response, next: NextFunction) {
+  async getAllInventoryStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { page = 1, limit = 20, search } = req.query;
       
@@ -39,7 +40,7 @@ export class InventoryController {
 
       res.json({
         success: true,
-        data: inventoryItems, // 배열을 직접 반환
+        data: inventoryItems,
         pagination: {
           total: inventoryItems.length,
           page: Number(page),
@@ -56,17 +57,36 @@ export class InventoryController {
   /**
    * Get inventory status for a specific SKU
    */
-  async getInventoryStatus(req: Request, res: Response, next: NextFunction) {
+  async getInventoryStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { sku } = req.params;
       
-      // Mock implementation
+      // 실제 데이터 조회
+      const mapping = await ProductMapping.findOne({ sku: sku.toUpperCase() });
+      
+      if (!mapping) {
+        res.json({
+          success: true,
+          data: {
+            sku,
+            naverStock: 0,
+            shopifyStock: 0,
+            synced: false,
+            lastSyncedAt: null,
+            message: '매핑되지 않은 SKU입니다.'
+          }
+        });
+        return;
+      }
+
+      // 실제 재고 정보 조회 로직 (구현 필요)
       const status = {
         sku,
-        naverStock: 0,
-        shopifyStock: 0,
-        synced: false,
-        lastSyncedAt: null
+        naverStock: mapping.inventory?.naver?.available || 0,
+        shopifyStock: mapping.inventory?.shopify?.available || 0,
+        synced: mapping.syncStatus === 'completed',
+        lastSyncedAt: mapping.lastSyncedAt,
+        status: mapping.status
       };
 
       res.json({
@@ -82,13 +102,24 @@ export class InventoryController {
   /**
    * Get inventory history
    */
-  async getInventoryHistory(req: Request, res: Response, next: NextFunction) {
+  async getInventoryHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { sku } = req.params;
       const { startDate, endDate, limit = 50 } = req.query;
 
-      // Mock implementation
-      const history = [];
+      // 날짜 필터 생성
+      const filter: any = { sku: sku.toUpperCase() };
+      
+      if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) filter.createdAt.$gte = new Date(startDate as string);
+        if (endDate) filter.createdAt.$lte = new Date(endDate as string);
+      }
+
+      // 재고 변동 이력 조회
+      const history = await InventoryTransaction.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(Number(limit));
 
       res.json({
         success: true,
@@ -103,21 +134,46 @@ export class InventoryController {
   /**
    * Adjust inventory
    */
-  async adjustInventory(req: Request, res: Response, next: NextFunction) {
+  async adjustInventory(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { sku } = req.params;
       const { quantity, reason, platform } = req.body;
 
-      // Mock implementation
+      // 유효성 검사
+      if (!quantity || !reason || !platform) {
+        res.status(400).json({
+          success: false,
+          error: '수량, 사유, 플랫폼은 필수 입력 항목입니다.'
+        });
+        return;
+      }
+
+      // 재고 조정 로직 구현
       logger.info(`Adjusting inventory for SKU ${sku}`, { quantity, reason, platform });
+
+      // 재고 변동 기록 생성
+      const transaction = new InventoryTransaction({
+        sku: sku.toUpperCase(),
+        type: 'adjustment',
+        platform,
+        quantity,
+        reason,
+        previousQuantity: 0, // 실제 이전 수량 조회 필요
+        newQuantity: quantity,
+        userId: (req as any).user?.id || 'system',
+        createdAt: new Date()
+      });
+
+      await transaction.save();
 
       res.json({
         success: true,
         message: '재고가 조정되었습니다.',
         data: {
           sku,
-          quantity,
-          platform
+          platform,
+          adjustedQuantity: quantity,
+          reason
         }
       });
     } catch (error) {
@@ -127,21 +183,68 @@ export class InventoryController {
   }
 
   /**
-   * Get low stock products
+   * Sync inventory for a specific SKU
    */
-  async getLowStockProducts(req: Request, res: Response, next: NextFunction) {
+  async syncInventory(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { threshold = 10, page = 1, limit = 20 } = req.query;
-
-      // Mock implementation
-      const products = [];
+      const { sku } = req.params;
+      
+      logger.info(`Starting inventory sync for SKU: ${sku}`);
+      
+      // 실제 동기화 로직 호출
+      if (this.inventorySyncService) {
+        await this.inventorySyncService.syncSingleProduct(sku.toUpperCase());
+      }
 
       res.json({
         success: true,
-        data: {
-          products,
-          total: 0,
-          threshold: Number(threshold)
+        message: `SKU ${sku}의 재고 동기화가 시작되었습니다.`
+      });
+    } catch (error) {
+      logger.error('Sync inventory error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get low stock products
+   */
+  async getLowStockProducts(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { threshold = 10, page = 1, limit = 20 } = req.query;
+      
+      // 낮은 재고 상품 조회 로직
+      const filter = {
+        $or: [
+          { 'inventory.naver.available': { $lte: Number(threshold) } },
+          { 'inventory.shopify.available': { $lte: Number(threshold) } }
+        ],
+        status: 'ACTIVE'
+      };
+
+      const total = await ProductMapping.countDocuments(filter);
+      const products = await ProductMapping.find(filter)
+        .skip((Number(page) - 1) * Number(limit))
+        .limit(Number(limit))
+        .sort({ 'inventory.naver.available': 1 });
+
+      const lowStockProducts = products.map(product => ({
+        sku: product.sku,
+        naverStock: product.inventory?.naver?.available || 0,
+        shopifyStock: product.inventory?.shopify?.available || 0,
+        productName: product.productName,
+        status: product.status,
+        lastSyncedAt: product.lastSyncedAt
+      }));
+
+      res.json({
+        success: true,
+        data: lowStockProducts,
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Math.ceil(total / Number(limit))
         }
       });
     } catch (error) {
@@ -151,80 +254,114 @@ export class InventoryController {
   }
 
   /**
-   * Get out of stock products
-   */
-  async getOutOfStockProducts(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { page = 1, limit = 20 } = req.query;
-
-      // Mock implementation
-      const products = [];
-
-      res.json({
-        success: true,
-        data: {
-          products,
-          total: 0
-        }
-      });
-    } catch (error) {
-      logger.error('Get out of stock products error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Bulk adjust inventory
-   */
-  async bulkAdjustInventory(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { adjustments } = req.body;
-
-      if (!Array.isArray(adjustments)) {
-        return res.status(400).json({
-          success: false,
-          error: { message: 'adjustments must be an array' }
-        });
-      }
-
-      // Mock implementation
-      logger.info(`Bulk adjusting inventory for ${adjustments.length} items`);
-
-      res.json({
-        success: true,
-        message: `${adjustments.length}개 상품의 재고가 조정되었습니다.`,
-        data: {
-          processed: adjustments.length,
-          success: adjustments.length,
-          failed: 0
-        }
-      });
-    } catch (error) {
-      logger.error('Bulk adjust inventory error:', error);
-      next(error);
-    }
-  }
-
-  /**
    * Get inventory discrepancies
    */
-  async getInventoryDiscrepancies(req: Request, res: Response, next: NextFunction) {
+  async getInventoryDiscrepancies(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { threshold = 5, page = 1, limit = 20 } = req.query;
+      const { page = 1, limit = 20, threshold = 5 } = req.query;
+      
+      // 재고 불일치 상품 조회
+      const mappings = await ProductMapping.find({ status: 'ACTIVE' });
+      
+      const discrepancies = mappings.filter(mapping => {
+        const naverStock = mapping.inventory?.naver?.available || 0;
+        const shopifyStock = mapping.inventory?.shopify?.available || 0;
+        return Math.abs(naverStock - shopifyStock) >= Number(threshold);
+      });
 
-      // Mock implementation
-      const discrepancies = [];
+      const paginatedDiscrepancies = discrepancies
+        .slice((Number(page) - 1) * Number(limit), Number(page) * Number(limit))
+        .map(mapping => ({
+          sku: mapping.sku,
+          naverStock: mapping.inventory?.naver?.available || 0,
+          shopifyStock: mapping.inventory?.shopify?.available || 0,
+          difference: Math.abs((mapping.inventory?.naver?.available || 0) - (mapping.inventory?.shopify?.available || 0)),
+          productName: mapping.productName,
+          lastSyncedAt: mapping.lastSyncedAt
+        }));
 
       res.json({
         success: true,
-        data: {
-          discrepancies,
-          total: 0,
-          threshold: Number(threshold)
+        data: paginatedDiscrepancies,
+        pagination: {
+          total: discrepancies.length,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Math.ceil(discrepancies.length / Number(limit))
         }
       });
     } catch (error) {
       logger.error('Get inventory discrepancies error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Sync all inventory
+   */
+  async syncAllInventory(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      logger.info('Starting full inventory sync');
+      
+      // 전체 재고 동기화 시작
+      if (this.inventorySyncService) {
+        // 비동기로 처리하고 즉시 응답
+        this.inventorySyncService.syncAllProducts().catch(error => {
+          logger.error('Full inventory sync error:', error);
+        });
+      }
+
+      res.json({
+        success: true,
+        message: '전체 재고 동기화가 시작되었습니다. 잠시 후 결과를 확인해주세요.'
+      });
+    } catch (error) {
+      logger.error('Sync all inventory error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get inventory metrics
+   */
+  async getInventoryMetrics(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const [
+        totalProducts,
+        syncedProducts,
+        lowStockProducts,
+        outOfStockProducts
+      ] = await Promise.all([
+        ProductMapping.countDocuments({ status: 'ACTIVE' }),
+        ProductMapping.countDocuments({ status: 'ACTIVE', syncStatus: 'completed' }),
+        ProductMapping.countDocuments({
+          status: 'ACTIVE',
+          $or: [
+            { 'inventory.naver.available': { $lte: 10 } },
+            { 'inventory.shopify.available': { $lte: 10 } }
+          ]
+        }),
+        ProductMapping.countDocuments({
+          status: 'ACTIVE',
+          $or: [
+            { 'inventory.naver.available': 0 },
+            { 'inventory.shopify.available': 0 }
+          ]
+        })
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          totalProducts,
+          syncedProducts,
+          lowStockProducts,
+          outOfStockProducts,
+          syncRate: totalProducts > 0 ? (syncedProducts / totalProducts) * 100 : 0
+        }
+      });
+    } catch (error) {
+      logger.error('Get inventory metrics error:', error);
       next(error);
     }
   }
