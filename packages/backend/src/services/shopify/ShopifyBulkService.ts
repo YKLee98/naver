@@ -1,11 +1,8 @@
 // packages/backend/src/services/shopify/ShopifyBulkService.ts
-import { ShopifyService } from './ShopifyService';
-import { ShopifyGraphQLService } from './ShopifyGraphQLService';
-import { logger } from '../../utils/logger';
-import { AppError } from '../../utils/errors';
-import { performance } from 'perf_hooks';
+import { ShopifyService } from './ShopifyService.js';
+import { ShopifyGraphQLService } from './ShopifyGraphQLService.js';
+import { logger } from '../../utils/logger.js';
 
-// Types and Interfaces
 interface PriceUpdate {
   sku: string;
   price: number;
@@ -28,78 +25,83 @@ interface BulkUpdateStats {
   success: number;
   failed: number;
   skipped: number;
-  errors?: Array<{
+  errors: Array<{
     sku: string;
     error: string;
   }>;
-  executionTime?: number;
+  duration?: number;
 }
 
-interface CSVRow {
-  sku: string;
-  price?: string | number;
-  quantity?: string | number;
-  [key: string]: any;
-}
-
-interface BulkServiceOptions {
-  batchSize?: number;
-  delayBetweenBatches?: number;
-  maxRetries?: number;
-  continueOnError?: boolean;
-}
-
+/**
+ * Enterprise Shopify Bulk Operations Service
+ * Handles batch updates with optimized performance and error recovery
+ */
 export class ShopifyBulkService extends ShopifyService {
-  private graphqlService: ShopifyGraphQLService;
+  private graphqlService: ShopifyGraphQLService | null = null;
   private readonly DEFAULT_BATCH_SIZE = 100;
-  private readonly DEFAULT_BATCH_DELAY = 1000;
+  private readonly DEFAULT_RETRY_ATTEMPTS = 3;
+  private readonly RATE_LIMIT_DELAY = 1000; // 1 second
 
   constructor() {
     super();
+    // GraphQL service will be initialized in initialize method
+  }
+
+  /**
+   * Override initialize to also initialize GraphQL service
+   */
+  public async initialize(): Promise<void> {
+    // Initialize parent service first
+    await super.initialize();
+    
+    // Initialize GraphQL service
     this.graphqlService = new ShopifyGraphQLService();
+    if (typeof (this.graphqlService as any).initialize === 'function') {
+      await (this.graphqlService as any).initialize();
+    }
+    
+    logger.info('ShopifyBulkService initialized successfully');
+  }
+
+  /**
+   * Ensure GraphQL service is available
+   */
+  private ensureGraphQLService(): void {
+    if (!this.graphqlService) {
+      throw new Error('GraphQL service not initialized');
+    }
   }
 
   /**
    * 배열을 지정된 크기의 청크로 나누는 헬퍼 함수
    */
   private chunk<T>(array: T[], size: number): T[][] {
-    if (size <= 0) {
-      throw new AppError('Batch size must be greater than 0', 400);
-    }
-
     const chunks: T[][] = [];
     for (let i = 0; i < array.length; i += size) {
-      chunks.push(array.slice(i, Math.min(i + size, array.length)));
+      chunks.push(array.slice(i, i + size));
     }
     return chunks;
   }
 
   /**
-   * 지연 함수
+   * Rate limiting helper
    */
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  private async rateLimit(): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, this.RATE_LIMIT_DELAY));
   }
 
   /**
-   * 대량 가격 업데이트
+   * 대량 가격 업데이트 with enhanced error handling
    */
   async bulkUpdatePrices(
     updates: PriceUpdate[],
-    options: BulkServiceOptions = {}
+    batchSize: number = this.DEFAULT_BATCH_SIZE
   ): Promise<BulkUpdateStats> {
-    const {
-      batchSize = this.DEFAULT_BATCH_SIZE,
-      delayBetweenBatches = this.DEFAULT_BATCH_DELAY,
-      continueOnError = true
-    } = options;
-
-    const startTime = performance.now();
-    logger.info('Starting bulk price update', { 
-      totalItems: updates.length,
-      batchSize,
-      options 
-    });
+    this.ensureInitialized();
+    this.ensureGraphQLService();
+    
+    const startTime = Date.now();
+    logger.info(`Starting bulk price update for ${updates.length} items`);
 
     const stats: BulkUpdateStats = {
       total: updates.length,
@@ -109,548 +111,466 @@ export class ShopifyBulkService extends ShopifyService {
       errors: []
     };
 
-    // 입력 검증
+    // Validate input
     if (!updates || updates.length === 0) {
       logger.warn('No price updates provided');
-      stats.executionTime = performance.now() - startTime;
       return stats;
     }
 
-    // SKU로 variant 정보 조회
-    const variantUpdates = await this.resolveVariantUpdates(updates, stats);
-
-    // null 제거 및 타입 안전성 보장
-    const validUpdates = variantUpdates.filter((u): u is NonNullable<typeof u> => u !== null);
+    // SKU로 variant 정보 조회 (병렬 처리)
+    const variantUpdates = await this.prepareVariantUpdates(updates, stats);
+    const validUpdates = variantUpdates.filter(u => u !== null);
 
     if (validUpdates.length === 0) {
-      logger.warn('No valid price updates after variant resolution');
-      stats.executionTime = performance.now() - startTime;
+      logger.warn('No valid variants found for price update');
+      stats.duration = Date.now() - startTime;
       return stats;
     }
 
     // 배치 처리
     const batches = this.chunk(validUpdates, batchSize);
-    
+    logger.info(`Processing ${batches.length} batches of ${batchSize} items`);
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
-      if (!batch || batch.length === 0) continue;
-
-      logger.info(`Processing price batch ${i + 1}/${batches.length}`, {
-        batchSize: batch.length
-      });
+      logger.debug(`Processing batch ${i + 1}/${batches.length}`);
 
       try {
-        const batchUpdates = batch.map(({ variantId, price }) => ({ 
-          variantId, 
-          price: price.toString() 
-        }));
+        await this.processPriceBatch(batch, stats);
         
-        await this.graphqlService.bulkUpdateVariantPrices(batchUpdates, {
-          maxRetries: options.maxRetries
-        });
-        
-        stats.success += batch.length;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        logger.error(`Failed to process price batch ${i + 1}`, { error: errorMessage });
-        
-        if (continueOnError) {
-          stats.failed += batch.length;
-          batch.forEach(item => {
-            stats.errors?.push({
-              sku: item.sku,
-              error: errorMessage
-            });
-          });
-        } else {
-          throw new AppError(`Batch update failed: ${errorMessage}`, 500);
+        // Rate limiting between batches
+        if (i < batches.length - 1) {
+          await this.rateLimit();
         }
-      }
-      
-      // Rate limiting between batches
-      if (i < batches.length - 1) {
-        await this.delay(delayBetweenBatches);
+      } catch (error: any) {
+        logger.error(`Batch ${i + 1} failed:`, error);
+        batch.forEach((item: any) => {
+          stats.failed++;
+          stats.errors.push({
+            sku: item.sku,
+            error: error.message
+          });
+        });
       }
     }
 
-    stats.executionTime = performance.now() - startTime;
-    logger.info('Bulk price update completed', stats);
+    stats.duration = Date.now() - startTime;
+    this.logBulkUpdateSummary('Price', stats);
+    
     return stats;
   }
 
   /**
-   * Variant 정보 조회 및 변환
+   * Prepare variant updates with parallel processing
    */
-  private async resolveVariantUpdates(
-    updates: PriceUpdate[],
+  private async prepareVariantUpdates(
+    updates: PriceUpdate[], 
     stats: BulkUpdateStats
-  ): Promise<Array<{
-    variantId: string;
-    price: string;
-    sku: string;
-  } | null>> {
-    const results = await Promise.all(
-      updates.map(async update => {
-        try {
-          // 가격 검증
-          if (!this.isValidPrice(update.price)) {
-            stats.skipped++;
-            stats.errors?.push({
-              sku: update.sku,
-              error: `Invalid price: ${update.price}`
-            });
-            return null;
-          }
+  ): Promise<any[]> {
+    const variantPromises = updates.map(async update => {
+      try {
+        const variant = await this.graphqlService!.findVariantBySku(update.sku);
+        if (variant) {
+          return {
+            variantId: variant.id,
+            price: update.price.toFixed(2),
+            sku: update.sku,
+          };
+        }
+        
+        logger.warn(`Variant not found for SKU: ${update.sku}`);
+        stats.skipped++;
+        stats.errors.push({
+          sku: update.sku,
+          error: 'Variant not found'
+        });
+        return null;
+      } catch (error: any) {
+        logger.error(`Failed to find variant for SKU ${update.sku}:`, error);
+        stats.failed++;
+        stats.errors.push({
+          sku: update.sku,
+          error: error.message
+        });
+        return null;
+      }
+    });
 
-          const variant = await this.graphqlService.findVariantBySku(update.sku);
-          if (variant) {
-            return {
-              variantId: variant.id,
-              price: update.price.toFixed(2),
-              sku: update.sku,
-            };
-          }
+    return await Promise.all(variantPromises);
+  }
+
+  /**
+   * Process single price batch with retry logic
+   */
+  private async processPriceBatch(
+    batch: any[], 
+    stats: BulkUpdateStats
+  ): Promise<void> {
+    for (const update of batch) {
+      let attempts = 0;
+      let success = false;
+
+      while (attempts < this.DEFAULT_RETRY_ATTEMPTS && !success) {
+        try {
+          await this.updateVariantPrice(update.variantId, update.price);
+          stats.success++;
+          success = true;
+        } catch (error: any) {
+          attempts++;
           
+          if (attempts >= this.DEFAULT_RETRY_ATTEMPTS) {
+            logger.error(`Failed to update price for ${update.sku} after ${attempts} attempts:`, error);
+            stats.failed++;
+            stats.errors.push({
+              sku: update.sku,
+              error: error.message
+            });
+          } else {
+            logger.warn(`Retrying price update for ${update.sku} (attempt ${attempts})`);
+            await this.rateLimit();
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Update single variant price
+   */
+  private async updateVariantPrice(variantId: string, price: string): Promise<void> {
+    const mutation = `
+      mutation productVariantUpdate($input: ProductVariantInput!) {
+        productVariantUpdate(input: $input) {
+          productVariant {
+            id
+            price
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        id: variantId,
+        price: price
+      }
+    };
+
+    const response = await this.graphqlService!.query(mutation, variables);
+    
+    if (response.data?.productVariantUpdate?.userErrors?.length > 0) {
+      const errors = response.data.productVariantUpdate.userErrors;
+      throw new Error(`Variant update failed: ${errors.map((e: any) => e.message).join(', ')}`);
+    }
+  }
+
+  /**
+   * 대량 재고 업데이트 with enhanced error handling
+   */
+  async bulkUpdateInventory(
+    updates: InventoryUpdate[],
+    locationId: string,
+    batchSize: number = this.DEFAULT_BATCH_SIZE
+  ): Promise<BulkUpdateStats> {
+    this.ensureInitialized();
+    this.ensureGraphQLService();
+    
+    const startTime = Date.now();
+    logger.info(`Starting bulk inventory update for ${updates.length} items at location ${locationId}`);
+
+    const stats: BulkUpdateStats = {
+      total: updates.length,
+      success: 0,
+      failed: 0,
+      skipped: 0,
+      errors: []
+    };
+
+    // Validate input
+    if (!updates || updates.length === 0) {
+      logger.warn('No inventory updates provided');
+      return stats;
+    }
+
+    if (!locationId) {
+      throw new Error('Location ID is required for inventory updates');
+    }
+
+    // Prepare inventory items
+    const inventoryItems = await this.prepareInventoryItems(updates, locationId, stats);
+    const validItems = inventoryItems.filter(item => item !== null);
+
+    if (validItems.length === 0) {
+      logger.warn('No valid inventory items found for update');
+      stats.duration = Date.now() - startTime;
+      return stats;
+    }
+
+    // 배치 처리
+    const batches = this.chunk(validItems, batchSize);
+    logger.info(`Processing ${batches.length} batches of ${batchSize} items`);
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      logger.debug(`Processing inventory batch ${i + 1}/${batches.length}`);
+
+      try {
+        await this.processInventoryBatch(batch, stats);
+        
+        // Rate limiting between batches
+        if (i < batches.length - 1) {
+          await this.rateLimit();
+        }
+      } catch (error: any) {
+        logger.error(`Inventory batch ${i + 1} failed:`, error);
+        batch.forEach((item: any) => {
+          stats.failed++;
+          stats.errors.push({
+            sku: item.sku,
+            error: error.message
+          });
+        });
+      }
+    }
+
+    stats.duration = Date.now() - startTime;
+    this.logBulkUpdateSummary('Inventory', stats);
+    
+    return stats;
+  }
+
+  /**
+   * Prepare inventory items for update
+   */
+  private async prepareInventoryItems(
+    updates: InventoryUpdate[],
+    locationId: string,
+    stats: BulkUpdateStats
+  ): Promise<any[]> {
+    const itemPromises = updates.map(async update => {
+      try {
+        const variant = await this.graphqlService!.findVariantBySku(update.sku);
+        if (!variant) {
           logger.warn(`Variant not found for SKU: ${update.sku}`);
           stats.skipped++;
-          stats.errors?.push({
+          stats.errors.push({
             sku: update.sku,
             error: 'Variant not found'
           });
           return null;
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          logger.error(`Failed to find variant for SKU: ${update.sku}`, { error: errorMessage });
-          stats.failed++;
-          stats.errors?.push({
+        }
+
+        const inventoryItem = await this.graphqlService!.getInventoryItem(
+          variant.id,
+          locationId
+        );
+
+        if (!inventoryItem) {
+          logger.warn(`Inventory item not found for SKU: ${update.sku}`);
+          stats.skipped++;
+          stats.errors.push({
             sku: update.sku,
-            error: errorMessage
+            error: 'Inventory item not found'
           });
           return null;
         }
-      })
-    );
 
-    return results;
-  }
-
-  /**
-   * 대량 재고 업데이트
-   */
-  async bulkUpdateInventory(
-    updates: InventoryUpdate[],
-    options: BulkServiceOptions = {}
-  ): Promise<BulkUpdateStats> {
-    const {
-      batchSize = this.DEFAULT_BATCH_SIZE,
-      delayBetweenBatches = this.DEFAULT_BATCH_DELAY,
-      continueOnError = true
-    } = options;
-
-    const startTime = performance.now();
-    logger.info('Starting bulk inventory update', {
-      totalItems: updates.length,
-      batchSize,
-      options
+        return {
+          inventoryItemId: inventoryItem.id,
+          locationId: locationId,
+          quantity: update.quantity,
+          adjustment: update.adjustment || false,
+          sku: update.sku
+        };
+      } catch (error: any) {
+        logger.error(`Failed to prepare inventory item for SKU ${update.sku}:`, error);
+        stats.failed++;
+        stats.errors.push({
+          sku: update.sku,
+          error: error.message
+        });
+        return null;
+      }
     });
 
-    const stats: BulkUpdateStats = {
-      total: updates.length,
-      success: 0,
-      failed: 0,
-      skipped: 0,
-      errors: []
-    };
-
-    // 입력 검증
-    if (!updates || updates.length === 0) {
-      logger.warn('No inventory updates provided');
-      stats.executionTime = performance.now() - startTime;
-      return stats;
-    }
-
-    // SKU로 inventory 정보 조회
-    const inventoryUpdates = await this.resolveInventoryUpdates(updates, stats);
-
-    // null 제거 및 타입 안전성 보장
-    const validUpdates = inventoryUpdates.filter((u): u is NonNullable<typeof u> => u !== null);
-
-    if (validUpdates.length === 0) {
-      logger.warn('No valid inventory updates after resolution');
-      stats.executionTime = performance.now() - startTime;
-      return stats;
-    }
-
-    // 배치 처리
-    const batches = this.chunk(validUpdates, batchSize);
-    
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      if (!batch || batch.length === 0) continue;
-
-      logger.info(`Processing inventory batch ${i + 1}/${batches.length}`, {
-        batchSize: batch.length
-      });
-
-      try {
-        const batchUpdates = batch.map(({ inventoryItemId, locationId, availableDelta }) => ({
-          inventoryItemId,
-          locationId,
-          availableDelta,
-        }));
-        
-        await this.graphqlService.bulkAdjustInventory(batchUpdates, 'sync', {
-          maxRetries: options.maxRetries
-        });
-        
-        stats.success += batch.length;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        logger.error(`Failed to process inventory batch ${i + 1}`, { error: errorMessage });
-        
-        if (continueOnError) {
-          stats.failed += batch.length;
-          batch.forEach(item => {
-            stats.errors?.push({
-              sku: item.sku,
-              error: errorMessage
-            });
-          });
-        } else {
-          throw new AppError(`Batch update failed: ${errorMessage}`, 500);
-        }
-      }
-      
-      // Rate limiting between batches
-      if (i < batches.length - 1) {
-        await this.delay(delayBetweenBatches);
-      }
-    }
-
-    stats.executionTime = performance.now() - startTime;
-    logger.info('Bulk inventory update completed', stats);
-    return stats;
+    return await Promise.all(itemPromises);
   }
 
   /**
-   * Inventory 정보 조회 및 변환
+   * Process single inventory batch
    */
-  private async resolveInventoryUpdates(
-    updates: InventoryUpdate[],
+  private async processInventoryBatch(
+    batch: any[],
     stats: BulkUpdateStats
-  ): Promise<Array<{
-    inventoryItemId: string;
-    locationId: string;
-    availableDelta: number;
-    sku: string;
-  } | null>> {
-    const results = await Promise.all(
-      updates.map(async update => {
-        try {
-          // 수량 검증
-          if (!this.isValidQuantity(update.quantity)) {
-            stats.skipped++;
-            stats.errors?.push({
-              sku: update.sku,
-              error: `Invalid quantity: ${update.quantity}`
-            });
-            return null;
+  ): Promise<void> {
+    const mutation = `
+      mutation inventoryBulkAdjustQuantityAtLocation($inventoryItemAdjustments: [InventoryAdjustItemInput!]!, $locationId: ID!) {
+        inventoryBulkAdjustQuantityAtLocation(
+          inventoryItemAdjustments: $inventoryItemAdjustments,
+          locationId: $locationId
+        ) {
+          inventoryLevels {
+            id
+            available
           }
-
-          const variant = await this.graphqlService.findVariantBySku(update.sku);
-          if (!variant || !variant.inventoryItem.inventoryLevels.edges.length) {
-            logger.warn(`Inventory info not found for SKU: ${update.sku}`);
-            stats.skipped++;
-            stats.errors?.push({
-              sku: update.sku,
-              error: 'Inventory info not found'
-            });
-            return null;
+          userErrors {
+            field
+            message
           }
-
-          const firstEdge = variant.inventoryItem.inventoryLevels.edges[0];
-          if (!firstEdge) {
-            logger.warn(`No inventory levels for SKU: ${update.sku}`);
-            stats.skipped++;
-            return null;
-          }
-
-          const inventoryLevel = firstEdge.node;
-          
-          let availableDelta = update.quantity;
-          if (!update.adjustment) {
-            // 절대값인 경우 현재값과의 차이 계산
-            availableDelta = update.quantity - inventoryLevel.available;
-          }
-
-          // 변경사항이 없으면 스킵
-          if (availableDelta === 0) {
-            stats.skipped++;
-            logger.debug(`No inventory change for SKU: ${update.sku}`);
-            return null;
-          }
-
-          return {
-            inventoryItemId: variant.inventoryItem.id,
-            locationId: inventoryLevel.location.id,
-            availableDelta,
-            sku: update.sku,
-          };
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          logger.error(`Failed to find inventory for SKU: ${update.sku}`, { error: errorMessage });
-          stats.failed++;
-          stats.errors?.push({
-            sku: update.sku,
-            error: errorMessage
-          });
-          return null;
         }
-      })
-    );
+      }
+    `;
 
-    return results;
+    const adjustments = batch.map(item => ({
+      inventoryItemId: item.inventoryItemId,
+      availableDelta: item.adjustment ? item.quantity : item.quantity - (item.currentQuantity || 0)
+    }));
+
+    try {
+      const response = await this.graphqlService!.query(mutation, {
+        inventoryItemAdjustments: adjustments,
+        locationId: batch[0].locationId
+      });
+
+      if (response.data?.inventoryBulkAdjustQuantityAtLocation?.userErrors?.length > 0) {
+        const errors = response.data.inventoryBulkAdjustQuantityAtLocation.userErrors;
+        throw new Error(`Inventory update failed: ${errors.map((e: any) => e.message).join(', ')}`);
+      }
+
+      stats.success += batch.length;
+    } catch (error: any) {
+      logger.error('Inventory batch update failed:', error);
+      batch.forEach(item => {
+        stats.failed++;
+        stats.errors.push({
+          sku: item.sku,
+          error: error.message
+        });
+      });
+    }
   }
 
   /**
    * 전체 동기화 (가격 + 재고)
    */
-  async fullSync(
+  async bulkSync(
     items: SyncItem[],
-    options: BulkServiceOptions = {}
+    locationId: string,
+    options: {
+      updatePrices?: boolean;
+      updateInventory?: boolean;
+      batchSize?: number;
+    } = {}
   ): Promise<{
     price: BulkUpdateStats;
     inventory: BulkUpdateStats;
-    totalExecutionTime: number;
+    totalDuration: number;
   }> {
-    const startTime = performance.now();
-    logger.info(`Starting full sync for ${items.length} items`);
+    this.ensureInitialized();
+    
+    const startTime = Date.now();
+    const {
+      updatePrices = true,
+      updateInventory = true,
+      batchSize = this.DEFAULT_BATCH_SIZE
+    } = options;
 
-    // 입력 검증
-    if (!items || items.length === 0) {
-      return {
-        price: this.createEmptyStats(),
-        inventory: this.createEmptyStats(),
-        totalExecutionTime: 0
-      };
-    }
+    logger.info(`Starting bulk sync for ${items.length} items`, {
+      updatePrices,
+      updateInventory,
+      locationId
+    });
+
+    const results = {
+      price: null as any,
+      inventory: null as any,
+      totalDuration: 0
+    };
 
     // 가격 업데이트
-    const priceStats = await this.bulkUpdatePrices(
-      items.map(item => ({ sku: item.sku, price: item.price })),
-      options
-    );
-
-    // 잠시 대기 (Rate limiting)
-    await this.delay(2000);
+    if (updatePrices) {
+      const priceUpdates: PriceUpdate[] = items.map(item => ({
+        sku: item.sku,
+        price: item.price
+      }));
+      
+      results.price = await this.bulkUpdatePrices(priceUpdates, batchSize);
+    }
 
     // 재고 업데이트
-    const inventoryStats = await this.bulkUpdateInventory(
-      items.map(item => ({ sku: item.sku, quantity: item.quantity, adjustment: false })),
-      options
-    );
+    if (updateInventory) {
+      const inventoryUpdates: InventoryUpdate[] = items.map(item => ({
+        sku: item.sku,
+        quantity: item.quantity,
+        adjustment: false
+      }));
+      
+      results.inventory = await this.bulkUpdateInventory(
+        inventoryUpdates,
+        locationId,
+        batchSize
+      );
+    }
 
-    const totalExecutionTime = performance.now() - startTime;
+    results.totalDuration = Date.now() - startTime;
     
-    logger.info('Full sync completed', { 
-      priceStats, 
-      inventoryStats,
-      totalExecutionTime 
+    logger.info('Bulk sync completed', {
+      totalDuration: results.totalDuration,
+      priceStats: results.price,
+      inventoryStats: results.inventory
     });
-    
-    return {
-      price: priceStats,
-      inventory: inventoryStats,
-      totalExecutionTime
-    };
-  }
 
-  /**
-   * CSV 파일로부터 대량 업데이트
-   */
-  async updateFromCSV(
-    csvData: CSVRow[],
-    options: BulkServiceOptions = {}
-  ): Promise<{
-    price?: BulkUpdateStats;
-    inventory?: BulkUpdateStats;
-    summary: {
-      totalRows: number;
-      validPriceRows: number;
-      validInventoryRows: number;
-      invalidRows: number;
-    };
-  }> {
-    logger.info('Starting update from CSV', { totalRows: csvData.length });
-
-    const results: {
-      price?: BulkUpdateStats;
-      inventory?: BulkUpdateStats;
-      summary: {
-        totalRows: number;
-        validPriceRows: number;
-        validInventoryRows: number;
-        invalidRows: number;
-      };
-    } = {
-      summary: {
-        totalRows: csvData.length,
-        validPriceRows: 0,
-        validInventoryRows: 0,
-        invalidRows: 0
-      }
-    };
-
-    // CSV 데이터 검증 및 파싱
-    const { priceUpdates, inventoryUpdates } = this.parseCSVData(csvData, results.summary);
-
-    // 가격 업데이트 실행
-    if (priceUpdates.length > 0) {
-      results.price = await this.bulkUpdatePrices(priceUpdates, options);
-    }
-
-    // 재고 업데이트 실행
-    if (inventoryUpdates.length > 0) {
-      // 가격 업데이트 후 잠시 대기
-      if (priceUpdates.length > 0) {
-        await this.delay(2000);
-      }
-      results.inventory = await this.bulkUpdateInventory(inventoryUpdates, options);
-    }
-
-    logger.info('CSV update completed', results);
     return results;
   }
 
   /**
-   * CSV 데이터 파싱 및 검증
+   * Log bulk update summary
    */
-  private parseCSVData(
-    csvData: CSVRow[],
-    summary: {
-      validPriceRows: number;
-      validInventoryRows: number;
-      invalidRows: number;
+  private logBulkUpdateSummary(type: string, stats: BulkUpdateStats): void {
+    const successRate = stats.total > 0 
+      ? ((stats.success / stats.total) * 100).toFixed(2)
+      : '0';
+
+    logger.info(`
+╔════════════════════════════════════════════════════════════╗
+║ ${type} Bulk Update Summary                                  
+╠════════════════════════════════════════════════════════════╣
+║ Total Items:     ${stats.total.toString().padEnd(10)}
+║ ✅ Success:      ${stats.success.toString().padEnd(10)} (${successRate}%)
+║ ❌ Failed:       ${stats.failed.toString().padEnd(10)}
+║ ⏭️  Skipped:      ${stats.skipped.toString().padEnd(10)}
+║ ⏱️  Duration:     ${stats.duration ? `${stats.duration}ms` : 'N/A'}
+╚════════════════════════════════════════════════════════════╝
+    `);
+
+    if (stats.errors.length > 0) {
+      logger.error('Failed items:', stats.errors);
     }
-  ): {
-    priceUpdates: PriceUpdate[];
-    inventoryUpdates: InventoryUpdate[];
-  } {
-    const priceUpdates: PriceUpdate[] = [];
-    const inventoryUpdates: InventoryUpdate[] = [];
-    const processedSkus = new Set<string>();
-
-    for (const row of csvData) {
-      if (!row.sku || typeof row.sku !== 'string' || row.sku.trim() === '') {
-        summary.invalidRows++;
-        logger.warn('Invalid row: missing or invalid SKU', { row });
-        continue;
-      }
-
-      const sku = row.sku.trim();
-
-      // 중복 SKU 체크
-      if (processedSkus.has(sku)) {
-        summary.invalidRows++;
-        logger.warn(`Duplicate SKU in CSV: ${sku}`);
-        continue;
-      }
-      processedSkus.add(sku);
-
-      // 가격 파싱
-      if (row.price !== undefined && row.price !== '' && row.price !== null) {
-        const priceValue = this.parsePrice(row.price);
-        
-        if (priceValue !== null) {
-          priceUpdates.push({
-            sku,
-            price: priceValue,
-          });
-          summary.validPriceRows++;
-        } else {
-          logger.warn(`Invalid price value for SKU ${sku}:`, row.price);
-        }
-      }
-
-      // 재고 파싱
-      if (row.quantity !== undefined && row.quantity !== '' && row.quantity !== null) {
-        const quantityValue = this.parseQuantity(row.quantity);
-        
-        if (quantityValue !== null) {
-          inventoryUpdates.push({
-            sku,
-            quantity: quantityValue,
-            adjustment: false,
-          });
-          summary.validInventoryRows++;
-        } else {
-          logger.warn(`Invalid quantity value for SKU ${sku}:`, row.quantity);
-        }
-      }
-    }
-
-    return { priceUpdates, inventoryUpdates };
   }
 
   /**
-   * 가격 값 파싱 및 검증
+   * Get service status
    */
-  private parsePrice(value: string | number): number | null {
-    let priceValue: number;
-    
-    if (typeof value === 'string') {
-      // 통화 기호 및 쉼표 제거
-      const cleanedValue = value.replace(/[$,]/g, '').trim();
-      priceValue = parseFloat(cleanedValue);
-    } else {
-      priceValue = value;
-    }
-    
-    return this.isValidPrice(priceValue) ? priceValue : null;
-  }
-
-  /**
-   * 재고 수량 파싱 및 검증
-   */
-  private parseQuantity(value: string | number): number | null {
-    let quantityValue: number;
-    
-    if (typeof value === 'string') {
-      // 쉼표 제거 및 정수 변환
-      const cleanedValue = value.replace(/,/g, '').trim();
-      quantityValue = parseInt(cleanedValue, 10);
-    } else {
-      quantityValue = Math.floor(value);
-    }
-    
-    return this.isValidQuantity(quantityValue) ? quantityValue : null;
-  }
-
-  /**
-   * 가격 유효성 검증
-   */
-  private isValidPrice(price: number): boolean {
-    return !isNaN(price) && isFinite(price) && price > 0 && price <= 999999.99;
-  }
-
-  /**
-   * 수량 유효성 검증
-   */
-  private isValidQuantity(quantity: number): boolean {
-    return !isNaN(quantity) && isFinite(quantity) && quantity >= 0 && quantity <= 999999;
-  }
-
-  /**
-   * 빈 통계 객체 생성
-   */
-  private createEmptyStats(): BulkUpdateStats {
+  public getStatus(): any {
+    const parentStatus = super.getStatus();
     return {
-      total: 0,
-      success: 0,
-      failed: 0,
-      skipped: 0,
-      errors: [],
-      executionTime: 0
+      ...parentStatus,
+      hasGraphQLService: !!this.graphqlService,
+      batchSize: this.DEFAULT_BATCH_SIZE,
+      retryAttempts: this.DEFAULT_RETRY_ATTEMPTS
     };
+  }
+
+  /**
+   * Cleanup resources
+   */
+  public async cleanup(): Promise<void> {
+    await super.cleanup();
+    this.graphqlService = null;
+    logger.info('ShopifyBulkService cleanup completed');
   }
 }

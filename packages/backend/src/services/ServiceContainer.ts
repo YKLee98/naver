@@ -37,73 +37,50 @@ import { SettingsController } from '../controllers/SettingsController.js';
 import { NotificationController } from '../controllers/NotificationController.js';
 import { ReportController } from '../controllers/ReportController.js';
 
-export interface IServiceContainer {
-  // Core Services
-  redis: Redis;
-  io?: SocketIOServer;
-  
-  // Naver Services
-  naverAuthService: NaverAuthService;
-  naverProductService: NaverProductService;
-  naverOrderService: NaverOrderService;
-  
-  // Shopify Services
-  shopifyService: ShopifyService;
-  shopifyGraphQLService: ShopifyGraphQLService;
-  shopifyBulkService: ShopifyBulkService;
-  shopifyInventoryService: ShopifyInventoryService;
-  shopifyProductSearchService: ShopifyProductSearchService;
-  
-  // Sync Services
-  syncService: SyncService;
-  inventorySyncService: InventorySyncService;
-  priceSyncService: PriceSyncService;
-  mappingService: MappingService;
-  conflictResolver: ConflictResolver;
-  
-  // Other Services
-  exchangeRateService: ExchangeRateService;
-  notificationService: NotificationService;
-  activityService: ActivityService;
-  reportService: ReportService;
-  
-  // Controllers
-  authController: AuthController;
-  productController: ProductController;
-  inventoryController: InventoryController;
-  syncController: SyncController;
-  mappingController: MappingController;
-  dashboardController: DashboardController;
-  webhookController: WebhookController;
-  shopifyWebhookController: ShopifyWebhookController;
-  priceController?: PriceController;
-  analyticsController?: AnalyticsController;
-  settingsController?: SettingsController;
-  notificationController?: NotificationController;
-  reportController?: ReportController;
+/**
+ * Service initialization status tracker
+ */
+interface ServiceInitStatus {
+  name: string;
+  status: 'pending' | 'initializing' | 'success' | 'failed';
+  error?: string;
+  startTime?: number;
+  endTime?: number;
 }
 
-export class ServiceContainer implements IServiceContainer {
+/**
+ * Enterprise Service Container with comprehensive lifecycle management
+ * Implements Singleton pattern with dependency injection
+ */
+export class ServiceContainer {
   private static instance: ServiceContainer;
+  private initializationStatus: Map<string, ServiceInitStatus> = new Map();
+  private isFullyInitialized: boolean = false;
   
-  // Core
+  // Core Dependencies
   public redis: Redis;
   public io?: SocketIOServer;
   
-  // Services
+  // Naver Services
   public naverAuthService!: NaverAuthService;
   public naverProductService!: NaverProductService;
   public naverOrderService!: NaverOrderService;
+  
+  // Shopify Services
   public shopifyService!: ShopifyService;
   public shopifyGraphQLService!: ShopifyGraphQLService;
   public shopifyBulkService!: ShopifyBulkService;
   public shopifyInventoryService!: ShopifyInventoryService;
   public shopifyProductSearchService!: ShopifyProductSearchService;
+  
+  // Sync Services
   public syncService!: SyncService;
   public inventorySyncService!: InventorySyncService;
   public priceSyncService!: PriceSyncService;
   public mappingService!: MappingService;
   public conflictResolver!: ConflictResolver;
+  
+  // Other Services
   public exchangeRateService!: ExchangeRateService;
   public notificationService!: NotificationService;
   public activityService!: ActivityService;
@@ -126,80 +103,68 @@ export class ServiceContainer implements IServiceContainer {
 
   private constructor(redis: Redis) {
     this.redis = redis;
+    logger.info('ServiceContainer instance created');
   }
 
+  /**
+   * Initialize ServiceContainer with all dependencies
+   * Ensures singleton pattern and proper initialization order
+   */
   static async initialize(redis: Redis): Promise<ServiceContainer> {
     if (!ServiceContainer.instance) {
+      logger.info('🚀 Initializing ServiceContainer...');
       ServiceContainer.instance = new ServiceContainer(redis);
-      await ServiceContainer.instance.initializeServices();
-      await ServiceContainer.instance.initializeControllers();
+      
+      try {
+        await ServiceContainer.instance.initializeServices();
+        await ServiceContainer.instance.initializeControllers();
+        ServiceContainer.instance.isFullyInitialized = true;
+        
+        logger.info('✅ ServiceContainer initialized successfully');
+        ServiceContainer.instance.logInitializationSummary();
+      } catch (error) {
+        logger.error('❌ ServiceContainer initialization failed:', error);
+        ServiceContainer.instance.logInitializationSummary();
+        throw error;
+      }
     }
+    
     return ServiceContainer.instance;
   }
 
+  /**
+   * Get singleton instance (must be initialized first)
+   */
   static getInstance(): ServiceContainer {
     if (!ServiceContainer.instance) {
       throw new Error('ServiceContainer not initialized. Call ServiceContainer.initialize() first.');
     }
+    
+    if (!ServiceContainer.instance.isFullyInitialized) {
+      logger.warn('ServiceContainer accessed before full initialization');
+    }
+    
     return ServiceContainer.instance;
   }
 
+  /**
+   * Initialize all services with proper error handling and status tracking
+   */
   private async initializeServices(): Promise<void> {
+    logger.info('🔧 Initializing services...');
+    
     try {
-      logger.info('🔧 Initializing services...');
+      // Phase 1: Core Services (no dependencies)
+      await this.initializePhase1Services();
       
-      // Initialize Naver Services
-      this.naverAuthService = new NaverAuthService(this.redis);
-      this.naverProductService = new NaverProductService(this.naverAuthService);
-      this.naverOrderService = new NaverOrderService(this.naverAuthService);
+      // Phase 2: Platform Services (depend on core)
+      await this.initializePhase2Services();
       
-      // Initialize Shopify Services
-      this.shopifyService = new ShopifyService();
-      await this.shopifyService.initialize();
+      // Phase 3: Business Logic Services (depend on platform)
+      await this.initializePhase3Services();
       
-      this.shopifyGraphQLService = new ShopifyGraphQLService();
-      this.shopifyBulkService = new ShopifyBulkService();
-      this.shopifyInventoryService = new ShopifyInventoryService();
-      this.shopifyProductSearchService = new ShopifyProductSearchService();
-      
-      // Initialize Sync Services
-      this.conflictResolver = new ConflictResolver();
-      
-      this.inventorySyncService = new InventorySyncService(
-        this.naverProductService,
-        this.shopifyInventoryService,
-        this.conflictResolver
-      );
-      
-      this.priceSyncService = new PriceSyncService(
-        this.naverProductService,
-        this.shopifyGraphQLService,
-        this.redis
-      );
-      
-      this.mappingService = new MappingService(
-        this.naverProductService,
-        this.shopifyGraphQLService,
-        this.shopifyProductSearchService
-      );
-      
-      this.syncService = new SyncService(
-        this.naverProductService,
-        this.naverOrderService,
-        this.shopifyBulkService,
-        this.shopifyGraphQLService,
-        this.redis
-      );
-      
-      // Initialize Other Services
-      this.exchangeRateService = new ExchangeRateService(this.redis);
-      this.notificationService = new NotificationService(this.redis);
-      this.activityService = new ActivityService();
-      this.reportService = new ReportService(
-        this.syncService,
-        this.inventorySyncService,
-        this.priceSyncService
-      );
+      // Phase 4: Utility Services
+      await this.initializePhase4Services();
       
       logger.info('✅ All services initialized successfully');
     } catch (error) {
@@ -208,11 +173,214 @@ export class ServiceContainer implements IServiceContainer {
     }
   }
 
+  /**
+   * Phase 1: Initialize core services without dependencies
+   */
+  private async initializePhase1Services(): Promise<void> {
+    logger.info('📦 Phase 1: Initializing core services...');
+    
+    // Naver Auth Service
+    await this.initializeService('NaverAuthService', async () => {
+      this.naverAuthService = new NaverAuthService(this.redis);
+      return this.naverAuthService;
+    });
+
+    // Conflict Resolver
+    await this.initializeService('ConflictResolver', async () => {
+      this.conflictResolver = new ConflictResolver();
+      return this.conflictResolver;
+    });
+  }
+
+  /**
+   * Phase 2: Initialize platform-specific services
+   */
+  private async initializePhase2Services(): Promise<void> {
+    logger.info('📦 Phase 2: Initializing platform services...');
+    
+    // Naver Services
+    await this.initializeService('NaverProductService', async () => {
+      this.naverProductService = new NaverProductService(this.naverAuthService);
+      return this.naverProductService;
+    });
+
+    await this.initializeService('NaverOrderService', async () => {
+      this.naverOrderService = new NaverOrderService(this.naverAuthService);
+      return this.naverOrderService;
+    });
+
+    // Shopify Services - with proper async initialization
+    await this.initializeService('ShopifyService', async () => {
+      this.shopifyService = new ShopifyService();
+      await this.shopifyService.initialize(); // 비동기 초기화 호출
+      return this.shopifyService;
+    });
+
+    await this.initializeService('ShopifyGraphQLService', async () => {
+      this.shopifyGraphQLService = new ShopifyGraphQLService();
+      // GraphQL 서비스도 initialize 메서드가 있다면 호출
+      if (typeof (this.shopifyGraphQLService as any).initialize === 'function') {
+        await (this.shopifyGraphQLService as any).initialize();
+      }
+      return this.shopifyGraphQLService;
+    });
+
+    await this.initializeService('ShopifyBulkService', async () => {
+      this.shopifyBulkService = new ShopifyBulkService();
+      // Bulk 서비스도 initialize 메서드가 있다면 호출
+      if (typeof (this.shopifyBulkService as any).initialize === 'function') {
+        await (this.shopifyBulkService as any).initialize();
+      }
+      return this.shopifyBulkService;
+    });
+
+    await this.initializeService('ShopifyInventoryService', async () => {
+      this.shopifyInventoryService = new ShopifyInventoryService();
+      if (typeof (this.shopifyInventoryService as any).initialize === 'function') {
+        await (this.shopifyInventoryService as any).initialize();
+      }
+      return this.shopifyInventoryService;
+    });
+
+    await this.initializeService('ShopifyProductSearchService', async () => {
+      this.shopifyProductSearchService = new ShopifyProductSearchService();
+      if (typeof (this.shopifyProductSearchService as any).initialize === 'function') {
+        await (this.shopifyProductSearchService as any).initialize();
+      }
+      return this.shopifyProductSearchService;
+    });
+  }
+
+  /**
+   * Phase 3: Initialize business logic services
+   */
+  private async initializePhase3Services(): Promise<void> {
+    logger.info('📦 Phase 3: Initializing business logic services...');
+    
+    await this.initializeService('InventorySyncService', async () => {
+      this.inventorySyncService = new InventorySyncService(
+        this.naverProductService,
+        this.shopifyInventoryService,
+        this.conflictResolver
+      );
+      return this.inventorySyncService;
+    });
+
+    await this.initializeService('PriceSyncService', async () => {
+      this.priceSyncService = new PriceSyncService(
+        this.naverProductService,
+        this.shopifyGraphQLService,
+        this.redis
+      );
+      return this.priceSyncService;
+    });
+
+    await this.initializeService('MappingService', async () => {
+      this.mappingService = new MappingService(
+        this.naverProductService,
+        this.shopifyGraphQLService,
+        this.shopifyProductSearchService
+      );
+      return this.mappingService;
+    });
+
+    await this.initializeService('SyncService', async () => {
+      this.syncService = new SyncService(
+        this.naverProductService,
+        this.naverOrderService,
+        this.shopifyBulkService,
+        this.shopifyGraphQLService,
+        this.redis
+      );
+      return this.syncService;
+    });
+  }
+
+  /**
+   * Phase 4: Initialize utility services
+   */
+  private async initializePhase4Services(): Promise<void> {
+    logger.info('📦 Phase 4: Initializing utility services...');
+    
+    await this.initializeService('ExchangeRateService', async () => {
+      this.exchangeRateService = new ExchangeRateService(this.redis);
+      return this.exchangeRateService;
+    });
+
+    await this.initializeService('NotificationService', async () => {
+      this.notificationService = new NotificationService(this.redis);
+      return this.notificationService;
+    });
+
+    await this.initializeService('ActivityService', async () => {
+      this.activityService = new ActivityService();
+      return this.activityService;
+    });
+
+    await this.initializeService('ReportService', async () => {
+      this.reportService = new ReportService(
+        this.syncService,
+        this.inventorySyncService,
+        this.priceSyncService
+      );
+      return this.reportService;
+    });
+  }
+
+  /**
+   * Initialize single service with error handling and status tracking
+   */
+  private async initializeService(
+    name: string, 
+    initializer: () => Promise<any>
+  ): Promise<void> {
+    const status: ServiceInitStatus = {
+      name,
+      status: 'initializing',
+      startTime: Date.now()
+    };
+    
+    this.initializationStatus.set(name, status);
+    
+    try {
+      logger.debug(`Initializing ${name}...`);
+      await initializer();
+      
+      status.status = 'success';
+      status.endTime = Date.now();
+      
+      logger.debug(`✓ ${name} initialized in ${status.endTime - status.startTime!}ms`);
+    } catch (error: any) {
+      status.status = 'failed';
+      status.error = error.message;
+      status.endTime = Date.now();
+      
+      logger.error(`✗ ${name} initialization failed:`, error);
+      
+      // Critical services fail the entire initialization
+      const criticalServices = [
+        'NaverAuthService', 
+        'ShopifyService', 
+        'SyncService'
+      ];
+      
+      if (criticalServices.includes(name)) {
+        throw new Error(`Critical service ${name} failed to initialize: ${error.message}`);
+      }
+      
+      // Non-critical services log warning but continue
+      logger.warn(`Non-critical service ${name} failed, continuing...`);
+    }
+  }
+
+  /**
+   * Initialize all controllers
+   */
   private async initializeControllers(): Promise<void> {
     try {
       logger.info('🎮 Initializing controllers...');
       
-      // Initialize Core Controllers
+      // Core Controllers (always required)
       this.authController = new AuthController();
       
       this.productController = new ProductController(
@@ -246,51 +414,8 @@ export class ServiceContainer implements IServiceContainer {
         this.notificationService
       );
       
-      // Initialize Optional Controllers (with error handling)
-      try {
-        const { PriceController } = await import('../controllers/PriceController.js');
-        this.priceController = new PriceController(
-          this.priceSyncService,
-          this.exchangeRateService
-        );
-      } catch (error) {
-        logger.warn('PriceController not available:', error);
-      }
-      
-      try {
-        const { AnalyticsController } = await import('../controllers/AnalyticsController.js');
-        this.analyticsController = new AnalyticsController(
-          this.reportService,
-          this.activityService
-        );
-      } catch (error) {
-        logger.warn('AnalyticsController not available:', error);
-      }
-      
-      try {
-        const { SettingsController } = await import('../controllers/SettingsController.js');
-        this.settingsController = new SettingsController(this.redis);
-      } catch (error) {
-        logger.warn('SettingsController not available:', error);
-      }
-      
-      try {
-        const { NotificationController } = await import('../controllers/NotificationController.js');
-        this.notificationController = new NotificationController(
-          this.notificationService
-        );
-      } catch (error) {
-        logger.warn('NotificationController not available:', error);
-      }
-      
-      try {
-        const { ReportController } = await import('../controllers/ReportController.js');
-        this.reportController = new ReportController(
-          this.reportService
-        );
-      } catch (error) {
-        logger.warn('ReportController not available:', error);
-      }
+      // Optional Controllers (with graceful degradation)
+      await this.initializeOptionalControllers();
       
       logger.info('✅ All controllers initialized successfully');
     } catch (error) {
@@ -299,59 +424,148 @@ export class ServiceContainer implements IServiceContainer {
     }
   }
 
-  setWebSocket(io: SocketIOServer): void {
+  /**
+   * Initialize optional controllers with error handling
+   */
+  private async initializeOptionalControllers(): Promise<void> {
+    const optionalControllers = [
+      {
+        name: 'PriceController',
+        init: async () => {
+          const { PriceController } = await import('../controllers/PriceController.js');
+          this.priceController = new PriceController(
+            this.priceSyncService,
+            this.exchangeRateService
+          );
+        }
+      },
+      {
+        name: 'AnalyticsController',
+        init: async () => {
+          const { AnalyticsController } = await import('../controllers/AnalyticsController.js');
+          this.analyticsController = new AnalyticsController(
+            this.reportService,
+            this.activityService
+          );
+        }
+      },
+      {
+        name: 'SettingsController',
+        init: async () => {
+          const { SettingsController } = await import('../controllers/SettingsController.js');
+          this.settingsController = new SettingsController();
+        }
+      },
+      {
+        name: 'NotificationController',
+        init: async () => {
+          const { NotificationController } = await import('../controllers/NotificationController.js');
+          this.notificationController = new NotificationController(
+            this.notificationService
+          );
+        }
+      },
+      {
+        name: 'ReportController',
+        init: async () => {
+          const { ReportController } = await import('../controllers/ReportController.js');
+          this.reportController = new ReportController(
+            this.reportService
+          );
+        }
+      }
+    ];
+
+    for (const controller of optionalControllers) {
+      try {
+        await controller.init();
+        logger.debug(`✓ ${controller.name} initialized`);
+      } catch (error) {
+        logger.warn(`${controller.name} not available:`, error);
+      }
+    }
+  }
+
+  /**
+   * Set WebSocket server instance
+   */
+  public setSocketIO(io: SocketIOServer): void {
     this.io = io;
-    
-    // Update services that need WebSocket
-    if (this.notificationService) {
-      this.notificationService.setWebSocket(io);
-    }
-    
-    if (this.syncService) {
-      this.syncService.setWebSocket(io);
-    }
-    
-    logger.info('✅ WebSocket server attached to services');
+    logger.info('WebSocket server attached to ServiceContainer');
   }
 
-  getService<K extends keyof IServiceContainer>(name: K): IServiceContainer[K] {
-    const service = this[name];
-    if (!service) {
-      throw new Error(`Service ${String(name)} not found in container`);
-    }
-    return service;
+  /**
+   * Get initialization status report
+   */
+  public getInitializationStatus(): {
+    isFullyInitialized: boolean;
+    services: Array<ServiceInitStatus>;
+    summary: {
+      total: number;
+      success: number;
+      failed: number;
+      pending: number;
+    };
+  } {
+    const services = Array.from(this.initializationStatus.values());
+    const summary = {
+      total: services.length,
+      success: services.filter(s => s.status === 'success').length,
+      failed: services.filter(s => s.status === 'failed').length,
+      pending: services.filter(s => s.status === 'pending').length
+    };
+
+    return {
+      isFullyInitialized: this.isFullyInitialized,
+      services,
+      summary
+    };
   }
 
-  hasService(name: keyof IServiceContainer): boolean {
-    return this[name] !== undefined;
-  }
-
-  async cleanup(): Promise<void> {
-    logger.info('🧹 Cleaning up services...');
+  /**
+   * Log initialization summary
+   */
+  private logInitializationSummary(): void {
+    const status = this.getInitializationStatus();
     
-    try {
-      // Cleanup services that need it
-      if (this.syncService) {
-        await this.syncService.cleanup?.();
-      }
-      
-      if (this.notificationService) {
-        await this.notificationService.cleanup?.();
-      }
-      
-      if (this.exchangeRateService) {
-        await this.exchangeRateService.cleanup?.();
-      }
-      
-      // Close WebSocket connections
-      if (this.io) {
-        this.io.close();
-      }
-      
-      logger.info('✅ Services cleaned up successfully');
-    } catch (error) {
-      logger.error('Error during service cleanup:', error);
-      throw error;
+    logger.info('═══════════════════════════════════════════════════');
+    logger.info('ServiceContainer Initialization Summary:');
+    logger.info(`Total Services: ${status.summary.total}`);
+    logger.info(`✅ Success: ${status.summary.success}`);
+    logger.info(`❌ Failed: ${status.summary.failed}`);
+    logger.info(`⏳ Pending: ${status.summary.pending}`);
+    
+    if (status.summary.failed > 0) {
+      logger.info('Failed Services:');
+      status.services
+        .filter(s => s.status === 'failed')
+        .forEach(s => {
+          logger.error(`  - ${s.name}: ${s.error}`);
+        });
     }
+    
+    logger.info('═══════════════════════════════════════════════════');
+  }
+
+  /**
+   * Cleanup all services
+   */
+  public async cleanup(): Promise<void> {
+    logger.info('Cleaning up ServiceContainer...');
+    
+    // Cleanup Shopify services
+    if (this.shopifyService && typeof (this.shopifyService as any).cleanup === 'function') {
+      await (this.shopifyService as any).cleanup();
+    }
+    
+    // Close Redis connection
+    if (this.redis) {
+      await this.redis.quit();
+    }
+    
+    // Reset singleton
+    ServiceContainer.instance = null as any;
+    
+    logger.info('ServiceContainer cleanup completed');
   }
 }
