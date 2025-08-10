@@ -9,7 +9,6 @@ const __dirname = dirname(__filename);
 // .env 파일 로드 (프로젝트 루트에서)
 dotenv.config({ path: resolve(__dirname, '../../.env') });
 
-
 // 환경 변수 값 가져오기 헬퍼 함수
 function getEnvValue(key: string, defaultValue?: string): string {
   const value = process.env[key];
@@ -151,6 +150,84 @@ export const config = {
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10), // 10MB
   },
 };
+
+/**
+ * 설정 검증 함수
+ * 필수 환경 변수와 설정 값들이 올바른지 확인
+ */
+export function validateConfig(): void {
+  const errors: string[] = [];
+  
+  // 프로덕션 환경에서 필수 환경 변수 체크
+  if (config.isProduction) {
+    // JWT Secret 검증
+    if (config.jwt.secret === 'your-super-secret-jwt-key-change-this-in-production') {
+      errors.push('JWT_SECRET must be changed in production environment');
+    }
+    
+    // 암호화 키 검증
+    if (config.encryption.key === 'your-encryption-key-32-characters') {
+      errors.push('ENCRYPTION_KEY must be changed in production environment');
+    }
+    
+    // MongoDB URI 검증
+    if (config.mongodb.uri === 'mongodb://localhost:27017/ERP_NAVER') {
+      console.warn('Warning: Using default MongoDB URI in production');
+    }
+    
+    // CORS Origin 검증
+    if (config.misc.corsOrigin === '*') {
+      console.warn('Warning: CORS is set to allow all origins in production');
+    }
+  }
+  
+  // 네이버 API 설정 검증
+  if (!config.naver.clientId) {
+    errors.push('NAVER_CLIENT_ID is required');
+  }
+  
+  if (!config.naver.clientSecret || config.naver.clientSecret.length < 29) {
+    console.warn('Warning: NAVER_CLIENT_SECRET may be invalid or too short');
+  }
+  
+  // Shopify API 설정 검증 (선택적)
+  if (process.env.ENABLE_SHOPIFY === 'true') {
+    if (!config.shopify.accessToken) {
+      errors.push('SHOPIFY_ACCESS_TOKEN is required when ENABLE_SHOPIFY is true');
+    }
+    
+    if (!config.shopify.apiKey) {
+      errors.push('SHOPIFY_API_KEY is required when ENABLE_SHOPIFY is true');
+    }
+    
+    if (!config.shopify.apiSecret) {
+      errors.push('SHOPIFY_API_SECRET is required when ENABLE_SHOPIFY is true');
+    }
+  }
+  
+  // 포트 검증
+  if (config.server.port < 1 || config.server.port > 65535) {
+    errors.push(`Invalid PORT: ${config.server.port}. Must be between 1 and 65535`);
+  }
+  
+  if (config.server.wsPort < 1 || config.server.wsPort > 65535) {
+    errors.push(`Invalid WS_PORT: ${config.server.wsPort}. Must be between 1 and 65535`);
+  }
+  
+  // Redis 설정 검증
+  if (config.redis.port < 1 || config.redis.port > 65535) {
+    errors.push(`Invalid REDIS_PORT: ${config.redis.port}. Must be between 1 and 65535`);
+  }
+  
+  // 에러가 있으면 throw
+  if (errors.length > 0) {
+    const errorMessage = 'Configuration validation failed:\n' + errors.map(e => `  - ${e}`).join('\n');
+    throw new Error(errorMessage);
+  }
+  
+  // 설정 검증 성공
+  console.log('✅ Configuration validated successfully');
+}
 
 // 개발 환경에서 설정 출력 (민감한 정보는 마스킹)
 if (config.isDevelopment) {
