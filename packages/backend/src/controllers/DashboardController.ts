@@ -7,6 +7,7 @@ import {
   PriceHistory,
   Activity,
   SyncHistory,
+  ProductStatus,
 } from '../models/index.js';
 import { logger } from '../utils/logger.js';
 import { getRedisClient } from '../config/redis.js';
@@ -104,7 +105,7 @@ export class DashboardController {
         inventoryValue,
       ] = await Promise.all([
         ProductMapping.countDocuments(),
-        ProductMapping.countDocuments({ isActive: true, status: 'ACTIVE' }),
+        ProductMapping.countDocuments({ isActive: true, status: ProductStatus.ACTIVE }),
         PriceSyncJob.findOne({ status: 'completed' })
           .sort({ completedAt: -1 })
           .lean(),
@@ -958,10 +959,10 @@ export class DashboardController {
   private async getProductStatistics() {
     const [total, active, inactive, error, pending] = await Promise.all([
       ProductMapping.countDocuments(),
-      ProductMapping.countDocuments({ status: 'ACTIVE' }),
-      ProductMapping.countDocuments({ status: 'INACTIVE' }),
-      ProductMapping.countDocuments({ status: 'ERROR' }),
-      ProductMapping.countDocuments({ status: 'PENDING' }),
+      ProductMapping.countDocuments({ status: ProductStatus.ACTIVE }),
+      ProductMapping.countDocuments({ status: ProductStatus.INACTIVE }),
+      ProductMapping.countDocuments({ status: 'OUT_OF_STOCK' }),
+      ProductMapping.countDocuments({ status: ProductStatus.PENDING }),
     ]);
 
     return {

@@ -11,13 +11,7 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [
-      react({
-        babel: {
-          plugins: [
-            ['@babel/plugin-transform-runtime', { runtime: 'automatic' }],
-          ],
-        },
-      }),
+      react(),
       compression({
         algorithm: 'gzip',
         ext: '.gz',
