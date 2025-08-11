@@ -2,33 +2,14 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { visualizer } from 'rollup-plugin-visualizer';
-import compression from 'vite-plugin-compression';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   
   return {
-    plugins: [
-      react(),
-      compression({
-        algorithm: 'gzip',
-        ext: '.gz',
-        threshold: 10240,
-      }),
-      compression({
-        algorithm: 'brotliCompress',
-        ext: '.br',
-        threshold: 10240,
-      }),
-      visualizer({
-        open: false,
-        gzipSize: true,
-        brotliSize: true,
-        filename: 'dist/stats.html',
-      }),
-    ],
+    plugins: [react()],
+    
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
@@ -43,12 +24,21 @@ export default defineConfig(({ mode }) => {
         '@assets': path.resolve(__dirname, './src/assets'),
       },
     },
+    
     server: {
       port: 5173,
-      strictPort: true,
+      strictPort: false,
       host: true,
       open: false,
       cors: true,
+      watch: {
+        usePolling: true,
+        interval: 1000,
+      },
+      fs: {
+        strict: false,
+        allow: ['..'],
+      },
       proxy: {
         '/api': {
           target: env.VITE_API_URL || 'http://localhost:3000',
@@ -64,103 +54,73 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    build: {
-      outDir: 'dist',
-      sourcemap: mode === 'development',
-      minify: 'terser',
-      terserOptions: {
-        compress: {
-          drop_console: mode === 'production',
-          drop_debugger: mode === 'production',
-        },
-      },
-      chunkSizeWarningLimit: 500,
-      rollupOptions: {
-        output: {
-          manualChunks: (id) => {
-            // Core React dependencies
-            if (id.includes('node_modules')) {
-              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
-                return 'react-core';
-              }
-              // MUI Core
-              if (id.includes('@mui/material') || id.includes('@mui/system') || id.includes('@mui/utils')) {
-                return 'mui-core';
-              }
-              // MUI X components
-              if (id.includes('@mui/x-')) {
-                return 'mui-x';
-              }
-              // Emotion (MUI dependency)
-              if (id.includes('@emotion')) {
-                return 'emotion';
-              }
-              // Redux
-              if (id.includes('redux') || id.includes('@reduxjs')) {
-                return 'redux';
-              }
-              // Charts - only Recharts
-              if (id.includes('recharts')) {
-                return 'charts';
-              }
-              // Form libraries
-              if (id.includes('react-hook-form') || id.includes('yup')) {
-                return 'forms';
-              }
-              // Date utilities
-              if (id.includes('date-fns')) {
-                return 'date-utils';
-              }
-              // Network libraries
-              if (id.includes('axios') || id.includes('socket.io')) {
-                return 'network';
-              }
-              // Other vendors
-              return 'vendor';
-            }
-          },
-          assetFileNames: (assetInfo) => {
-            const info = assetInfo.name.split('.');
-            const ext = info[info.length - 1];
-            if (/png|jpe?g|svg|gif|tiff|bmp|ico/i.test(ext)) {
-              return `assets/images/[name]-[hash][extname]`;
-            }
-            if (/woff|woff2|eot|ttf|otf/i.test(ext)) {
-              return `assets/fonts/[name]-[hash][extname]`;
-            }
-            return `assets/[name]-[hash][extname]`;
-          },
-          chunkFileNames: 'js/[name]-[hash].js',
-          entryFileNames: 'js/[name]-[hash].js',
-        },
-      },
-      reportCompressedSize: false,
-    },
+    
     optimizeDeps: {
+      // 실제로 설치된 패키지만 include
       include: [
         'react',
         'react-dom',
         'react-router-dom',
         '@mui/material',
+        // '@mui/lab', // 설치 확인 후 추가
+        // '@mui/x-date-pickers', // 설치 확인 후 추가
         '@emotion/react',
         '@emotion/styled',
-        'axios',
-        'recharts',
-        'date-fns',
-        'react-hook-form',
-        'yup',
-        'react-toastify',
-        'socket.io-client',
         '@reduxjs/toolkit',
         'react-redux',
+        'axios',
+        'date-fns',
+        'recharts',
+        'react-hook-form',
+        'yup',
+        'socket.io-client',
       ],
-      exclude: ['@mui/icons-material'],
+      // MUI icons는 exclude
+      exclude: [
+        '@mui/icons-material',
+      ],
+      // 강제 재최적화 옵션
+      force: false, // development에서도 false로 변경
     },
-    define: {
-      'process.env': {},
-      __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+    
+    build: {
+      outDir: 'dist',
+      sourcemap: mode === 'development',
+      minify: mode === 'production' ? 'terser' : false,
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks: (id) => {
+            // node_modules 패키지 분리
+            if (id.includes('node_modules')) {
+              // MUI icons는 별도 청크
+              if (id.includes('@mui/icons-material')) {
+                return 'mui-icons';
+              }
+              // React 코어
+              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+                return 'react-vendor';
+              }
+              // MUI 코어
+              if (id.includes('@mui') && !id.includes('icons')) {
+                return 'mui-vendor';
+              }
+              // Redux
+              if (id.includes('redux') || id.includes('@reduxjs')) {
+                return 'redux-vendor';
+              }
+              // 기타 유틸리티
+              if (id.includes('axios') || id.includes('date-fns') || id.includes('lodash')) {
+                return 'utils-vendor';
+              }
+            }
+          },
+        },
+      },
     },
+    
     esbuild: {
+      logLevel: 'info',
       logOverride: { 'this-is-undefined-in-esm': 'silent' },
     },
   };
