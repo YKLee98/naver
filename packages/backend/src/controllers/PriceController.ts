@@ -1,12 +1,35 @@
 // packages/backend/src/controllers/PriceController.ts
 import { Request, Response, NextFunction } from 'express';
-import { PriceHistory, ExchangeRate, ProductMapping } from '../models';
-import { asyncHandler } from '../utils/asyncHandler';
-import { AppError } from '../utils/errors';
-import { getRedisClient } from '../config/redis';
-import { logger } from '../utils/logger';
+import { PriceHistory, ExchangeRate, ProductMapping } from '../models/index.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { AppError } from '../utils/errors.js';
+import { getRedisClient } from '../config/redis.js';
+import { logger } from '../utils/logger.js';
 
 export class PriceController {
+  private priceSyncService: any;
+  private exchangeRateService: any;
+
+  constructor(priceSyncService?: any, exchangeRateService?: any) {
+    this.priceSyncService = priceSyncService;
+    this.exchangeRateService = exchangeRateService;
+
+    // Bind method aliases for api.routes.ts compatibility
+    this.getPrices = this.getCurrentPrices.bind(this);
+    this.getPriceBySku = this.getCurrentPrice.bind(this);
+    this.getPriceDiscrepancies = this.getPriceDiscrepanciesMethod.bind(this);
+    this.calculatePrice = this.simulatePriceCalculation.bind(this);
+    this.getMargins = this.getMarginsMethod.bind(this);
+    this.syncPriceBySku = this.syncPriceBySkuMethod.bind(this);
+  }
+
+  // Method aliases for api.routes.ts compatibility
+  getPrices: any;
+  getPriceBySku: any;
+  getPriceDiscrepancies: any;
+  calculatePrice: any;
+  getMargins: any;
+  syncPriceBySku: any;
   /**
    * 가격 이력 조회
    * GET /api/v1/prices/history
@@ -459,4 +482,114 @@ export class PriceController {
       .select('platform oldPrice newPrice changeReason createdAt')
       .lean();
   }
+
+  /**
+   * 가격 불일치 조회
+   * GET /api/v1/prices/discrepancies
+   */
+  getPriceDiscrepanciesMethod = asyncHandler(
+    async (req: Request, res: Response): Promise<void> => {
+      const { threshold = 5, page = 1, limit = 20 } = req.query;
+
+      const mappings = await ProductMapping.find({ isActive: true }).lean();
+      const discrepancies = [];
+
+      for (const mapping of mappings) {
+        if (mapping.last_naver_price && mapping.last_shopify_price) {
+          const expectedPrice = mapping.last_naver_price * (await this.getCurrentExchangeRate()) * (1 + (mapping.margin || 15) / 100);
+          const diff = Math.abs(mapping.last_shopify_price - expectedPrice);
+          const diffPercent = (diff / expectedPrice) * 100;
+
+          if (diffPercent > Number(threshold)) {
+            discrepancies.push({
+              sku: mapping.sku,
+              productName: mapping.name || 'Unknown',
+              naverPrice: mapping.last_naver_price,
+              shopifyPrice: mapping.last_shopify_price,
+              expectedPrice: expectedPrice.toFixed(2),
+              difference: diff.toFixed(2),
+              differencePercent: diffPercent.toFixed(2),
+            });
+          }
+        }
+      }
+
+      const skip = (Number(page) - 1) * Number(limit);
+      const paginatedDiscrepancies = discrepancies.slice(skip, skip + Number(limit));
+
+      res.json({
+        success: true,
+        data: paginatedDiscrepancies,
+        pagination: {
+          total: discrepancies.length,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Math.ceil(discrepancies.length / Number(limit)),
+        },
+      });
+    }
+  );
+
+  /**
+   * 마진 정보 조회
+   * GET /api/v1/prices/margins
+   */
+  getMarginsMethod = asyncHandler(
+    async (req: Request, res: Response): Promise<void> => {
+      const { page = 1, limit = 20 } = req.query;
+      const skip = (Number(page) - 1) * Number(limit);
+
+      const [mappings, total] = await Promise.all([
+        ProductMapping.find({ isActive: true })
+          .skip(skip)
+          .limit(Number(limit))
+          .lean(),
+        ProductMapping.countDocuments({ isActive: true }),
+      ]);
+
+      const marginData = mappings.map((mapping) => ({
+        sku: mapping.sku,
+        productName: mapping.name || 'Unknown',
+        margin: mapping.margin || 15,
+        naverPrice: mapping.last_naver_price || 0,
+        shopifyPrice: mapping.last_shopify_price || 0,
+        calculatedMargin: mapping.last_naver_price && mapping.last_shopify_price
+          ? ((mapping.last_shopify_price / (mapping.last_naver_price * 0.00075) - 1) * 100).toFixed(2)
+          : 0,
+      }));
+
+      res.json({
+        success: true,
+        data: marginData,
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Math.ceil(total / Number(limit)),
+        },
+      });
+    }
+  );
+
+  /**
+   * SKU별 가격 동기화
+   * POST /api/v1/prices/sync/:sku
+   */
+  syncPriceBySkuMethod = asyncHandler(
+    async (req: Request, res: Response): Promise<void> => {
+      const { sku } = req.params;
+
+      if (!this.priceSyncService) {
+        throw new AppError('Price sync service not available', 503);
+      }
+
+      const result = await this.priceSyncService.syncSinglePrice(sku);
+
+      res.json({
+        success: true,
+        message: `Price synced for SKU: ${sku}`,
+        data: result,
+      });
+    }
+  );
 }

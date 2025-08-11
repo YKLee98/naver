@@ -124,4 +124,136 @@ export class SettingsController {
       next(error);
     }
   }
+
+  /**
+   * Get setting by key
+   */
+  async getSettingByKey(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { key } = req.params;
+      const settings = await Settings.findOne().lean();
+
+      if (!settings) {
+        return res.status(404).json({
+          success: false,
+          error: 'Settings not found',
+        });
+      }
+
+      const value = settings[key];
+      if (value === undefined) {
+        return res.status(404).json({
+          success: false,
+          error: `Setting key "${key}" not found`,
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          key,
+          value,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Update setting by key
+   */
+  async updateSettingByKey(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { key } = req.params;
+      const { value } = req.body;
+
+      const settings = await Settings.findOne();
+      if (!settings) {
+        return res.status(404).json({
+          success: false,
+          error: 'Settings not found',
+        });
+      }
+
+      settings[key] = value;
+      await settings.save();
+
+      res.json({
+        success: true,
+        data: {
+          key,
+          value,
+        },
+        message: `Setting "${key}" updated successfully`,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Export settings
+   */
+  async exportSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      const settings = await Settings.findOne().lean();
+
+      if (!settings) {
+        return res.status(404).json({
+          success: false,
+          error: 'Settings not found',
+        });
+      }
+
+      // Remove sensitive fields
+      const exportData = { ...settings };
+      delete exportData._id;
+      delete exportData.__v;
+
+      res.json({
+        success: true,
+        data: exportData,
+        exportedAt: new Date(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Import settings
+   */
+  async importSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      const importData = req.body;
+
+      // Validate import data
+      if (!importData || typeof importData !== 'object') {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid import data',
+        });
+      }
+
+      // Update or create settings
+      const settings = await Settings.findOneAndUpdate(
+        {},
+        importData,
+        { new: true, upsert: true }
+      );
+
+      logger.info('Settings imported successfully', {
+        userId: (req as any).user?.id,
+      });
+
+      res.json({
+        success: true,
+        data: settings,
+        message: 'Settings imported successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }

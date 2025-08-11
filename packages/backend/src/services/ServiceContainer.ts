@@ -541,8 +541,7 @@ export class ServiceContainer {
 
       this.productController = new ProductController(
         this.naverProductService,
-        this.shopifyGraphQLService,
-        this.mappingService
+        this.shopifyGraphQLService
       );
 
       this.inventoryController = new InventoryController(

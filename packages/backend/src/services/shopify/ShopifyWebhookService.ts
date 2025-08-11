@@ -1,8 +1,9 @@
 // packages/backend/src/services/shopify/ShopifyWebhookService.ts
-import { ShopifyService } from './ShopifyService';
+import { ShopifyService } from './ShopifyService.js';
 import crypto from 'crypto';
-import { logger } from '../../utils/logger';
-
+import { logger } from '../../utils/logger.js';
+import '@shopify/shopify-api/adapters/node';
+import { Shopify } from '@shopify/shopify-api';
 interface WebhookValidation {
   isValid: boolean;
   topic?: string;

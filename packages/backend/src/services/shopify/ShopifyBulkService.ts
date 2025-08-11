@@ -2,6 +2,7 @@
 import { ShopifyService } from './ShopifyService.js';
 import { ShopifyGraphQLService } from './ShopifyGraphQLService.js';
 import { logger } from '../../utils/logger.js';
+import '@shopify/shopify-api/adapters/node';
 
 interface PriceUpdate {
   sku: string;

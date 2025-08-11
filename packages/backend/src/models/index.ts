@@ -47,6 +47,7 @@ export { WebhookLog, type IWebhookLog } from './WebhookLog.js';
 export { SyncHistory, type ISyncHistory } from './SyncHistory.js';
 export { PriceSyncJob, type IPriceSyncJob } from './PriceSyncJob.js';
 export { SyncActivity, type ISyncActivity } from './SyncActivity.js';
+export { PriceSyncRule, type IPriceSyncRule } from './PriceSyncRule.js';
 
 // Re-export all types for convenience
 export type * from './types.js';

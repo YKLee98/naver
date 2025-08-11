@@ -417,6 +417,67 @@ export class DashboardController {
   };
 
   // ============================================
+  /**
+   * Get summary data
+   */
+  getSummary = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const summary = await this.generateSummary();
+      res.json({
+        success: true,
+        data: summary,
+      });
+    } catch (error) {
+      logger.error('Error fetching summary:', error);
+      next(error);
+    }
+  };
+
+  /**
+   * Get quick stats
+   */
+  getQuickStats = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const stats = await this.calculateQuickStats();
+      res.json({
+        success: true,
+        data: stats,
+      });
+    } catch (error) {
+      logger.error('Error fetching quick stats:', error);
+      next(error);
+    }
+  };
+
+  /**
+   * Get trends chart data
+   */
+  getTrendsChart = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { period = '7d' } = req.query;
+      const trendsData = await this.generateTrendsData(period as string);
+      res.json({
+        success: true,
+        data: trendsData,
+      });
+    } catch (error) {
+      logger.error('Error fetching trends data:', error);
+      next(error);
+    }
+  };
+
   // ALERT METHODS
   // ============================================
 
@@ -1423,6 +1484,86 @@ export class DashboardController {
     return {
       path: `/tmp/${exportId}.json`,
       name: `dashboard-export-${exportId}.json`,
+    };
+  }
+
+  private async generateSummary() {
+    const [stats, recentActivities, alerts] = await Promise.all([
+      this.calculateStats({}),
+      Activity.find().sort({ createdAt: -1 }).limit(5).lean(),
+      this.fetchAlerts('active'),
+    ]);
+
+    return {
+      stats,
+      recentActivities,
+      activeAlerts: alerts.length,
+      lastUpdated: new Date(),
+    };
+  }
+
+  private async calculateQuickStats() {
+    const [mappings, syncJobs, transactions] = await Promise.all([
+      ProductMapping.countDocuments({ isActive: true }),
+      SyncHistory.countDocuments({
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      }),
+      InventoryTransaction.countDocuments({
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      }),
+    ]);
+
+    return {
+      activeMappings: mappings,
+      todaySyncs: syncJobs,
+      todayTransactions: transactions,
+      systemHealth: 'operational',
+    };
+  }
+
+  private async generateTrendsData(period: string) {
+    const days = period === '30d' ? 30 : period === '14d' ? 14 : 7;
+    const startDate = subDays(new Date(), days);
+
+    const syncTrends = await SyncHistory.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+          },
+          total: { $sum: 1 },
+          success: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] },
+          },
+          failed: {
+            $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] },
+          },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    return {
+      labels: syncTrends.map(t => t._id),
+      datasets: [
+        {
+          label: 'Success',
+          data: syncTrends.map(t => t.success),
+          borderColor: '#4caf50',
+          backgroundColor: 'rgba(76, 175, 80, 0.1)',
+        },
+        {
+          label: 'Failed',
+          data: syncTrends.map(t => t.failed),
+          borderColor: '#f44336',
+          backgroundColor: 'rgba(244, 67, 54, 0.1)',
+        },
+      ],
     };
   }
 }

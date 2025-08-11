@@ -1,38 +1,58 @@
-// ===== 1. packages/backend/src/index.ts =====
+// packages/backend/src/index.ts
 import 'dotenv/config';
-import server from './server.js';
 import { logger } from './utils/logger.js';
-import { config } from './config/index.js';
+import { config, validateConfig } from './config/index.js';
+import { startCluster } from './cluster.js';
 
 /**
- * Start the application
+ * Main application entry point
+ * Determines whether to run in cluster mode or single process mode
  */
 async function startApplication() {
   try {
-    // Validate environment
-    if (!config.mongoUri) {
-      throw new Error('MongoDB URI is not configured');
-    }
-
-    if (!config.jwtSecret) {
-      throw new Error('JWT Secret is not configured');
-    }
-
-    // Log startup information
-    logger.info('Starting Hallyu Pomaholic ERP Server...');
+    logger.info('🚀 Starting Hallyu-Fomaholic Sync System...');
     logger.info(`Environment: ${config.env}`);
     logger.info(`Node Version: ${process.version}`);
+    
+    // Validate configuration
+    const errors = validateConfig();
+    
+    if (errors.length > 0) {
+      logger.error('Configuration validation failed:', errors);
+      process.exit(1);
+    }
 
-    // Start the server
-    await server.start();
-
-    // Log successful startup
+    // Check if clustering is enabled
+    if (config.features.enableClustering && config.env === 'production') {
+      logger.info('Starting in cluster mode...');
+      await startCluster();
+    } else {
+      logger.info('Starting in single process mode...');
+      
+      // Import server dynamically to avoid loading it in cluster primary
+      const serverModule = await import('./server.js');
+      
+      // Server module exports a default class that auto-starts
+      logger.info('Server module loaded and starting...');
+    }
+    
     logger.info('Application started successfully');
   } catch (error) {
     logger.error('Failed to start application:', error);
     process.exit(1);
   }
 }
+
+// Handle process-level errors
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
 
 // Start the application
 startApplication();

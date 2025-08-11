@@ -6,9 +6,21 @@ import { Activity } from '../models/Activity.js';
 
 export class SyncController {
   private syncService: SyncService;
+  
+  // Method aliases for api.routes.ts compatibility
+  syncAll: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+  syncProducts: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+  getSyncJobs: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+  getSyncJobById: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 
   constructor(syncService: SyncService) {
     this.syncService = syncService;
+    
+    // Bind methods for api.routes.ts compatibility
+    this.syncAll = this.performFullSync.bind(this);
+    this.syncProducts = this.performFullSync.bind(this);
+    this.getSyncJobs = this.getSyncHistory.bind(this);
+    this.getSyncJobById = this.getSyncJobStatus.bind(this);
   }
 
   /**

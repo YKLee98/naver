@@ -43,50 +43,31 @@ export function setupApiRoutes(container?: ServiceContainer): Router {
       const ctrl = serviceContainer.dashboardController;
 
       // Statistics
-      protectedRouter.get(
-        '/dashboard/statistics',
-        ctrl.getStatistics.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/dashboard/statistics/:type',
-        ctrl.getStatisticsByType.bind(ctrl)
-      );
+      protectedRouter.get('/dashboard/statistics', ctrl.getStatistics.bind(ctrl));
+      protectedRouter.get('/dashboard/statistics/:type', ctrl.getStatisticsByType.bind(ctrl));
 
       // Activities
-      protectedRouter.get(
-        '/dashboard/activities',
-        ctrl.getRecentActivities.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/dashboard/activities/:id',
-        ctrl.getActivityById.bind(ctrl)
-      );
+      protectedRouter.get('/dashboard/activities', ctrl.getRecentActivities.bind(ctrl));
+      protectedRouter.get('/dashboard/activities/:id', ctrl.getActivityById.bind(ctrl));
 
       // Charts
-      protectedRouter.get(
-        '/dashboard/charts/sales',
-        ctrl.getSalesChart.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/dashboard/charts/inventory',
-        ctrl.getInventoryChart.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/dashboard/charts/sync',
-        ctrl.getSyncChart.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/dashboard/charts/trends',
-        ctrl.getTrendsChart.bind(ctrl)
-      );
-
-      // Summary
-      protectedRouter.get('/dashboard/summary', ctrl.getSummary.bind(ctrl));
+      protectedRouter.get('/dashboard/charts/sales', ctrl.getSalesChartData.bind(ctrl));
+      protectedRouter.get('/dashboard/charts/inventory', ctrl.getInventoryChartData.bind(ctrl));
+      protectedRouter.get('/dashboard/charts/sync', ctrl.getSyncChartData.bind(ctrl));
+      
+      // Additional dashboard endpoints
+      if (ctrl.getTrendsChart) {
+        protectedRouter.get('/dashboard/charts/trends', ctrl.getTrendsChart.bind(ctrl));
+      }
+      if (ctrl.getSummary) {
+        protectedRouter.get('/dashboard/summary', ctrl.getSummary.bind(ctrl));
+      }
       protectedRouter.get('/dashboard/alerts', ctrl.getAlerts.bind(ctrl));
-      protectedRouter.get(
-        '/dashboard/quick-stats',
-        ctrl.getQuickStats.bind(ctrl)
-      );
+      if (ctrl.getQuickStats) {
+        protectedRouter.get('/dashboard/quick-stats', ctrl.getQuickStats.bind(ctrl));
+      } else {
+        protectedRouter.get('/dashboard/quick-stats', ctrl.getStatistics.bind(ctrl));
+      }
 
       logger.info('✅ Dashboard routes registered');
     }
@@ -102,22 +83,15 @@ export function setupApiRoutes(container?: ServiceContainer): Router {
       protectedRouter.post('/products', ctrl.createProduct.bind(ctrl));
       protectedRouter.put('/products/:sku', ctrl.updateProduct.bind(ctrl));
       protectedRouter.delete('/products/:sku', ctrl.deleteProduct.bind(ctrl));
-      protectedRouter.get(
-        '/products/search/naver',
-        ctrl.searchNaverProducts.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/products/search/shopify',
-        ctrl.searchShopifyProducts.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/products/bulk-update',
-        ctrl.bulkUpdateProducts.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/products/export/csv',
-        ctrl.exportProducts.bind(ctrl)
-      );
+      
+      protectedRouter.get('/products/search/naver', ctrl.searchNaverProducts.bind(ctrl));
+      protectedRouter.get('/products/search/shopify', ctrl.searchShopifyProducts.bind(ctrl));
+      protectedRouter.post('/products/bulk-update', ctrl.bulkUpdateProducts.bind(ctrl));
+      protectedRouter.get('/products/export/csv', ctrl.exportProducts.bind(ctrl));
+      
+      if (ctrl.syncProduct) {
+        protectedRouter.post('/products/:sku/sync', ctrl.syncProduct.bind(ctrl));
+      }
 
       logger.info('✅ Product routes registered');
     }
@@ -133,42 +107,16 @@ export function setupApiRoutes(container?: ServiceContainer): Router {
       protectedRouter.post('/mappings', ctrl.createMapping.bind(ctrl));
       protectedRouter.put('/mappings/:id', ctrl.updateMapping.bind(ctrl));
       protectedRouter.delete('/mappings/:id', ctrl.deleteMapping.bind(ctrl));
-      protectedRouter.post(
-        '/mappings/bulk',
-        ctrl.bulkCreateMappings.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/mappings/bulk-upload',
-        ctrl.bulkUploadMappings.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/mappings/:id/toggle',
-        ctrl.toggleMapping.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/mappings/:id/validate',
-        ctrl.validateMapping.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/mappings/auto-discover',
-        ctrl.autoDiscoverMappings.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/mappings/search-shopify',
-        ctrl.searchShopifyProducts.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/mappings/auto-search',
-        ctrl.autoSearchAndMap.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/mappings/export/csv',
-        ctrl.exportMappings.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/mappings/template/download',
-        ctrl.downloadTemplate.bind(ctrl)
-      );
+      
+      protectedRouter.post('/mappings/bulk', ctrl.bulkCreateMappings.bind(ctrl));
+      protectedRouter.post('/mappings/bulk-upload', ctrl.bulkUploadMappings.bind(ctrl));
+      protectedRouter.patch('/mappings/:id/toggle', ctrl.toggleMapping.bind(ctrl));
+      protectedRouter.post('/mappings/:id/validate', ctrl.validateMapping.bind(ctrl));
+      protectedRouter.post('/mappings/auto-discover', ctrl.autoDiscoverMappings.bind(ctrl));
+      protectedRouter.get('/mappings/search-shopify', ctrl.searchShopifyProducts.bind(ctrl));
+      protectedRouter.post('/mappings/auto-search', ctrl.autoSearchAndCreate.bind(ctrl));
+      protectedRouter.get('/mappings/export/csv', ctrl.exportMappings.bind(ctrl));
+      protectedRouter.get('/mappings/template/download', ctrl.downloadTemplate.bind(ctrl));
 
       logger.info('✅ Mapping routes registered');
     }
@@ -179,53 +127,28 @@ export function setupApiRoutes(container?: ServiceContainer): Router {
     if (serviceContainer.inventoryController) {
       const ctrl = serviceContainer.inventoryController;
 
-      // Main inventory endpoints
-      protectedRouter.get('/inventory', ctrl.getAllInventoryStatus.bind(ctrl));
-      protectedRouter.get(
-        '/inventory/status',
-        ctrl.getAllInventoryStatus.bind(ctrl)
-      );
+      // Main inventory routes
+      protectedRouter.get('/inventory', ctrl.getInventory.bind(ctrl));
       protectedRouter.get('/inventory/:sku', ctrl.getInventoryBySku.bind(ctrl));
-      protectedRouter.get(
-        '/inventory/:sku/status',
-        ctrl.getInventoryStatus.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/inventory/:sku/history',
-        ctrl.getInventoryHistory.bind(ctrl)
-      );
-
-      // Sync endpoints
-      protectedRouter.post('/inventory/sync', ctrl.syncAllInventory.bind(ctrl));
-      protectedRouter.post(
-        '/inventory/sync/:sku',
-        ctrl.syncInventoryBySku.bind(ctrl)
-      );
-
-      // Update endpoints
       protectedRouter.put('/inventory/:sku', ctrl.updateInventory.bind(ctrl));
-      protectedRouter.post(
-        '/inventory/:sku/adjust',
-        ctrl.adjustInventory.bind(ctrl)
-      );
-
-      // Analysis endpoints
-      protectedRouter.get(
-        '/inventory/discrepancies',
-        ctrl.getDiscrepancies.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/inventory/discrepancies/:sku/resolve',
-        ctrl.resolveDiscrepancy.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/inventory/low-stock',
-        ctrl.getLowStockProducts.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/inventory/transactions',
-        ctrl.getTransactions.bind(ctrl)
-      );
+      protectedRouter.post('/inventory/:sku/adjust', ctrl.adjustInventory.bind(ctrl));
+      
+      // Inventory status and history
+      protectedRouter.get('/inventory/:sku/status', ctrl.getInventoryStatus.bind(ctrl));
+      protectedRouter.get('/inventory/:sku/history', ctrl.getInventoryHistory.bind(ctrl));
+      
+      // Bulk operations
+      protectedRouter.post('/inventory/bulk-update', ctrl.bulkUpdateInventory.bind(ctrl));
+      
+      // Sync operations
+      protectedRouter.post('/inventory/sync/:sku', ctrl.syncInventoryBySku.bind(ctrl));
+      protectedRouter.post('/inventory/sync', ctrl.syncAllInventory.bind(ctrl));
+      
+      // Discrepancy management
+      protectedRouter.post('/inventory/discrepancy-check', ctrl.checkDiscrepancy.bind(ctrl));
+      protectedRouter.get('/inventory/discrepancies/list', ctrl.getDiscrepancies.bind(ctrl));
+      protectedRouter.post('/inventory/discrepancies/resolve', ctrl.resolveDiscrepancy.bind(ctrl));
+      protectedRouter.post('/inventory/discrepancies/:sku/resolve', ctrl.resolveDiscrepancy.bind(ctrl));
 
       logger.info('✅ Inventory routes registered');
     }
@@ -236,38 +159,23 @@ export function setupApiRoutes(container?: ServiceContainer): Router {
     if (serviceContainer.syncController) {
       const ctrl = serviceContainer.syncController;
 
-      protectedRouter.post('/sync/full', ctrl.performFullSync.bind(ctrl));
-      protectedRouter.post(
-        '/sync/prices',
-        ctrl.syncPrices?.bind(ctrl) ||
-          ((req, res) => res.status(501).json({ error: 'Not implemented' }))
-      );
-      protectedRouter.post(
-        '/sync/inventory',
-        ctrl.syncInventory?.bind(ctrl) ||
-          ((req, res) => res.status(501).json({ error: 'Not implemented' }))
-      );
-      protectedRouter.get('/sync/status', ctrl.getSyncStatus.bind(ctrl));
-      protectedRouter.get(
-        '/sync/status/:jobId',
-        ctrl.getSyncJobStatus?.bind(ctrl) ||
-          ((req, res) => res.status(501).json({ error: 'Not implemented' }))
-      );
-      protectedRouter.get('/sync/history', ctrl.getSyncHistory.bind(ctrl));
+      protectedRouter.post('/sync/all', ctrl.syncAll.bind(ctrl));
+      protectedRouter.post('/sync/inventory', ctrl.syncInventory.bind(ctrl));
+      protectedRouter.post('/sync/prices', ctrl.syncPrices.bind(ctrl));
+      protectedRouter.post('/sync/products', ctrl.syncProducts.bind(ctrl));
       protectedRouter.post('/sync/sku/:sku', ctrl.syncSingleSku.bind(ctrl));
-      protectedRouter.post('/sync/retry/:jobId', ctrl.retrySyncJob.bind(ctrl));
-      protectedRouter.post(
-        '/sync/cancel/:jobId',
-        ctrl.cancelSyncJob.bind(ctrl)
-      );
-      protectedRouter.get('/sync/settings', ctrl.getSyncSettings.bind(ctrl));
-      protectedRouter.put('/sync/settings', ctrl.updateSyncSettings.bind(ctrl));
+      protectedRouter.get('/sync/status', ctrl.getSyncStatus.bind(ctrl));
+      protectedRouter.get('/sync/history', ctrl.getSyncHistory.bind(ctrl));
+      protectedRouter.get('/sync/jobs', ctrl.getSyncJobs.bind(ctrl));
+      protectedRouter.get('/sync/jobs/:id', ctrl.getSyncJobById.bind(ctrl));
+      protectedRouter.post('/sync/jobs/:id/cancel', ctrl.cancelSyncJob.bind(ctrl));
+      protectedRouter.post('/sync/jobs/:id/retry', ctrl.retrySyncJob.bind(ctrl));
 
       logger.info('✅ Sync routes registered');
     }
 
     // ============================================
-    // PRICE ROUTES (Optional)
+    // PRICE ROUTES
     // ============================================
     if (serviceContainer.priceController) {
       const ctrl = serviceContainer.priceController;
@@ -275,63 +183,35 @@ export function setupApiRoutes(container?: ServiceContainer): Router {
       protectedRouter.get('/prices', ctrl.getPrices.bind(ctrl));
       protectedRouter.get('/prices/:sku', ctrl.getPriceBySku.bind(ctrl));
       protectedRouter.put('/prices/:sku', ctrl.updatePrice.bind(ctrl));
-      protectedRouter.post(
-        '/prices/bulk-update',
-        ctrl.bulkUpdatePrices.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/prices/history/:sku',
-        ctrl.getPriceHistory.bind(ctrl)
-      );
+      protectedRouter.post('/prices/bulk-update', ctrl.bulkUpdatePrices.bind(ctrl));
+      protectedRouter.get('/prices/discrepancies', ctrl.getPriceDiscrepancies.bind(ctrl));
+      protectedRouter.get('/prices/history/:sku', ctrl.getPriceHistory.bind(ctrl));
       protectedRouter.post('/prices/calculate', ctrl.calculatePrice.bind(ctrl));
-      protectedRouter.get(
-        '/prices/discrepancies',
-        ctrl.getPriceDiscrepancies.bind(ctrl)
-      );
-      protectedRouter.post('/prices/sync', ctrl.syncPrices.bind(ctrl));
+      protectedRouter.get('/prices/margins', ctrl.getMargins.bind(ctrl));
       protectedRouter.post('/prices/sync/:sku', ctrl.syncPriceBySku.bind(ctrl));
-      protectedRouter.get('/prices/rules', ctrl.getPriceRules.bind(ctrl));
-      protectedRouter.post('/prices/rules', ctrl.createPriceRule.bind(ctrl));
-      protectedRouter.put('/prices/rules/:id', ctrl.updatePriceRule.bind(ctrl));
-      protectedRouter.delete(
-        '/prices/rules/:id',
-        ctrl.deletePriceRule.bind(ctrl)
-      );
 
       logger.info('✅ Price routes registered');
     }
 
     // ============================================
-    // ANALYTICS ROUTES (Optional)
+    // ANALYTICS ROUTES
     // ============================================
     if (serviceContainer.analyticsController) {
       const ctrl = serviceContainer.analyticsController;
 
       protectedRouter.get('/analytics/overview', ctrl.getOverview.bind(ctrl));
-      protectedRouter.get(
-        '/analytics/performance',
-        ctrl.getPerformanceMetrics.bind(ctrl)
-      );
+      protectedRouter.get('/analytics/sales', ctrl.getSalesAnalytics.bind(ctrl));
+      protectedRouter.get('/analytics/inventory', ctrl.getInventoryAnalytics.bind(ctrl));
+      protectedRouter.get('/analytics/sync', ctrl.getSyncAnalytics.bind(ctrl));
+      protectedRouter.get('/analytics/performance', ctrl.getPerformanceMetrics.bind(ctrl));
       protectedRouter.get('/analytics/trends', ctrl.getTrends.bind(ctrl));
-      protectedRouter.get('/analytics/reports', ctrl.getReports.bind(ctrl));
-      protectedRouter.post(
-        '/analytics/reports/generate',
-        ctrl.generateReport.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/analytics/reports/:id',
-        ctrl.getReportById.bind(ctrl)
-      );
-      protectedRouter.get(
-        '/analytics/reports/:id/download',
-        ctrl.downloadReport.bind(ctrl)
-      );
+      protectedRouter.get('/analytics/export', ctrl.exportAnalytics.bind(ctrl));
 
       logger.info('✅ Analytics routes registered');
     }
 
     // ============================================
-    // SETTINGS ROUTES (Optional)
+    // SETTINGS ROUTES
     // ============================================
     if (serviceContainer.settingsController) {
       const ctrl = serviceContainer.settingsController;
@@ -348,121 +228,73 @@ export function setupApiRoutes(container?: ServiceContainer): Router {
     }
 
     // ============================================
-    // NOTIFICATION ROUTES (Optional)
+    // NOTIFICATION ROUTES
     // ============================================
     if (serviceContainer.notificationController) {
       const ctrl = serviceContainer.notificationController;
 
       protectedRouter.get('/notifications', ctrl.getNotifications.bind(ctrl));
-      protectedRouter.post(
-        '/notifications/:id/read',
-        ctrl.markAsRead.bind(ctrl)
-      );
-      protectedRouter.delete(
-        '/notifications/:id',
-        ctrl.deleteNotification.bind(ctrl)
-      );
-      protectedRouter.post(
-        '/notifications/test',
-        ctrl.sendTestNotification.bind(ctrl)
-      );
+      protectedRouter.get('/notifications/:id', ctrl.getNotificationById.bind(ctrl));
+      protectedRouter.patch('/notifications/:id/read', ctrl.markAsRead.bind(ctrl));
+      protectedRouter.patch('/notifications/read-all', ctrl.markAllAsRead.bind(ctrl));
+      protectedRouter.delete('/notifications/:id', ctrl.deleteNotification.bind(ctrl));
+      protectedRouter.post('/notifications/test', ctrl.sendTestNotification.bind(ctrl));
 
       logger.info('✅ Notification routes registered');
     }
 
     // ============================================
-    // REPORT ROUTES (Optional)
+    // REPORT ROUTES
     // ============================================
     if (serviceContainer.reportController) {
       const ctrl = serviceContainer.reportController;
 
       protectedRouter.get('/reports', ctrl.getReports.bind(ctrl));
-      protectedRouter.post('/reports/generate', ctrl.generateReport.bind(ctrl));
       protectedRouter.get('/reports/:id', ctrl.getReportById.bind(ctrl));
-      protectedRouter.get(
-        '/reports/:id/download',
-        ctrl.downloadReport.bind(ctrl)
-      );
+      protectedRouter.post('/reports/generate', ctrl.generateReport.bind(ctrl));
+      protectedRouter.get('/reports/:id/download', ctrl.downloadReport.bind(ctrl));
       protectedRouter.delete('/reports/:id', ctrl.deleteReport.bind(ctrl));
+      protectedRouter.get('/reports/templates', ctrl.getReportTemplates.bind(ctrl));
 
       logger.info('✅ Report routes registered');
     }
 
     // ============================================
-    // WEBHOOK ROUTES (Public - no auth required)
+    // AUTH ROUTES (Public)
     // ============================================
-    if (serviceContainer.webhookController) {
-      const ctrl = serviceContainer.webhookController;
+    if (serviceContainer.authController) {
+      const ctrl = serviceContainer.authController;
 
-      router.post('/webhooks/naver', ctrl.handleNaverWebhook.bind(ctrl));
-      router.post('/webhooks/shopify', ctrl.handleShopifyWebhook.bind(ctrl));
+      router.post('/auth/login', ctrl.login.bind(ctrl));
+      router.post('/auth/register', ctrl.register.bind(ctrl));
+      router.post('/auth/refresh', ctrl.refreshToken.bind(ctrl));
+      router.post('/auth/logout', ctrl.logout.bind(ctrl));
+      router.post('/auth/forgot-password', ctrl.forgotPassword.bind(ctrl));
+      router.post('/auth/reset-password', ctrl.resetPassword.bind(ctrl));
+      
+      // Protected auth routes
+      protectedRouter.get('/auth/me', ctrl.getProfile.bind(ctrl));
+      protectedRouter.put('/auth/profile', ctrl.updateProfile.bind(ctrl));
+      protectedRouter.put('/auth/change-password', ctrl.changePassword.bind(ctrl));
 
-      logger.info('✅ Webhook routes registered');
-    }
-
-    // ============================================
-    // SHOPIFY WEBHOOK ROUTES (Public - with HMAC validation)
-    // ============================================
-    if (serviceContainer.shopifyWebhookController) {
-      const ctrl = serviceContainer.shopifyWebhookController;
-
-      router.post(
-        '/webhooks/shopify/orders/create',
-        ctrl.handleOrderCreate.bind(ctrl)
-      );
-      router.post(
-        '/webhooks/shopify/orders/update',
-        ctrl.handleOrderUpdate.bind(ctrl)
-      );
-      router.post(
-        '/webhooks/shopify/orders/cancel',
-        ctrl.handleOrderCancel.bind(ctrl)
-      );
-      router.post(
-        '/webhooks/shopify/products/create',
-        ctrl.handleProductCreate.bind(ctrl)
-      );
-      router.post(
-        '/webhooks/shopify/products/update',
-        ctrl.handleProductUpdate.bind(ctrl)
-      );
-      router.post(
-        '/webhooks/shopify/products/delete',
-        ctrl.handleProductDelete.bind(ctrl)
-      );
-      router.post(
-        '/webhooks/shopify/inventory/update',
-        ctrl.handleInventoryUpdate.bind(ctrl)
-      );
-
-      logger.info('✅ Shopify webhook routes registered');
+      logger.info('✅ Auth routes registered');
     }
   };
 
-  // If container is provided, set up routes immediately
+  // Setup routes if container is provided
   if (container) {
     setupContainerRoutes(container);
-  } else {
-    // Defer route setup until container is available
-    process.nextTick(async () => {
-      try {
-        const serviceContainer = ServiceContainer.getInstance();
-        setupContainerRoutes(serviceContainer);
-      } catch (error) {
-        logger.error('Failed to get ServiceContainer for route setup:', error);
-      }
-    });
   }
 
-  // Combine public and protected routes
+  // Mount protected routes
   router.use('/', protectedRouter);
 
   // 404 handler for API routes
-  router.use('*', (req, res) => {
+  router.use((req, res) => {
     res.status(404).json({
       success: false,
       error: 'API endpoint not found',
-      path: req.originalUrl,
+      path: req.path,
     });
   });
 

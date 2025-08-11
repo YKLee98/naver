@@ -3,13 +3,19 @@ import mongoose from 'mongoose';
 import { logger } from '../utils/logger.js';
 
 /**
- * MongoDB connection options
+ * MongoDB connection options - Optimized for production
  */
 const mongoOptions: mongoose.ConnectOptions = {
-  maxPoolSize: 10,
-  minPoolSize: 2,
+  maxPoolSize: 50,              // Increased for better concurrency
+  minPoolSize: 5,               // Maintain minimum connections
   serverSelectionTimeoutMS: 5000,
   socketTimeoutMS: 45000,
+  retryWrites: true,             // Enable automatic retry
+  retryReads: true,              // Enable read retry
+  heartbeatFrequencyMS: 10000,  // Health check frequency
+  maxIdleTimeMS: 30000,          // Close idle connections
+  compressors: ['zstd', 'zlib'], // Enable compression
+  readPreference: 'secondaryPreferred', // Optimize read operations
 };
 
 /**

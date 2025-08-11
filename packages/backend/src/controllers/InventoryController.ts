@@ -1,43 +1,70 @@
 // packages/backend/src/controllers/InventoryController.ts
 import { Request, Response, NextFunction } from 'express';
-import { InventorySyncService } from '../services/sync/index.js';
-import { logger } from '../utils/logger.js';
-import {
-  ProductMapping,
-  InventoryTransaction,
+import { 
+  ProductMapping, 
+  InventoryTransaction, 
   Activity,
+  SyncHistory 
 } from '../models/index.js';
+import { NaverProductService } from '../services/naver/index.js';
+import { ShopifyInventoryService } from '../services/shopify/index.js';
+import { InventorySyncService } from '../services/sync/index.js';
 import { AppError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
+import { getRedisClient } from '../config/redis.js';
+
+interface InventoryAdjustment {
+  sku: string;
+  quantity: number;
+  reason: string;
+  notes?: string;
+}
+
+interface InventoryStatus {
+  sku: string;
+  naverQuantity: number;
+  shopifyQuantity: number;
+  discrepancy: number;
+  lastSyncedAt: Date;
+  syncStatus: 'synced' | 'out_of_sync' | 'error';
+}
 
 export class InventoryController {
+  private naverProductService?: NaverProductService;
+  private shopifyInventoryService?: ShopifyInventoryService;
   private inventorySyncService: InventorySyncService;
+  private redis: any;
 
-  constructor(inventorySyncService: InventorySyncService) {
+  constructor(
+    inventorySyncService: InventorySyncService,
+    naverProductService?: NaverProductService,
+    shopifyInventoryService?: ShopifyInventoryService
+  ) {
     this.inventorySyncService = inventorySyncService;
+    this.naverProductService = naverProductService;
+    this.shopifyInventoryService = shopifyInventoryService;
+    this.redis = getRedisClient();
   }
 
   /**
-   * Get all inventory status
-   * GET /api/v1/inventory/status
+   * 재고 목록 조회
    */
-  async getAllInventoryStatus(
+  getInventory = async (
     req: Request,
     res: Response,
     next: NextFunction
-  ): Promise<void> {
+  ): Promise<void> => {
     try {
-      const {
-        page = 1,
-        limit = 20,
-        search,
-        status,
-        stockLevel,
-        sortBy = 'sku',
-        order = 'asc',
+      const { 
+        page = 1, 
+        limit = 20, 
+        vendor = 'album',
+        lowStock = false,
+        outOfStock = false,
+        search 
       } = req.query;
 
-      // Build query
-      const query: any = {};
+      const query: any = { vendor };
 
       if (search) {
         query.$or = [
@@ -46,234 +73,79 @@ export class InventoryController {
         ];
       }
 
-      if (status) {
-        query.syncStatus = status;
-      }
-
-      // Get mappings with inventory data
       const skip = (Number(page) - 1) * Number(limit);
 
-      const [mappings, total] = await Promise.all([
-        ProductMapping.find(query)
-          .sort({ [sortBy as string]: order === 'asc' ? 1 : -1 })
-          .skip(skip)
-          .limit(Number(limit))
-          .lean(),
-        ProductMapping.countDocuments(query),
-      ]);
+      const mappings = await ProductMapping.find(query)
+        .skip(skip)
+        .limit(Number(limit))
+        .lean();
 
-      // Format inventory items
-      const inventoryItems = mappings.map((mapping) => {
-        const naverStock = mapping.inventory?.naver?.available || 0;
-        const shopifyStock = mapping.inventory?.shopify?.available || 0;
-        const difference = Math.abs(naverStock - shopifyStock);
+      // 각 제품의 실시간 재고 정보 조회
+      const inventoryData = await Promise.all(
+        mappings.map(async (mapping) => {
+          try {
+            if (!this.naverProductService || !this.shopifyInventoryService) {
+              return {
+                sku: mapping.sku,
+                productName: mapping.productName,
+                naverQuantity: 0,
+                shopifyQuantity: 0,
+                discrepancy: 0,
+                syncStatus: 'error',
+                lastSyncedAt: mapping.lastSyncedAt,
+              };
+            }
 
-        let itemStatus = 'synced';
-        if (difference > 0) itemStatus = 'mismatch';
-        if (naverStock === 0 || shopifyStock === 0) itemStatus = 'warning';
-        if (naverStock === 0 && shopifyStock === 0) itemStatus = 'out_of_stock';
+            const [naverInventory, shopifyInventory] = await Promise.all([
+              this.naverProductService.getInventory(mapping.naverProductId),
+              this.shopifyInventoryService.getInventoryBySku(mapping.sku),
+            ]);
 
-        return {
-          _id: mapping._id,
-          id: mapping._id,
-          sku: mapping.sku,
-          productName: mapping.productName,
-          naverStock,
-          shopifyStock,
-          difference,
-          status: itemStatus,
-          syncStatus: mapping.syncStatus,
-          lastSyncedAt: mapping.lastSyncedAt,
-          isActive: mapping.isActive,
-        };
-      });
+            const discrepancy = Math.abs(naverInventory - shopifyInventory);
 
-      // Apply stock level filter if provided
-      let filteredItems = inventoryItems;
-      if (stockLevel) {
-        switch (stockLevel) {
-          case 'low':
-            filteredItems = inventoryItems.filter(
-              (item) => item.naverStock < 10 || item.shopifyStock < 10
-            );
-            break;
-          case 'out':
-            filteredItems = inventoryItems.filter(
-              (item) => item.naverStock === 0 || item.shopifyStock === 0
-            );
-            break;
-          case 'normal':
-            filteredItems = inventoryItems.filter(
-              (item) => item.naverStock >= 10 && item.shopifyStock >= 10
-            );
-            break;
-        }
+            return {
+              sku: mapping.sku,
+              productName: mapping.productName,
+              naverQuantity: naverInventory,
+              shopifyQuantity: shopifyInventory,
+              discrepancy,
+              syncStatus: discrepancy === 0 ? 'synced' : 'out_of_sync',
+              lastSyncedAt: mapping.lastSyncedAt,
+            };
+          } catch (error) {
+            logger.error(`Failed to get inventory for ${mapping.sku}:`, error);
+            return {
+              sku: mapping.sku,
+              productName: mapping.productName,
+              naverQuantity: 0,
+              shopifyQuantity: 0,
+              discrepancy: 0,
+              syncStatus: 'error',
+              lastSyncedAt: mapping.lastSyncedAt,
+            };
+          }
+        })
+      );
+
+      // 필터링
+      let filteredData = inventoryData;
+
+      if (lowStock === 'true') {
+        filteredData = filteredData.filter(
+          item => item.naverQuantity > 0 && item.naverQuantity <= 10
+        );
       }
 
-      res.json({
-        success: true,
-        data: filteredItems,
-        pagination: {
-          total: filteredItems.length,
-          page: Number(page),
-          limit: Number(limit),
-          totalPages: Math.ceil(filteredItems.length / Number(limit)),
-        },
-        summary: {
-          totalSku: total,
-          normalCount: inventoryItems.filter((i) => i.status === 'synced')
-            .length,
-          warningCount: inventoryItems.filter((i) => i.status === 'warning')
-            .length,
-          errorCount: inventoryItems.filter((i) => i.status === 'mismatch')
-            .length,
-          outOfStockCount: inventoryItems.filter(
-            (i) => i.status === 'out_of_stock'
-          ).length,
-        },
-      });
-    } catch (error) {
-      logger.error('Get all inventory status error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Get inventory status for a specific SKU
-   * GET /api/v1/inventory/:sku/status
-   */
-  async getInventoryStatus(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
-    try {
-      const { sku } = req.params;
-
-      // Find mapping
-      const mapping = await ProductMapping.findOne({
-        sku: sku.toUpperCase(),
-      }).lean();
-
-      if (!mapping) {
-        res.status(404).json({
-          success: false,
-          error: 'Product not found',
-          message: `No product mapping found for SKU: ${sku}`,
-        });
-        return;
+      if (outOfStock === 'true') {
+        filteredData = filteredData.filter(item => item.naverQuantity === 0);
       }
 
-      // Get current inventory status
-      const naverStock = mapping.inventory?.naver?.available || 0;
-      const shopifyStock = mapping.inventory?.shopify?.available || 0;
-      const difference = Math.abs(naverStock - shopifyStock);
-
-      let syncStatus = 'synced';
-      if (difference > 0) syncStatus = 'out_of_sync';
-      if (mapping.syncStatus === 'error') syncStatus = 'error';
-
-      const status = {
-        sku: mapping.sku,
-        productName: mapping.productName,
-        naverStock,
-        shopifyStock,
-        difference,
-        syncStatus,
-        status:
-          difference === 0
-            ? 'in_sync'
-            : difference > 5
-              ? 'critical'
-              : 'out_of_sync',
-        lastSyncedAt: mapping.lastSyncedAt,
-        isActive: mapping.isActive,
-        vendor: mapping.vendor,
-        metadata: {
-          naverProductId: mapping.naverProductId,
-          shopifyProductId: mapping.shopifyProductId,
-          shopifyVariantId: mapping.shopifyVariantId,
-        },
-      };
-
-      res.json({
-        success: true,
-        data: status,
-      });
-    } catch (error) {
-      logger.error('Get inventory status error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Get inventory history
-   * GET /api/v1/inventory/:sku/history
-   */
-  async getInventoryHistory(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
-    try {
-      const { sku } = req.params;
-      const {
-        startDate,
-        endDate,
-        type,
-        platform,
-        limit = 50,
-        page = 1,
-      } = req.query;
-
-      // Build query
-      const filter: any = { sku: sku.toUpperCase() };
-
-      if (startDate || endDate) {
-        filter.createdAt = {};
-        if (startDate) filter.createdAt.$gte = new Date(startDate as string);
-        if (endDate) filter.createdAt.$lte = new Date(endDate as string);
-      }
-
-      if (type) {
-        filter.transactionType = type;
-      }
-
-      if (platform) {
-        filter.platform = platform;
-      }
-
-      // Get history with pagination
-      const skip = (Number(page) - 1) * Number(limit);
-
-      const [history, total] = await Promise.all([
-        InventoryTransaction.find(filter)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(Number(limit))
-          .lean(),
-        InventoryTransaction.countDocuments(filter),
-      ]);
+      const total = await ProductMapping.countDocuments(query);
 
       res.json({
         success: true,
         data: {
-          history: history.map((transaction) => ({
-            _id: transaction._id,
-            sku: transaction.sku,
-            timestamp: transaction.createdAt,
-            type: transaction.transactionType,
-            platform: transaction.platform,
-            previousStock: transaction.previousQuantity,
-            change: transaction.quantity,
-            newStock: transaction.newQuantity,
-            reason: transaction.reason,
-            performedBy: transaction.performedBy,
-            syncStatus: transaction.syncStatus,
-            orderId: transaction.orderId,
-            metadata: transaction.metadata,
-          })),
-          total,
+          inventory: filteredData,
           pagination: {
             page: Number(page),
             limit: Number(limit),
@@ -283,483 +155,724 @@ export class InventoryController {
         },
       });
     } catch (error) {
-      logger.error('Get inventory history error:', error);
       next(error);
     }
-  }
+  };
 
   /**
-   * Adjust inventory
-   * POST /api/v1/inventory/:sku/adjust
+   * SKU별 재고 조회
    */
-  async adjustInventory(
+  getInventoryBySku = async (
     req: Request,
     res: Response,
     next: NextFunction
-  ): Promise<void> {
-    try {
-      const { sku } = req.params;
-      const {
-        platform,
-        adjustType,
-        naverQuantity,
-        shopifyQuantity,
-        reason,
-        notes,
-      } = req.body;
-
-      // Validation
-      if (!platform || !adjustType || !reason) {
-        res.status(400).json({
-          success: false,
-          error: 'Missing required fields',
-          message: 'Platform, adjustType, and reason are required',
-        });
-        return;
-      }
-
-      if (platform === 'naver' && naverQuantity === undefined) {
-        res.status(400).json({
-          success: false,
-          error: 'Missing naverQuantity',
-          message: 'naverQuantity is required when adjusting Naver inventory',
-        });
-        return;
-      }
-
-      if (platform === 'shopify' && shopifyQuantity === undefined) {
-        res.status(400).json({
-          success: false,
-          error: 'Missing shopifyQuantity',
-          message:
-            'shopifyQuantity is required when adjusting Shopify inventory',
-        });
-        return;
-      }
-
-      // Find mapping
-      const mapping = await ProductMapping.findOne({
-        sku: sku.toUpperCase(),
-      });
-
-      if (!mapping) {
-        res.status(404).json({
-          success: false,
-          error: 'Product not found',
-        });
-        return;
-      }
-
-      // Get current quantities
-      const currentNaverStock = mapping.inventory?.naver?.available || 0;
-      const currentShopifyStock = mapping.inventory?.shopify?.available || 0;
-
-      // Calculate new quantities based on adjust type
-      let newNaverQuantity = currentNaverStock;
-      let newShopifyQuantity = currentShopifyStock;
-
-      if (platform === 'naver' || platform === 'both') {
-        switch (adjustType) {
-          case 'set':
-            newNaverQuantity = naverQuantity;
-            break;
-          case 'add':
-            newNaverQuantity = currentNaverStock + naverQuantity;
-            break;
-          case 'subtract':
-            newNaverQuantity = Math.max(0, currentNaverStock - naverQuantity);
-            break;
-        }
-      }
-
-      if (platform === 'shopify' || platform === 'both') {
-        switch (adjustType) {
-          case 'set':
-            newShopifyQuantity = shopifyQuantity;
-            break;
-          case 'add':
-            newShopifyQuantity = currentShopifyStock + shopifyQuantity;
-            break;
-          case 'subtract':
-            newShopifyQuantity = Math.max(
-              0,
-              currentShopifyStock - shopifyQuantity
-            );
-            break;
-        }
-      }
-
-      // Update mapping inventory
-      if (!mapping.inventory) {
-        mapping.inventory = { naver: {}, shopify: {} };
-      }
-
-      if (platform === 'naver' || platform === 'both') {
-        mapping.inventory.naver.available = newNaverQuantity;
-      }
-
-      if (platform === 'shopify' || platform === 'both') {
-        mapping.inventory.shopify.available = newShopifyQuantity;
-      }
-
-      await mapping.save();
-
-      // Create transaction records
-      const transactions = [];
-
-      if (platform === 'naver' || platform === 'both') {
-        transactions.push(
-          new InventoryTransaction({
-            sku: sku.toUpperCase(),
-            platform: 'naver',
-            transactionType: 'adjustment',
-            quantity: newNaverQuantity - currentNaverStock,
-            previousQuantity: currentNaverStock,
-            newQuantity: newNaverQuantity,
-            reason: reason,
-            performedBy: 'manual',
-            syncStatus: 'completed',
-            metadata: { notes, adjustType, userId: (req as any).user?.id },
-          })
-        );
-      }
-
-      if (platform === 'shopify' || platform === 'both') {
-        transactions.push(
-          new InventoryTransaction({
-            sku: sku.toUpperCase(),
-            platform: 'shopify',
-            transactionType: 'adjustment',
-            quantity: newShopifyQuantity - currentShopifyStock,
-            previousQuantity: currentShopifyStock,
-            newQuantity: newShopifyQuantity,
-            reason: reason,
-            performedBy: 'manual',
-            syncStatus: 'completed',
-            metadata: { notes, adjustType, userId: (req as any).user?.id },
-          })
-        );
-      }
-
-      await InventoryTransaction.insertMany(transactions);
-
-      // Log activity
-      await Activity.create({
-        type: 'inventory_update',
-        action: 'Manual inventory adjustment',
-        details: `Adjusted ${platform} inventory for SKU ${sku}: ${reason}`,
-        metadata: {
-          sku,
-          platform,
-          adjustType,
-          previousNaverStock: currentNaverStock,
-          newNaverStock: newNaverQuantity,
-          previousShopifyStock: currentShopifyStock,
-          newShopifyStock: newShopifyQuantity,
-        },
-        userId: (req as any).user?.id,
-      });
-
-      res.json({
-        success: true,
-        message: 'Inventory adjusted successfully',
-        data: {
-          sku: mapping.sku,
-          productName: mapping.productName,
-          naverStock: mapping.inventory.naver.available,
-          shopifyStock: mapping.inventory.shopify.available,
-          adjustmentDetails: {
-            platform,
-            adjustType,
-            previousNaverStock: currentNaverStock,
-            newNaverStock: newNaverQuantity,
-            previousShopifyStock: currentShopifyStock,
-            newShopifyStock: newShopifyQuantity,
-          },
-        },
-      });
-    } catch (error) {
-      logger.error('Adjust inventory error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Sync inventory for a specific SKU
-   * POST /api/v1/inventory/:sku/sync
-   */
-  async syncInventory(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
+  ): Promise<void> => {
     try {
       const { sku } = req.params;
 
-      logger.info(`Starting inventory sync for SKU: ${sku}`);
-
-      // Find mapping
-      const mapping = await ProductMapping.findOne({
-        sku: sku.toUpperCase(),
-      });
+      const mapping = await ProductMapping.findOne({ sku });
 
       if (!mapping) {
-        res.status(404).json({
-          success: false,
-          error: 'Product not found',
-        });
-        return;
+        throw new AppError('Product mapping not found', 404);
       }
 
-      // Perform sync
-      const result = await this.inventorySyncService.syncSingleSku(sku);
-
-      // Log activity
-      await Activity.create({
-        type: 'sync',
-        action: 'Manual inventory sync',
-        details: `Synced inventory for SKU ${sku}`,
-        metadata: result,
-        userId: (req as any).user?.id,
-      });
-
-      res.json({
-        success: true,
-        message: 'Inventory sync completed',
-        data: result,
-      });
-    } catch (error) {
-      logger.error('Sync inventory error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Sync all inventory
-   * POST /api/v1/inventory/sync-all
-   */
-  async syncAllInventory(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
-    try {
-      logger.info('Starting full inventory sync');
-
-      const result = await this.inventorySyncService.syncAllInventory();
-
-      // Log activity
-      await Activity.create({
-        type: 'sync',
-        action: 'Full inventory sync',
-        details: `Synced all inventory: ${result.success} successful, ${result.failed} failed`,
-        metadata: result,
-        userId: (req as any).user?.id,
-      });
-
-      res.json({
-        success: true,
-        message: 'Full inventory sync completed',
-        data: result,
-      });
-    } catch (error) {
-      logger.error('Sync all inventory error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Get low stock products
-   * GET /api/v1/inventory/low-stock
-   */
-  async getLowStockProducts(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
-    try {
-      const { threshold = 10, category } = req.query;
-
-      const query: any = { isActive: true };
-
-      if (category) {
-        query['metadata.naverCategory'] = category;
+      if (!this.naverProductService || !this.shopifyInventoryService) {
+        throw new AppError('Inventory services not available', 503);
       }
 
-      const mappings = await ProductMapping.find(query).lean();
+      const [naverInventory, shopifyInventory] = await Promise.all([
+        this.naverProductService.getInventory(mapping.naverProductId),
+        this.shopifyInventoryService.getInventoryBySku(sku),
+      ]);
 
-      const lowStockProducts = mappings
-        .filter((mapping) => {
-          const naverStock = mapping.inventory?.naver?.available || 0;
-          const shopifyStock = mapping.inventory?.shopify?.available || 0;
-          return (
-            naverStock < Number(threshold) || shopifyStock < Number(threshold)
-          );
-        })
-        .map((mapping) => ({
-          sku: mapping.sku,
-          productName: mapping.productName,
-          naverStock: mapping.inventory?.naver?.available || 0,
-          shopifyStock: mapping.inventory?.shopify?.available || 0,
-          threshold: Number(threshold),
-          category: mapping.metadata?.naverCategory || 'Unknown',
-          vendor: mapping.vendor,
-        }));
-
-      res.json({
-        success: true,
-        data: lowStockProducts,
-        summary: {
-          total: lowStockProducts.length,
-          threshold: Number(threshold),
-        },
-      });
-    } catch (error) {
-      logger.error('Get low stock products error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Get inventory discrepancies
-   * GET /api/v1/inventory/discrepancies
-   */
-  async getInventoryDiscrepancies(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
-    try {
-      const { minDifference = 1 } = req.query;
-
-      const mappings = await ProductMapping.find({ isActive: true }).lean();
-
-      const discrepancies = mappings
-        .filter((mapping) => {
-          const naverStock = mapping.inventory?.naver?.available || 0;
-          const shopifyStock = mapping.inventory?.shopify?.available || 0;
-          const difference = Math.abs(naverStock - shopifyStock);
-          return difference >= Number(minDifference);
-        })
-        .map((mapping) => {
-          const naverStock = mapping.inventory?.naver?.available || 0;
-          const shopifyStock = mapping.inventory?.shopify?.available || 0;
-          const difference = naverStock - shopifyStock;
-
-          return {
-            sku: mapping.sku,
-            productName: mapping.productName,
-            naverStock,
-            shopifyStock,
-            difference,
-            percentageDiff:
-              shopifyStock > 0
-                ? Math.round((difference / shopifyStock) * 100)
-                : 100,
-            lastSyncedAt: mapping.lastSyncedAt,
-            severity:
-              Math.abs(difference) > 10
-                ? 'high'
-                : Math.abs(difference) > 5
-                  ? 'medium'
-                  : 'low',
-          };
-        });
-
-      res.json({
-        success: true,
-        data: discrepancies,
-        summary: {
-          total: discrepancies.length,
-          high: discrepancies.filter((d) => d.severity === 'high').length,
-          medium: discrepancies.filter((d) => d.severity === 'medium').length,
-          low: discrepancies.filter((d) => d.severity === 'low').length,
-        },
-      });
-    } catch (error) {
-      logger.error('Get inventory discrepancies error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Get inventory metrics
-   * GET /api/v1/inventory/metrics
-   */
-  async getInventoryMetrics(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
-    try {
-      const mappings = await ProductMapping.find({ isActive: true }).lean();
-
-      let totalNaverStock = 0;
-      let totalShopifyStock = 0;
-      let inStockCount = 0;
-      let outOfStockCount = 0;
-      let lowStockCount = 0;
-      let syncedCount = 0;
-      let mismatchCount = 0;
-
-      for (const mapping of mappings) {
-        const naverStock = mapping.inventory?.naver?.available || 0;
-        const shopifyStock = mapping.inventory?.shopify?.available || 0;
-
-        totalNaverStock += naverStock;
-        totalShopifyStock += shopifyStock;
-
-        if (naverStock > 10 && shopifyStock > 10) {
-          inStockCount++;
-        } else if (naverStock === 0 || shopifyStock === 0) {
-          outOfStockCount++;
-        } else {
-          lowStockCount++;
-        }
-
-        if (naverStock === shopifyStock) {
-          syncedCount++;
-        } else {
-          mismatchCount++;
-        }
-      }
-
-      const metrics = {
-        totalSkus: mappings.length,
-        totalNaverStock,
-        totalShopifyStock,
-        stockLevels: {
-          inStock: inStockCount,
-          lowStock: lowStockCount,
-          outOfStock: outOfStockCount,
-        },
-        syncStatus: {
-          synced: syncedCount,
-          mismatched: mismatchCount,
-          syncRate:
-            mappings.length > 0
-              ? Math.round((syncedCount / mappings.length) * 100)
-              : 0,
-        },
-        averageStock: {
-          naver:
-            mappings.length > 0
-              ? Math.round(totalNaverStock / mappings.length)
-              : 0,
-          shopify:
-            mappings.length > 0
-              ? Math.round(totalShopifyStock / mappings.length)
-              : 0,
-        },
+      const inventoryStatus: InventoryStatus = {
+        sku,
+        naverQuantity: naverInventory,
+        shopifyQuantity: shopifyInventory,
+        discrepancy: Math.abs(naverInventory - shopifyInventory),
+        lastSyncedAt: mapping.lastSyncedAt || new Date(),
+        syncStatus: naverInventory === shopifyInventory ? 'synced' : 'out_of_sync',
       };
 
       res.json({
         success: true,
-        data: metrics,
+        data: inventoryStatus,
       });
     } catch (error) {
-      logger.error('Get inventory metrics error:', error);
       next(error);
     }
-  }
+  };
+
+  /**
+   * 재고 상태 조회
+   */
+  getInventoryStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+
+      const cacheKey = `inventory:status:${sku}`;
+      const cached = await this.redis.get(cacheKey);
+
+      if (cached) {
+        return res.json({
+          success: true,
+          data: JSON.parse(cached),
+          cached: true,
+        });
+      }
+
+      const mapping = await ProductMapping.findOne({ sku });
+
+      if (!mapping) {
+        throw new AppError('Product mapping not found', 404);
+      }
+
+      if (!this.naverProductService || !this.shopifyInventoryService) {
+        throw new AppError('Inventory services not available', 503);
+      }
+
+      const [naverProduct, shopifyInventory, transactions] = await Promise.all([
+        this.naverProductService.getProductById(mapping.naverProductId),
+        this.shopifyInventoryService.getInventoryBySku(sku),
+        InventoryTransaction.find({ sku })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .lean(),
+      ]);
+
+      const status = {
+        sku,
+        productName: mapping.productName,
+        naver: {
+          quantity: naverProduct?.quantity || 0,
+          status: naverProduct?.status || 'unknown',
+        },
+        shopify: {
+          quantity: shopifyInventory || 0,
+          tracked: true,
+        },
+        discrepancy: Math.abs((naverProduct?.quantity || 0) - (shopifyInventory || 0)),
+        syncStatus: mapping.syncStatus,
+        lastSyncedAt: mapping.lastSyncedAt,
+        recentTransactions: transactions,
+      };
+
+      // 캐시 저장 (1분)
+      await this.redis.setex(cacheKey, 60, JSON.stringify(status));
+
+      res.json({
+        success: true,
+        data: status,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 재고 이력 조회
+   */
+  getInventoryHistory = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const { startDate, endDate, limit = 50 } = req.query;
+
+      const query: any = { sku };
+
+      if (startDate || endDate) {
+        query.createdAt = {};
+        if (startDate) query.createdAt.$gte = new Date(String(startDate));
+        if (endDate) query.createdAt.$lte = new Date(String(endDate));
+      }
+
+      const transactions = await InventoryTransaction.find(query)
+        .sort({ createdAt: -1 })
+        .limit(Number(limit))
+        .lean();
+
+      res.json({
+        success: true,
+        data: transactions,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 대량 재고 업데이트
+   */
+  bulkUpdateInventory = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { updates, source = 'manual' } = req.body;
+
+      if (!Array.isArray(updates) || updates.length === 0) {
+        throw new AppError('Updates array is required', 400);
+      }
+
+      const results = [];
+
+      for (const update of updates) {
+        try {
+          const { sku, quantity, reason = 'Manual adjustment' } = update;
+
+          // 재고 업데이트
+          const result = await this.inventorySyncService.updateInventory(
+            sku,
+            quantity,
+            source
+          );
+
+          // 트랜잭션 기록
+          await InventoryTransaction.create({
+            sku,
+            type: 'adjustment',
+            quantity: quantity,
+            previousQuantity: result.previousQuantity,
+            newQuantity: quantity,
+            reason,
+            source,
+            userId: (req as any).user?.id,
+          });
+
+          results.push({
+            sku,
+            success: true,
+            previousQuantity: result.previousQuantity,
+            newQuantity: quantity,
+          });
+        } catch (error: any) {
+          results.push({
+            sku: update.sku,
+            success: false,
+            error: error.message,
+          });
+        }
+      }
+
+      // 활동 로그
+      await Activity.create({
+        type: 'inventory_bulk_update',
+        entity: 'Inventory',
+        userId: (req as any).user?.id,
+        metadata: {
+          totalCount: updates.length,
+          successCount: results.filter(r => r.success).length,
+          failedCount: results.filter(r => !r.success).length,
+        },
+        status: 'completed',
+      });
+
+      res.json({
+        success: true,
+        data: {
+          results,
+          summary: {
+            total: results.length,
+            success: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success).length,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * SKU별 재고 동기화
+   */
+  syncInventoryBySku = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const { direction = 'naver_to_shopify' } = req.body;
+
+      const result = await this.inventorySyncService.syncSingleInventory(
+        sku,
+        direction
+      );
+
+      if (!result.success) {
+        throw new AppError(result.error || 'Sync failed', 500);
+      }
+
+      // 동기화 이력 저장
+      await SyncHistory.create({
+        type: 'inventory',
+        status: 'completed',
+        source: direction === 'naver_to_shopify' ? 'naver' : 'shopify',
+        target: direction === 'naver_to_shopify' ? 'shopify' : 'naver',
+        totalItems: 1,
+        successItems: 1,
+        failedItems: 0,
+        details: {
+          sku,
+          changes: result.changes,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 전체 재고 동기화
+   */
+  syncAllInventory = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { vendor = 'album', direction = 'naver_to_shopify' } = req.body;
+
+      // 백그라운드 작업으로 실행
+      const jobId = `inventory_sync_${Date.now()}`;
+
+      // Redis에 작업 상태 저장
+      await this.redis.setex(
+        `job:${jobId}`,
+        3600,
+        JSON.stringify({
+          status: 'processing',
+          startedAt: new Date(),
+        })
+      );
+
+      // 비동기로 동기화 실행
+      this.inventorySyncService
+        .syncAllInventory({ vendor, direction })
+        .then(async (result) => {
+          await this.redis.setex(
+            `job:${jobId}`,
+            3600,
+            JSON.stringify({
+              status: 'completed',
+              completedAt: new Date(),
+              result,
+            })
+          );
+        })
+        .catch(async (error) => {
+          await this.redis.setex(
+            `job:${jobId}`,
+            3600,
+            JSON.stringify({
+              status: 'failed',
+              failedAt: new Date(),
+              error: error.message,
+            })
+          );
+        });
+
+      res.json({
+        success: true,
+        message: 'Inventory sync started',
+        jobId,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 재고 불일치 확인
+   */
+  checkDiscrepancy = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { vendor = 'album', threshold = 0 } = req.query;
+
+      if (!this.naverProductService || !this.shopifyInventoryService) {
+        throw new AppError('Inventory services not available', 503);
+      }
+
+      const mappings = await ProductMapping.find({ 
+        vendor, 
+        isActive: true 
+      }).lean();
+
+      const discrepancies = [];
+
+      for (const mapping of mappings) {
+        try {
+          const [naverInventory, shopifyInventory] = await Promise.all([
+            this.naverProductService.getInventory(mapping.naverProductId),
+            this.shopifyInventoryService.getInventoryBySku(mapping.sku),
+          ]);
+
+          const diff = Math.abs(naverInventory - shopifyInventory);
+
+          if (diff > Number(threshold)) {
+            discrepancies.push({
+              sku: mapping.sku,
+              productName: mapping.productName,
+              naverQuantity: naverInventory,
+              shopifyQuantity: shopifyInventory,
+              discrepancy: diff,
+              lastSyncedAt: mapping.lastSyncedAt,
+            });
+          }
+        } catch (error) {
+          logger.error(`Failed to check discrepancy for ${mapping.sku}:`, error);
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          discrepancies,
+          summary: {
+            total: mappings.length,
+            withDiscrepancy: discrepancies.length,
+            synced: mappings.length - discrepancies.length,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 재고 업데이트
+   */
+  updateInventory = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const { quantity, platform = 'both', reason = 'Manual update' } = req.body;
+
+      if (quantity === undefined || quantity < 0) {
+        throw new AppError('Valid quantity is required', 400);
+      }
+
+      const mapping = await ProductMapping.findOne({ sku });
+
+      if (!mapping) {
+        throw new AppError('Product mapping not found', 404);
+      }
+
+      if (!this.naverProductService || !this.shopifyInventoryService) {
+        throw new AppError('Inventory services not available', 503);
+      }
+
+      const results = {
+        naver: { success: false, message: '' },
+        shopify: { success: false, message: '' },
+      };
+
+      // 네이버 재고 업데이트
+      if (platform === 'naver' || platform === 'both') {
+        try {
+          await this.naverProductService.updateInventory(
+            mapping.naverProductId,
+            quantity
+          );
+          results.naver = { success: true, message: 'Updated successfully' };
+        } catch (error: any) {
+          results.naver = { success: false, message: error.message };
+        }
+      }
+
+      // Shopify 재고 업데이트
+      if (platform === 'shopify' || platform === 'both') {
+        try {
+          await this.shopifyInventoryService.updateInventory(sku, quantity);
+          results.shopify = { success: true, message: 'Updated successfully' };
+        } catch (error: any) {
+          results.shopify = { success: false, message: error.message };
+        }
+      }
+
+      // 트랜잭션 기록
+      await InventoryTransaction.create({
+        sku,
+        type: 'update',
+        quantity,
+        reason,
+        platform,
+        userId: (req as any).user?.id,
+      });
+
+      res.json({
+        success: true,
+        data: results,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 재고 조정
+   */
+  adjustInventory = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const { adjustment, reason, notes } = req.body;
+
+      if (!adjustment || adjustment === 0) {
+        throw new AppError('Valid adjustment value is required', 400);
+      }
+
+      const mapping = await ProductMapping.findOne({ sku });
+
+      if (!mapping) {
+        throw new AppError('Product mapping not found', 404);
+      }
+
+      if (!this.shopifyInventoryService) {
+        throw new AppError('Inventory service not available', 503);
+      }
+
+      // 현재 재고 조회
+      const currentInventory = await this.shopifyInventoryService.getInventoryBySku(sku);
+      const newQuantity = currentInventory + adjustment;
+
+      if (newQuantity < 0) {
+        throw new AppError('Adjustment would result in negative inventory', 400);
+      }
+
+      // 재고 업데이트
+      await this.shopifyInventoryService.updateInventory(sku, newQuantity);
+
+      // 트랜잭션 기록
+      await InventoryTransaction.create({
+        sku,
+        type: 'adjustment',
+        quantity: adjustment,
+        previousQuantity: currentInventory,
+        newQuantity,
+        reason,
+        notes,
+        userId: (req as any).user?.id,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          sku,
+          previousQuantity: currentInventory,
+          adjustment,
+          newQuantity,
+          reason,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 재고 불일치 목록 조회
+   */
+  getDiscrepancies = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { vendor = 'album', page = 1, limit = 20 } = req.query;
+
+      if (!this.naverProductService || !this.shopifyInventoryService) {
+        throw new AppError('Inventory services not available', 503);
+      }
+
+      const skip = (Number(page) - 1) * Number(limit);
+
+      const mappings = await ProductMapping.find({ 
+        vendor, 
+        isActive: true 
+      })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean();
+
+      const discrepancies = [];
+
+      for (const mapping of mappings) {
+        try {
+          const [naverInventory, shopifyInventory] = await Promise.all([
+            this.naverProductService.getInventory(mapping.naverProductId),
+            this.shopifyInventoryService.getInventoryBySku(mapping.sku),
+          ]);
+
+          const diff = Math.abs(naverInventory - shopifyInventory);
+
+          if (diff > 0) {
+            discrepancies.push({
+              id: mapping._id,
+              sku: mapping.sku,
+              productName: mapping.productName,
+              naverQuantity: naverInventory,
+              shopifyQuantity: shopifyInventory,
+              discrepancy: diff,
+              percentage: shopifyInventory > 0 
+                ? Math.round((diff / shopifyInventory) * 100) 
+                : 100,
+              lastSyncedAt: mapping.lastSyncedAt,
+              status: diff > 10 ? 'critical' : diff > 5 ? 'warning' : 'minor',
+            });
+          }
+        } catch (error) {
+          logger.error(`Failed to check discrepancy for ${mapping.sku}:`, error);
+        }
+      }
+
+      // 불일치 정도로 정렬
+      discrepancies.sort((a, b) => b.discrepancy - a.discrepancy);
+
+      const total = await ProductMapping.countDocuments({ vendor, isActive: true });
+
+      res.json({
+        success: true,
+        data: {
+          discrepancies,
+          pagination: {
+            page: Number(page),
+            limit: Number(limit),
+            total,
+            pages: Math.ceil(total / Number(limit)),
+          },
+          summary: {
+            total: discrepancies.length,
+            critical: discrepancies.filter(d => d.status === 'critical').length,
+            warning: discrepancies.filter(d => d.status === 'warning').length,
+            minor: discrepancies.filter(d => d.status === 'minor').length,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 재고 불일치 해결
+   */
+  resolveDiscrepancy = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const { resolution = 'use_naver', notes } = req.body;
+
+      const mapping = await ProductMapping.findOne({ sku });
+
+      if (!mapping) {
+        throw new AppError('Product mapping not found', 404);
+      }
+
+      if (!this.naverProductService || !this.shopifyInventoryService) {
+        throw new AppError('Inventory services not available', 503);
+      }
+
+      const [naverInventory, shopifyInventory] = await Promise.all([
+        this.naverProductService.getInventory(mapping.naverProductId),
+        this.shopifyInventoryService.getInventoryBySku(sku),
+      ]);
+
+      let targetQuantity: number;
+      let source: string;
+
+      switch (resolution) {
+        case 'use_naver':
+          targetQuantity = naverInventory;
+          source = 'naver';
+          await this.shopifyInventoryService.updateInventory(sku, targetQuantity);
+          break;
+        case 'use_shopify':
+          targetQuantity = shopifyInventory;
+          source = 'shopify';
+          await this.naverProductService.updateInventory(
+            mapping.naverProductId,
+            targetQuantity
+          );
+          break;
+        case 'use_average':
+          targetQuantity = Math.round((naverInventory + shopifyInventory) / 2);
+          source = 'average';
+          await Promise.all([
+            this.naverProductService.updateInventory(mapping.naverProductId, targetQuantity),
+            this.shopifyInventoryService.updateInventory(sku, targetQuantity),
+          ]);
+          break;
+        default:
+          throw new AppError('Invalid resolution method', 400);
+      }
+
+      // 트랜잭션 기록
+      await InventoryTransaction.create({
+        sku,
+        type: 'discrepancy_resolution',
+        quantity: targetQuantity,
+        previousQuantity: shopifyInventory,
+        newQuantity: targetQuantity,
+        reason: `Discrepancy resolved using ${source}`,
+        notes,
+        metadata: {
+          naverQuantity: naverInventory,
+          shopifyQuantity: shopifyInventory,
+          resolution,
+        },
+        userId: (req as any).user?.id,
+      });
+
+      // 매핑 업데이트
+      mapping.lastSyncedAt = new Date();
+      mapping.syncStatus = 'synced';
+      await mapping.save();
+
+      res.json({
+        success: true,
+        data: {
+          sku,
+          previousNaver: naverInventory,
+          previousShopify: shopifyInventory,
+          newQuantity: targetQuantity,
+          resolution,
+          source,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  // Legacy method names for backward compatibility
+  getAllInventoryStatus = this.getInventory;
 }

@@ -9,6 +9,15 @@ import {
 } from '../models/index.js';
 
 export class AnalyticsController {
+  private syncService: any;
+  private shopifyService: any;
+  private naverProductService: any;
+
+  constructor(syncService?: any, shopifyService?: any, naverProductService?: any) {
+    this.syncService = syncService;
+    this.shopifyService = shopifyService;
+    this.naverProductService = naverProductService;
+  }
   /**
    * Get analytics overview
    */
@@ -265,7 +274,7 @@ export class AnalyticsController {
   /**
    * Export analytics data
    */
-  async exportData(req: Request, res: Response, next: NextFunction) {
+  async exportAnalytics(req: Request, res: Response, next: NextFunction) {
     try {
       const { format = 'json', type = 'overview' } = req.body;
 
@@ -386,5 +395,172 @@ export class AnalyticsController {
       return `${headers}\n${rows}`;
     }
     return '';
+  }
+
+  /**
+   * Get sales analytics
+   */
+  async getSalesAnalytics(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { period = '30d' } = req.query;
+      
+      let startDate = new Date();
+      switch (period) {
+        case '7d':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case '30d':
+          startDate.setDate(startDate.getDate() - 30);
+          break;
+        case '90d':
+          startDate.setDate(startDate.getDate() - 90);
+          break;
+      }
+
+      const salesData = await PriceHistory.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+            },
+            totalChanges: { $sum: 1 },
+            avgPrice: { $avg: '$newPrice' },
+          },
+        },
+        {
+          $sort: { _id: 1 },
+        },
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          period,
+          salesData,
+          startDate,
+          endDate: new Date(),
+        },
+      });
+    } catch (error) {
+      logger.error('Sales analytics error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get inventory analytics
+   */
+  async getInventoryAnalytics(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { period = '30d' } = req.query;
+      
+      let startDate = new Date();
+      switch (period) {
+        case '7d':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case '30d':
+          startDate.setDate(startDate.getDate() - 30);
+          break;
+        case '90d':
+          startDate.setDate(startDate.getDate() - 90);
+          break;
+      }
+
+      const inventoryData = await InventoryTransaction.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              type: '$type',
+            },
+            count: { $sum: 1 },
+            totalQuantity: { $sum: '$quantity' },
+          },
+        },
+        {
+          $sort: { '_id.date': 1 },
+        },
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          period,
+          inventoryData,
+          startDate,
+          endDate: new Date(),
+        },
+      });
+    } catch (error) {
+      logger.error('Inventory analytics error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get sync analytics
+   */
+  async getSyncAnalytics(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { period = '30d' } = req.query;
+      
+      let startDate = new Date();
+      switch (period) {
+        case '7d':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case '30d':
+          startDate.setDate(startDate.getDate() - 30);
+          break;
+        case '90d':
+          startDate.setDate(startDate.getDate() - 90);
+          break;
+      }
+
+      const syncData = await SyncHistory.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              status: '$status',
+            },
+            count: { $sum: 1 },
+            avgDuration: { $avg: '$duration' },
+          },
+        },
+        {
+          $sort: { '_id.date': 1 },
+        },
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          period,
+          syncData,
+          startDate,
+          endDate: new Date(),
+        },
+      });
+    } catch (error) {
+      logger.error('Sync analytics error:', error);
+      next(error);
+    }
   }
 }

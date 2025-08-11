@@ -1,6 +1,7 @@
 // packages/backend/src/services/shopify/ShopifyInventoryService.ts
 import { ShopifyService } from './ShopifyService.js';
 import { logger } from '../../utils/logger.js';
+import '@shopify/shopify-api/adapters/node';
 
 interface InventoryLevel {
   id: string;

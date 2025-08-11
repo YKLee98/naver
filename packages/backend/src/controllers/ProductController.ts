@@ -1,13 +1,15 @@
 // packages/backend/src/controllers/ProductController.ts
 import { Request, Response, NextFunction } from 'express';
-import { ProductMapping, SyncHistory, SystemLog } from '../models';
-import { NaverProductService } from '../services/naver';
-import { ShopifyGraphQLService } from '../services/shopify';
-import { PriceSyncService } from '../services/sync/PriceSyncService';
-import { InventorySyncService } from '../services/sync/InventorySyncService';
-import { AppError } from '../utils/errors';
-import { logger } from '../utils/logger';
-import { getRedisClient } from '../config/redis';
+import { ProductMapping, SyncHistory, SystemLog, Activity } from '../models/index.js';
+import { NaverProductService } from '../services/naver/index.js';
+import { ShopifyGraphQLService } from '../services/shopify/index.js';
+import { PriceSyncService } from '../services/sync/PriceSyncService.js';
+import { InventorySyncService } from '../services/sync/InventorySyncService.js';
+import { AppError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
+import { getRedisClient } from '../config/redis.js';
+import * as XLSX from 'xlsx';
+import { Parser } from 'json2csv';
 
 interface SyncOptions {
   syncPrice?: boolean;
@@ -58,6 +60,17 @@ export class ProductController {
       shopifyGraphQLService
     );
   }
+
+  /**
+   * 상품 목록 조회 (alias)
+   */
+  getProducts = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    return this.getMappedProducts(req, res, next);
+  };
 
   /**
    * 상품 목록 조회
@@ -159,6 +172,142 @@ export class ProductController {
   };
 
   /**
+   * 상품 생성
+   */
+  createProduct = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const productData = req.body;
+
+      // Validate required fields
+      if (!productData.sku || !productData.naverProductId) {
+        throw new AppError('SKU and Naver Product ID are required', 400);
+      }
+
+      // Check if SKU already exists
+      const existing = await ProductMapping.findOne({ sku: productData.sku });
+      if (existing) {
+        throw new AppError('Product with this SKU already exists', 409);
+      }
+
+      // Create new product mapping
+      const product = new ProductMapping({
+        ...productData,
+        syncStatus: 'pending',
+        isActive: true,
+      });
+
+      await product.save();
+
+      // Log activity
+      await Activity.create({
+        type: 'product_create',
+        entity: 'ProductMapping',
+        entityId: product._id,
+        userId: (req as any).user?.id,
+        metadata: {
+          sku: product.sku,
+          productName: product.productName,
+        },
+        status: 'completed',
+      });
+
+      res.status(201).json({
+        success: true,
+        data: product,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 상품 업데이트
+   */
+  updateProduct = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+      const updateData = req.body;
+
+      const product = await ProductMapping.findOneAndUpdate(
+        { sku },
+        { ...updateData, updatedAt: new Date() },
+        { new: true, runValidators: true }
+      );
+
+      if (!product) {
+        throw new AppError('Product not found', 404);
+      }
+
+      // Log activity
+      await Activity.create({
+        type: 'product_update',
+        entity: 'ProductMapping',
+        entityId: product._id,
+        userId: (req as any).user?.id,
+        metadata: {
+          sku: product.sku,
+          changes: updateData,
+        },
+        status: 'completed',
+      });
+
+      res.json({
+        success: true,
+        data: product,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 상품 삭제
+   */
+  deleteProduct = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.params;
+
+      const product = await ProductMapping.findOneAndDelete({ sku });
+
+      if (!product) {
+        throw new AppError('Product not found', 404);
+      }
+
+      // Log activity
+      await Activity.create({
+        type: 'product_delete',
+        entity: 'ProductMapping',
+        entityId: product._id,
+        userId: (req as any).user?.id,
+        metadata: {
+          sku: product.sku,
+          productName: product.productName,
+        },
+        status: 'completed',
+      });
+
+      res.json({
+        success: true,
+        message: 'Product deleted successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
    * 네이버 상품 검색
    */
   searchNaverProducts = async (
@@ -173,7 +322,8 @@ export class ProductController {
         throw new AppError('Search keyword is required', 400);
       }
 
-      const products = await this.naverProductService.searchProducts(
+      // 네이버 API에서 상품 검색
+      const searchResult = await this.naverProductService.searchProducts(
         String(keyword),
         {
           page: Number(page),
@@ -183,7 +333,7 @@ export class ProductController {
 
       res.json({
         success: true,
-        data: products,
+        data: searchResult,
       });
     } catch (error) {
       next(error);
@@ -199,15 +349,21 @@ export class ProductController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { query, first = 20 } = req.query;
+      const { sku, title, vendor = 'album' } = req.query;
 
-      if (!query) {
-        throw new AppError('Search query is required', 400);
+      const searchParams: any = { vendor };
+
+      if (sku) {
+        searchParams.sku = String(sku);
       }
 
+      if (title) {
+        searchParams.title = String(title);
+      }
+
+      // Shopify GraphQL로 상품 검색
       const products = await this.shopifyGraphQLService.searchProducts(
-        String(query),
-        Number(first)
+        searchParams
       );
 
       res.json({
@@ -220,39 +376,69 @@ export class ProductController {
   };
 
   /**
-   * 상품 매핑 업데이트
+   * 대량 상품 업데이트
    */
-  updateProductMapping = async (
+  bulkUpdateProducts = async (
     req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { sku } = req.params;
-      const updateData = req.body;
+      const { updates } = req.body;
 
-      const mapping = await ProductMapping.findOne({ sku });
-
-      if (!mapping) {
-        throw new AppError('Product mapping not found', 404);
+      if (!Array.isArray(updates) || updates.length === 0) {
+        throw new AppError('Updates array is required', 400);
       }
 
-      // 업데이트 허용 필드만 추출
-      const allowedFields = ['isActive', 'priceMargin', 'syncOptions'];
-      const updates: any = {};
+      const results = [];
 
-      for (const field of allowedFields) {
-        if (updateData[field] !== undefined) {
-          updates[field] = updateData[field];
+      for (const update of updates) {
+        try {
+          const { sku, ...updateData } = update;
+          
+          const product = await ProductMapping.findOneAndUpdate(
+            { sku },
+            { ...updateData, updatedAt: new Date() },
+            { new: true, runValidators: true }
+          );
+
+          results.push({
+            sku,
+            success: !!product,
+            error: product ? null : 'Product not found',
+          });
+        } catch (error: any) {
+          results.push({
+            sku: update.sku,
+            success: false,
+            error: error.message,
+          });
         }
       }
 
-      Object.assign(mapping, updates);
-      await mapping.save();
+      // Log activity
+      await Activity.create({
+        type: 'product_bulk_update',
+        entity: 'ProductMapping',
+        userId: (req as any).user?.id,
+        metadata: {
+          totalCount: updates.length,
+          successCount: results.filter(r => r.success).length,
+          failedCount: results.filter(r => !r.success).length,
+        },
+        status: 'completed',
+      });
 
       res.json({
         success: true,
-        data: mapping,
+        data: {
+          results,
+          summary: {
+            total: results.length,
+            success: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success).length,
+          },
+        },
       });
     } catch (error) {
       next(error);
@@ -260,7 +446,65 @@ export class ProductController {
   };
 
   /**
-   * 상품 동기화 - 실제 구현
+   * 상품 내보내기 (CSV)
+   */
+  exportProducts = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { format = 'csv', vendor = 'album' } = req.query;
+
+      const products = await ProductMapping.find({ vendor })
+        .lean()
+        .exec();
+
+      if (format === 'csv') {
+        const fields = [
+          'sku',
+          'productName',
+          'naverProductId',
+          'shopifyProductId',
+          'shopifyVariantId',
+          'vendor',
+          'isActive',
+          'syncStatus',
+          'lastSyncedAt',
+          'priceMargin',
+          'createdAt',
+          'updatedAt',
+        ];
+
+        const json2csvParser = new Parser({ fields });
+        const csv = json2csvParser.parse(products);
+
+        res.header('Content-Type', 'text/csv');
+        res.attachment(`products_${vendor}_${Date.now()}.csv`);
+        res.send(csv);
+      } else if (format === 'excel') {
+        const worksheet = XLSX.utils.json_to_sheet(products);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
+
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+        res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.attachment(`products_${vendor}_${Date.now()}.xlsx`);
+        res.send(buffer);
+      } else {
+        res.json({
+          success: true,
+          data: products,
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 상품 동기화
    */
   syncProduct = async (
     req: Request,
@@ -269,38 +513,13 @@ export class ProductController {
   ): Promise<void> => {
     try {
       const { sku } = req.params;
-      const {
-        syncPrice = true,
-        syncInventory = true,
-        syncImages = false,
-        syncDescription = false,
-        forceUpdate = false,
-      }: SyncOptions = req.body;
+      const options: SyncOptions = req.body;
 
-      // 매핑 정보 조회
       const mapping = await ProductMapping.findOne({ sku });
 
       if (!mapping) {
         throw new AppError('Product mapping not found', 404);
       }
-
-      if (!mapping.isActive && !forceUpdate) {
-        throw new AppError(
-          'Product mapping is not active. Use forceUpdate to sync inactive products.',
-          400
-        );
-      }
-
-      // 동기화 중복 체크 (Redis를 이용한 락)
-      const lockKey = `sync:lock:${sku}`;
-      const lockExists = await this.redis.get(lockKey);
-
-      if (lockExists) {
-        throw new AppError('Sync already in progress for this SKU', 409);
-      }
-
-      // 락 설정 (5분 TTL)
-      await this.redis.setex(lockKey, 300, Date.now());
 
       const syncResult: SyncResult = {
         success: false,
@@ -311,330 +530,49 @@ export class ProductController {
         timestamp: new Date(),
       };
 
-      try {
-        logger.info(`Starting sync for SKU: ${sku}`, { syncOptions: req.body });
-
-        // 동기화 상태 업데이트
-        mapping.syncStatus = 'syncing';
-        await mapping.save();
-
-        // 네이버와 Shopify 상품 정보 조회
-        const [naverProduct, shopifyVariant] = await Promise.all([
-          this.naverProductService.getProductById(mapping.naverProductId),
-          this.shopifyGraphQLService.findVariantBySku(sku),
-        ]);
-
-        if (!naverProduct) {
-          throw new AppError('Naver product not found', 404);
-        }
-
-        if (!shopifyVariant) {
-          throw new AppError('Shopify variant not found', 404);
-        }
-
-        // 1. 가격 동기화
-        if (syncPrice) {
-          try {
-            logger.info(`Syncing price for SKU: ${sku}`);
-
-            const oldPrice = parseFloat(shopifyVariant.price);
-            const priceResult = await this.priceSyncService.syncSinglePrice(
-              sku,
-              {
-                marginRate: mapping.priceMargin || 10,
-                roundTo: 100,
-                includeShipping: true,
-              }
-            );
-
-            if (priceResult.success) {
-              syncResult.syncedFields.push('price');
-              syncResult.changes.price = {
-                old: oldPrice,
-                new: priceResult.newPrice || oldPrice,
-              };
-              logger.info(`Price synced for SKU: ${sku}`, priceResult);
-            } else {
-              syncResult.errors.push(`Price sync failed: ${priceResult.error}`);
-            }
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : 'Unknown error';
-            syncResult.errors.push(`Price sync error: ${errorMessage}`);
-            logger.error(`Price sync failed for SKU: ${sku}`, error);
-          }
-        }
-
-        // 2. 재고 동기화
-        if (syncInventory) {
-          try {
-            logger.info(`Syncing inventory for SKU: ${sku}`);
-
-            const oldInventory = shopifyVariant.inventoryQuantity || 0;
-            const inventoryResult =
-              await this.inventorySyncService.syncInventoryBySku(sku);
-
-            if (inventoryResult.success) {
-              syncResult.syncedFields.push('inventory');
-              syncResult.changes.inventory = {
-                old: oldInventory,
-                new: inventoryResult.newQuantity || oldInventory,
-              };
-              logger.info(`Inventory synced for SKU: ${sku}`, inventoryResult);
-            } else {
-              syncResult.errors.push(
-                `Inventory sync failed: ${inventoryResult.error}`
-              );
-            }
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : 'Unknown error';
-            syncResult.errors.push(`Inventory sync error: ${errorMessage}`);
-            logger.error(`Inventory sync failed for SKU: ${sku}`, error);
-          }
-        }
-
-        // 3. 이미지 동기화
-        if (syncImages) {
-          try {
-            logger.info(`Syncing images for SKU: ${sku}`);
-
-            // 네이버 상품 이미지 가져오기
-            const naverImages = naverProduct.images || [];
-
-            if (naverImages.length > 0) {
-              // Shopify에 이미지 업데이트
-              const imageUpdateResult =
-                await this.shopifyGraphQLService.updateProductImages(
-                  shopifyVariant.product?.id || '',
-                  naverImages
-                );
-
-              if (imageUpdateResult.success) {
-                syncResult.syncedFields.push('images');
-                syncResult.changes.images = {
-                  added: imageUpdateResult.added || 0,
-                  removed: imageUpdateResult.removed || 0,
-                };
-                logger.info(`Images synced for SKU: ${sku}`, imageUpdateResult);
-              } else {
-                syncResult.errors.push('Image sync failed');
-              }
-            }
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : 'Unknown error';
-            syncResult.errors.push(`Image sync error: ${errorMessage}`);
-            logger.error(`Image sync failed for SKU: ${sku}`, error);
-          }
-        }
-
-        // 4. 설명 동기화
-        if (syncDescription) {
-          try {
-            logger.info(`Syncing description for SKU: ${sku}`);
-
-            const descriptionResult =
-              await this.shopifyGraphQLService.updateProductDescription(
-                shopifyVariant.product?.id || '',
-                naverProduct.description || ''
-              );
-
-            if (descriptionResult.success) {
-              syncResult.syncedFields.push('description');
-              syncResult.changes.description = true;
-              logger.info(`Description synced for SKU: ${sku}`);
-            } else {
-              syncResult.errors.push('Description sync failed');
-            }
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : 'Unknown error';
-            syncResult.errors.push(`Description sync error: ${errorMessage}`);
-            logger.error(`Description sync failed for SKU: ${sku}`, error);
-          }
-        }
-
-        // 동기화 성공 여부 판단
-        syncResult.success = syncResult.syncedFields.length > 0;
-
-        // 매핑 정보 업데이트
-        mapping.syncStatus = syncResult.success ? 'success' : 'failed';
-        mapping.lastSyncAt = new Date();
-        mapping.lastSyncResult = {
-          success: syncResult.success,
-          syncedFields: syncResult.syncedFields,
-          errors: syncResult.errors,
-        };
-        await mapping.save();
-
-        // 동기화 이력 저장
-        await SyncHistory.create({
-          sku,
-          vendor: mapping.vendor,
-          syncType: 'manual',
-          status: syncResult.success ? 'success' : 'failed',
-          details: {
-            syncedFields: syncResult.syncedFields,
-            changes: syncResult.changes,
-            errors: syncResult.errors,
-          },
-          duration: Date.now() - syncResult.timestamp.getTime(),
-        });
-
-        // 시스템 로그 저장
-        await SystemLog.create({
-          level: syncResult.success ? 'info' : 'warn',
-          category: 'sync',
-          message: `Product sync ${syncResult.success ? 'completed' : 'failed'} for SKU: ${sku}`,
-          context: {
-            service: 'ProductController',
-            method: 'syncProduct',
-          },
-          metadata: syncResult,
-        });
-
-        logger.info(`Sync completed for SKU: ${sku}`, syncResult);
-      } finally {
-        // 락 해제
-        await this.redis.del(lockKey);
-      }
-
-      res.json({
-        success: syncResult.success,
-        message: syncResult.success
-          ? `Product sync completed successfully for SKU: ${sku}`
-          : `Product sync completed with errors for SKU: ${sku}`,
-        data: syncResult,
-      });
-    } catch (error) {
-      logger.error(`Sync failed for SKU: ${req.params.sku}`, error);
-      next(error);
-    }
-  };
-
-  /**
-   * 대량 동기화
-   */
-  bulkSyncProducts = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const {
-        skus,
-        syncOptions = {},
-      }: { skus: string[]; syncOptions: SyncOptions } = req.body;
-
-      if (!skus || !Array.isArray(skus) || skus.length === 0) {
-        throw new AppError('SKUs array is required', 400);
-      }
-
-      if (skus.length > 100) {
-        throw new AppError('Maximum 100 SKUs can be synced at once', 400);
-      }
-
-      const results = [];
-
-      for (const sku of skus) {
+      // 가격 동기화
+      if (options.syncPrice) {
         try {
-          // 각 SKU에 대해 개별 동기화 실행
-          const mapping = await ProductMapping.findOne({ sku });
-
-          if (!mapping) {
-            results.push({
-              sku,
-              success: false,
-              error: 'Mapping not found',
-            });
-            continue;
+          const priceResult = await this.priceSyncService.syncSinglePrice(sku);
+          if (priceResult.success) {
+            syncResult.syncedFields.push('price');
+            syncResult.changes.price = priceResult.changes?.price;
           }
-
-          // 가격 동기화
-          if (syncOptions.syncPrice) {
-            const priceResult = await this.priceSyncService.syncSinglePrice(
-              sku,
-              {
-                marginRate: mapping.priceMargin || 10,
-              }
-            );
-
-            results.push({
-              sku,
-              success: priceResult.success,
-              type: 'price',
-              changes: priceResult,
-            });
-          }
-
-          // 재고 동기화
-          if (syncOptions.syncInventory) {
-            const inventoryResult =
-              await this.inventorySyncService.syncInventoryBySku(sku);
-
-            results.push({
-              sku,
-              success: inventoryResult.success,
-              type: 'inventory',
-              changes: inventoryResult,
-            });
-          }
-        } catch (error) {
-          results.push({
-            sku,
-            success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
+        } catch (error: any) {
+          syncResult.errors.push(`Price sync failed: ${error.message}`);
         }
       }
 
-      const successCount = results.filter((r) => r.success).length;
-      const failedCount = results.filter((r) => !r.success).length;
-
-      res.json({
-        success: true,
-        message: `Bulk sync completed. Success: ${successCount}, Failed: ${failedCount}`,
-        data: {
-          totalProcessed: skus.length,
-          successCount,
-          failedCount,
-          results,
-        },
-      });
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  /**
-   * 동기화 이력 조회
-   */
-  getSyncHistory = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      const { sku } = req.params;
-      const { limit = 50, startDate, endDate } = req.query;
-
-      const query: any = { sku };
-
-      if (startDate || endDate) {
-        query.createdAt = {};
-        if (startDate) query.createdAt.$gte = new Date(String(startDate));
-        if (endDate) query.createdAt.$lte = new Date(String(endDate));
+      // 재고 동기화
+      if (options.syncInventory) {
+        try {
+          const inventoryResult = await this.inventorySyncService.syncSingleInventory(sku);
+          if (inventoryResult.success) {
+            syncResult.syncedFields.push('inventory');
+            syncResult.changes.inventory = inventoryResult.changes?.inventory;
+          }
+        } catch (error: any) {
+          syncResult.errors.push(`Inventory sync failed: ${error.message}`);
+        }
       }
 
-      const history = await SyncHistory.find(query)
-        .sort({ createdAt: -1 })
-        .limit(Number(limit))
-        .lean();
+      syncResult.success = syncResult.errors.length === 0;
+
+      // 동기화 이력 저장
+      await SyncHistory.create({
+        type: 'manual',
+        status: syncResult.success ? 'completed' : 'failed',
+        source: 'api',
+        target: 'both',
+        totalItems: 1,
+        successItems: syncResult.success ? 1 : 0,
+        failedItems: syncResult.success ? 0 : 1,
+        details: syncResult,
+      });
 
       res.json({
         success: true,
-        data: history,
+        data: syncResult,
       });
     } catch (error) {
       next(error);

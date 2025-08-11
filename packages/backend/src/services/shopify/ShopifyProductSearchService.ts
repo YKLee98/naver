@@ -1,7 +1,8 @@
 // packages/backend/src/services/shopify/ShopifyProductSearchService.ts
 import axios from 'axios';
-import { logger } from '../../utils/logger';
-import { retry } from '../../utils/retry';
+import { logger } from '../../utils/logger.js';
+import { retry } from '../../utils/retry.js';
+import '@shopify/shopify-api/adapters/node';
 
 interface ShopifyProduct {
   id: number;

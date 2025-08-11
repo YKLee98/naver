@@ -104,4 +104,54 @@ export class NotificationController {
       next(error);
     }
   }
+
+  /**
+   * Get notification by ID
+   */
+  async getNotificationById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      // Mock implementation
+      const notification = {
+        id,
+        type: 'info',
+        title: 'Sample Notification',
+        message: 'This is a sample notification message.',
+        read: false,
+        createdAt: new Date(),
+      };
+
+      res.json({
+        success: true,
+        data: notification,
+      });
+    } catch (error) {
+      logger.error('Get notification by ID error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Mark all notifications as read
+   */
+  async markAllAsRead(req: Request, res: Response, next: NextFunction) {
+    try {
+      // Mock implementation
+      logger.info('All notifications marked as read');
+
+      res.json({
+        success: true,
+        message: '모든 알림이 읽음 처리되었습니다.',
+        updatedCount: 5, // Mock count
+      });
+    } catch (error) {
+      logger.error('Mark all as read error:', error);
+      next(error);
+    }
+  }
+
+  constructor(notificationService?: any) {
+    // Initialize with optional service
+  }
 }

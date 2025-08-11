@@ -1,11 +1,11 @@
 // packages/backend/src/controllers/MappingController.ts
 import { Request, Response, NextFunction } from 'express';
-import { ProductMapping, Activity } from '../models';
-import { MappingService } from '../services/sync';
-import { AppError } from '../utils/errors';
-import { logger } from '../utils/logger';
-import { validateSKU } from '../utils/validators';
-import { ShopifyProductSearchService } from '../services/shopify/ShopifyProductSearchService';
+import { ProductMapping, Activity } from '../models/index.js';
+import { MappingService } from '../services/sync/index.js';
+import { AppError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
+import { validateSKU } from '../utils/validators.js';
+import { ShopifyProductSearchService } from '../services/shopify/ShopifyProductSearchService.js';
 import * as XLSX from 'xlsx';
 import mongoose from 'mongoose';
 
@@ -48,7 +48,21 @@ export class MappingController {
     } catch (error) {
       logger.warn('ShopifyProductSearchService initialization failed:', error);
     }
+
+    // Bind aliases for api.routes.ts compatibility
+    this.getMappings = this.getAllMappings.bind(this);
+    this.bulkCreateMappings = this.bulkUploadMappings.bind(this);
+    this.toggleMapping = this.toggleMappingStatus.bind(this);
+    this.autoSearchAndCreate = this.autoSearchAndCreateMapping.bind(this);
+    this.downloadTemplate = this.downloadMappingTemplate.bind(this);
   }
+
+  // Aliases for api.routes.ts compatibility
+  getMappings: any;
+  bulkCreateMappings: any;
+  toggleMapping: any;
+  autoSearchAndCreate: any;
+  downloadTemplate: any;
 
   /**
    * Shopify 상품 검색 헬퍼
@@ -1243,4 +1257,124 @@ export class MappingController {
       return mapping;
     });
   }
+
+  /**
+   * 매핑 토글 (활성화/비활성화)
+   */
+  toggleMappingStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const mapping = await ProductMapping.findById(id);
+      if (!mapping) {
+        throw new AppError('Mapping not found', 404);
+      }
+
+      mapping.isActive = !mapping.isActive;
+      await mapping.save();
+
+      res.json({
+        success: true,
+        data: {
+          id: mapping._id,
+          isActive: mapping.isActive,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 자동 검색 및 매핑 생성
+   */
+  autoSearchAndCreateMapping = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { naverProductId, vendor = 'album' } = req.body;
+
+      if (!naverProductId) {
+        throw new AppError('Naver product ID is required', 400);
+      }
+
+      // SKU로 검색
+      const searchResult = await this.searchProductsBySku(
+        { params: { sku: naverProductId }, query: {} } as any,
+        res,
+        next
+      );
+
+      res.json({
+        success: true,
+        data: searchResult,
+        message: '자동 검색이 완료되었습니다.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 템플릿 다운로드
+   */
+  downloadMappingTemplate = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const template = [
+        {
+          sku: 'EXAMPLE-001',
+          productName: 'Example Product',
+          naverProductId: 'NAVER123',
+          shopifyProductId: 'gid://shopify/Product/123',
+          shopifyVariantId: 'gid://shopify/ProductVariant/456',
+          vendor: 'album',
+          priceMargin: 1.2,
+        },
+      ];
+
+      const csv = this.convertToCSV(template);
+      
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=mapping_template.csv');
+      res.send(csv);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Shopify 제품 검색 (API route용)
+   */
+  searchShopifyProducts = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { query, vendor = 'album' } = req.query;
+
+      if (!this.shopifySearchService) {
+        throw new AppError('Shopify search service not available', 503);
+      }
+
+      const result = await this.shopifySearchService.searchBySKU(String(query));
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
 }

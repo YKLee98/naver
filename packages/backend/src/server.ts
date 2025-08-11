@@ -369,14 +369,15 @@ class Server {
 
     return new Promise((resolve, reject) => {
       try {
-        this.httpServer = this.app!.express.listen(port, host, () => {
-          logger.info(`🌐 HTTP server listening on http://${host}:${port}`);
-          logger.info(
-            `📝 API documentation available at http://${host}:${port}/api-docs`
-          );
-          resolve();
-        });
-
+        // App 클래스의 listen 메소드를 사용
+        this.app!.listen(port);
+        this.httpServer = this.app!.getServer();
+        
+        logger.info(`🌐 HTTP server listening on http://${host}:${port}`);
+        logger.info(
+          `📝 API documentation available at http://${host}:${port}/api-docs`
+        );
+        
         this.httpServer.on('error', (error: any) => {
           if (error.code === 'EADDRINUSE') {
             logger.error(`Port ${port} is already in use`);
@@ -385,6 +386,8 @@ class Server {
           }
           reject(error);
         });
+        
+        resolve();
       } catch (error) {
         reject(error);
       }

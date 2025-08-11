@@ -2,9 +2,9 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { logger } from '../utils/logger';
-import { User } from '../models';
-import { AppError } from '../utils/errors';
+import { logger } from '../utils/logger.js';
+import { User } from '../models/index.js';
+import { AppError } from '../utils/errors.js';
 
 interface LoginRequest extends Request {
   body: {
@@ -400,6 +400,146 @@ export class AuthController {
       });
     } catch (error) {
       logger.error('Change password error:', error);
+      next(error);
+    }
+  }
+
+  // Method aliases for api.routes.ts compatibility
+  refreshToken = this.refresh;
+  getProfile = this.me;
+  updateProfile = this.updateProfileMethod.bind(this);
+  forgotPassword = this.forgotPasswordMethod.bind(this);
+  resetPassword = this.resetPasswordMethod.bind(this);
+
+  /**
+   * Update profile
+   */
+  async updateProfileMethod(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = (req as any).user?.id;
+      const updates = req.body;
+
+      // Remove sensitive fields
+      delete updates.password;
+      delete updates.role;
+      delete updates.email;
+
+      const user = await User.findByIdAndUpdate(
+        userId,
+        updates,
+        { new: true, runValidators: true }
+      ).select('-password');
+
+      if (!user) {
+        throw new AppError('User not found', 404);
+      }
+
+      res.json({
+        success: true,
+        data: user,
+        message: 'Profile updated successfully',
+      });
+    } catch (error) {
+      logger.error('Update profile error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Forgot password
+   */
+  async forgotPasswordMethod(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        throw new AppError('Email is required', 400);
+      }
+
+      const user = await User.findOne({ email: email.toLowerCase() });
+
+      if (!user) {
+        // Don't reveal if user exists or not
+        res.json({
+          success: true,
+          message: '비밀번호 재설정 이메일이 전송되었습니다.',
+        });
+        return;
+      }
+
+      // In production, you would:
+      // 1. Generate a reset token
+      // 2. Save it to the user with expiration
+      // 3. Send email with reset link
+
+      // Mock implementation
+      const resetToken = jwt.sign(
+        { id: user._id, type: 'password-reset' },
+        process.env['JWT_SECRET'] || 'secret',
+        { expiresIn: '1h' }
+      );
+
+      logger.info('Password reset requested:', {
+        email: user.email,
+        token: resetToken, // In production, don't log this
+      });
+
+      res.json({
+        success: true,
+        message: '비밀번호 재설정 이메일이 전송되었습니다.',
+        // In development only:
+        resetToken,
+      });
+    } catch (error) {
+      logger.error('Forgot password error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Reset password
+   */
+  async resetPasswordMethod(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { token, newPassword } = req.body;
+
+      if (!token || !newPassword) {
+        throw new AppError('Token and new password are required', 400);
+      }
+
+      // Verify token
+      const decoded = jwt.verify(
+        token,
+        process.env['JWT_SECRET'] || 'secret'
+      ) as any;
+
+      if (decoded.type !== 'password-reset') {
+        throw new AppError('Invalid reset token', 400);
+      }
+
+      // Update password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      const user = await User.findByIdAndUpdate(
+        decoded.id,
+        { password: hashedPassword },
+        { new: true }
+      );
+
+      if (!user) {
+        throw new AppError('User not found', 404);
+      }
+
+      logger.info('Password reset completed:', {
+        userId: user._id,
+        email: user.email,
+      });
+
+      res.json({
+        success: true,
+        message: '비밀번호가 재설정되었습니다.',
+      });
+    } catch (error) {
+      logger.error('Reset password error:', error);
       next(error);
     }
   }

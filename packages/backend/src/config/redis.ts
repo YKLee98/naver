@@ -278,7 +278,7 @@ export async function initializeRedis(): Promise<Redis> {
     logger.info(`Connecting to Redis: ${redisHost}:${redisPort}`);
   }
 
-  // Add retry strategy and other options
+  // Optimized retry strategy for production
   config.retryStrategy = (times: number) => {
     if (times > 3) {
       logger.error(
@@ -286,18 +286,21 @@ export async function initializeRedis(): Promise<Redis> {
       );
       return null; // Stop retrying
     }
-    const delay = Math.min(times * 1000, 3000);
+    // Exponential backoff with jitter
+    const delay = Math.min(times * 500 + Math.random() * 500, 2000);
     logger.warn(
-      `Retrying Redis connection in ${delay}ms... (attempt ${times}/3)`
+      `Retrying Redis connection in ${Math.round(delay)}ms... (attempt ${times}/3)`
     );
     return delay;
   };
 
-  config.enableOfflineQueue = true;
-  config.maxRetriesPerRequest = 3;
-  config.connectTimeout = 10000; // 10 seconds
+  config.enableOfflineQueue = false; // Better performance in production
+  config.maxRetriesPerRequest = 2;    // Reduced for faster failover
+  config.connectTimeout = 5000;       // 5 seconds for faster detection
   config.showFriendlyErrorStack = process.env['NODE_ENV'] !== 'production';
-  config.lazyConnect = true; // Don't connect immediately
+  config.lazyConnect = true;          // Don't connect immediately
+  config.keepAlive = 30000;           // Keep connection alive
+  config.commandTimeout = 5000;       // Command timeout
 
   try {
     // Create Redis client

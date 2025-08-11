@@ -8,6 +8,7 @@ import {
 import { shopifyConfig } from '../../config/shopify.config.js';
 import { logger } from '../../utils/logger.js';
 import { BaseService } from '../base/BaseService.js';
+import '@shopify/shopify-api/adapters/node';
 
 /**
  * Enhanced Shopify Service with robust REST client initialization

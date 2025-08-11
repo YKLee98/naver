@@ -1,6 +1,7 @@
 // packages/backend/src/services/activity/ActivityService.ts
-import { Activity, IActivity } from '../../models/Activity.js';
+import { Activity, type IActivity } from '../../models/Activity.js';
 import { logger } from '../../utils/logger.js';
+import { EventEmitter } from 'events';
 
 export interface ActivityOptions {
   type:
@@ -21,7 +22,11 @@ export interface ActivityOptions {
   duration?: number;
 }
 
-export class ActivityService {
+export class ActivityService extends EventEmitter {
+  constructor() {
+    super();
+  }
+
   /**
    * Log an activity
    */
@@ -37,6 +42,9 @@ export class ActivityService {
         action: activity.action,
         success: activity.success,
       });
+
+      // Emit event when activity is created
+      this.emit('activity:created', activity);
 
       return activity;
     } catch (error) {
@@ -55,7 +63,7 @@ export class ActivityService {
     success: boolean = true,
     userId?: string
   ): Promise<IActivity> {
-    return this.log({
+    const activity = await this.log({
       type: 'sync',
       action,
       details,
@@ -63,6 +71,11 @@ export class ActivityService {
       success,
       userId,
     });
+
+    // Emit specific sync activity event
+    this.emit('activity:sync', activity);
+    
+    return activity;
   }
 
   /**
@@ -74,13 +87,18 @@ export class ActivityService {
     changes: any,
     userId?: string
   ): Promise<IActivity> {
-    return this.log({
+    const activity = await this.log({
       type: 'inventory_update',
       action,
       details: `Inventory updated for SKU: ${sku}`,
       metadata: { sku, changes },
       userId,
     });
+
+    // Emit inventory update event
+    this.emit('activity:inventory', activity);
+    
+    return activity;
   }
 
   /**
@@ -93,13 +111,18 @@ export class ActivityService {
     platform: string,
     userId?: string
   ): Promise<IActivity> {
-    return this.log({
+    const activity = await this.log({
       type: 'price_update',
       action: `Price updated on ${platform}`,
       details: `Price changed from ${oldPrice} to ${newPrice} for SKU: ${sku}`,
       metadata: { sku, oldPrice, newPrice, platform },
       userId,
     });
+
+    // Emit price update event
+    this.emit('activity:price', activity);
+    
+    return activity;
   }
 
   /**

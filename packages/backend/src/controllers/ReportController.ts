@@ -147,28 +147,142 @@ export class ReportController {
       next(error);
     }
   }
+
+  /**
+   * Get all reports
+   */
+  async getReports(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { page = 1, limit = 20, type, status } = req.query;
+
+      // Mock data
+      const reports = [
+        {
+          id: 'report-1',
+          name: 'Monthly Sales Report',
+          type: 'sales',
+          status: 'completed',
+          generatedAt: new Date(),
+          size: '2.5 MB',
+        },
+        {
+          id: 'report-2',
+          name: 'Inventory Analysis',
+          type: 'inventory',
+          status: 'completed',
+          generatedAt: new Date(),
+          size: '1.8 MB',
+        },
+        {
+          id: 'report-3',
+          name: 'Sync History Report',
+          type: 'sync',
+          status: 'processing',
+          generatedAt: new Date(),
+          size: null,
+        },
+      ];
+
+      const filteredReports = reports.filter((report) => {
+        if (type && report.type !== type) return false;
+        if (status && report.status !== status) return false;
+        return true;
+      });
+
+      const skip = (Number(page) - 1) * Number(limit);
+      const paginatedReports = filteredReports.slice(skip, skip + Number(limit));
+
+      res.json({
+        success: true,
+        data: paginatedReports,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total: filteredReports.length,
+          pages: Math.ceil(filteredReports.length / Number(limit)),
+        },
+      });
+    } catch (error) {
+      logger.error('Get reports error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get report by ID
+   */
+  async getReportById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      // Mock data
+      const report = {
+        id,
+        name: 'Monthly Sales Report',
+        type: 'sales',
+        status: 'completed',
+        generatedAt: new Date(),
+        generatedBy: 'system',
+        size: '2.5 MB',
+        format: 'pdf',
+        data: {
+          summary: 'Report summary data',
+          details: 'Detailed report content',
+        },
+      };
+
+      res.json({
+        success: true,
+        data: report,
+      });
+    } catch (error) {
+      logger.error('Get report by ID error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get report templates
+   */
+  async getReportTemplates(req: Request, res: Response, next: NextFunction) {
+    try {
+      // Mock templates
+      const templates = [
+        {
+          id: 'template-1',
+          name: 'Sales Report Template',
+          type: 'sales',
+          description: 'Monthly sales analysis template',
+          fields: ['startDate', 'endDate', 'includeCharts'],
+        },
+        {
+          id: 'template-2',
+          name: 'Inventory Report Template',
+          type: 'inventory',
+          description: 'Inventory status and analysis template',
+          fields: ['warehouseId', 'lowStockOnly', 'includeHistory'],
+        },
+        {
+          id: 'template-3',
+          name: 'Sync Report Template',
+          type: 'sync',
+          description: 'Synchronization history and status template',
+          fields: ['startDate', 'endDate', 'includeErrors'],
+        },
+      ];
+
+      res.json({
+        success: true,
+        data: templates,
+      });
+    } catch (error) {
+      logger.error('Get report templates error:', error);
+      next(error);
+    }
+  }
+
+  constructor(reportService?: any) {
+    // Initialize with optional service
+  }
 }
 
-// ===== 6. packages/backend/src/controllers/types.ts =====
-export interface ControllerResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: {
-    message: string;
-    code?: string;
-  };
-  message?: string;
-}
-
-export interface PaginationParams {
-  limit?: number;
-  offset?: number;
-  page?: number;
-  sort?: string;
-  order?: 'asc' | 'desc';
-}
-
-export interface DateRangeParams {
-  startDate?: Date | string;
-  endDate?: Date | string;
-}
