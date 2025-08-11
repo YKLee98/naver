@@ -1,4 +1,3 @@
-
 // ===== 4. packages/backend/src/routes/exchangeRate.routes.ts =====
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/index.js';
@@ -8,10 +7,12 @@ import { getRedisClient } from '../config/redis.js';
 
 export default function setupExchangeRateRoutes(): Router {
   const router = Router();
-  
+
   const redis = getRedisClient();
   const exchangeRateService = new ExchangeRateService(redis);
-  const exchangeRateController = new ExchangeRateController(exchangeRateService);
+  const exchangeRateController = new ExchangeRateController(
+    exchangeRateService
+  );
 
   router.use(authMiddleware);
 

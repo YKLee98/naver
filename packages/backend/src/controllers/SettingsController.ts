@@ -10,7 +10,7 @@ export class SettingsController {
   async getSettings(req: Request, res: Response, next: NextFunction) {
     try {
       const settings = await Settings.findOne().lean();
-      
+
       if (!settings) {
         // Create default settings
         const defaultSettings = await Settings.create({
@@ -22,18 +22,18 @@ export class SettingsController {
           defaultMargin: 15,
           notificationEmail: '',
           webhookUrl: '',
-          timezone: 'Asia/Seoul'
+          timezone: 'Asia/Seoul',
         });
-        
+
         return res.json({
           success: true,
-          data: defaultSettings
+          data: defaultSettings,
         });
       }
 
       res.json({
         success: true,
-        data: settings
+        data: settings,
       });
     } catch (error) {
       next(error);
@@ -46,26 +46,29 @@ export class SettingsController {
   async updateSettings(req: Request, res: Response, next: NextFunction) {
     try {
       const updates = req.body;
-      
+
       // Validate settings
       if (updates.syncInterval && updates.syncInterval < 5) {
         return res.status(400).json({
           success: false,
-          error: { message: '동기화 간격은 최소 5분 이상이어야 합니다.' }
+          error: { message: '동기화 간격은 최소 5분 이상이어야 합니다.' },
         });
       }
 
       if (updates.lowStockThreshold && updates.lowStockThreshold < 0) {
         return res.status(400).json({
           success: false,
-          error: { message: '재고 임계값은 0 이상이어야 합니다.' }
+          error: { message: '재고 임계값은 0 이상이어야 합니다.' },
         });
       }
 
-      if (updates.defaultMargin && (updates.defaultMargin < 0 || updates.defaultMargin > 100)) {
+      if (
+        updates.defaultMargin &&
+        (updates.defaultMargin < 0 || updates.defaultMargin > 100)
+      ) {
         return res.status(400).json({
           success: false,
-          error: { message: '기본 마진율은 0-100% 사이여야 합니다.' }
+          error: { message: '기본 마진율은 0-100% 사이여야 합니다.' },
         });
       }
 
@@ -80,7 +83,7 @@ export class SettingsController {
       res.json({
         success: true,
         data: settings,
-        message: '설정이 업데이트되었습니다.'
+        message: '설정이 업데이트되었습니다.',
       });
     } catch (error) {
       next(error);
@@ -101,7 +104,7 @@ export class SettingsController {
         defaultMargin: 15,
         notificationEmail: '',
         webhookUrl: '',
-        timezone: 'Asia/Seoul'
+        timezone: 'Asia/Seoul',
       };
 
       const settings = await Settings.findOneAndUpdate(
@@ -115,7 +118,7 @@ export class SettingsController {
       res.json({
         success: true,
         data: settings,
-        message: '설정이 기본값으로 초기화되었습니다.'
+        message: '설정이 기본값으로 초기화되었습니다.',
       });
     } catch (error) {
       next(error);

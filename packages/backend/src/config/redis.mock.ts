@@ -1,5 +1,4 @@
 // packages/backend/src/config/redis.mock.ts
-import { logger } from '../utils/logger';
 
 export class RedisMock {
   private store: Map<string, any> = new Map();
@@ -8,7 +7,12 @@ export class RedisMock {
     return this.store.get(key) || null;
   }
 
-  async set(key: string, value: string, mode?: string, duration?: number): Promise<'OK'> {
+  async set(
+    key: string,
+    value: string,
+    _mode?: string,
+    _duration?: number
+  ): Promise<'OK'> {
     this.store.set(key, value);
     return 'OK';
   }
@@ -21,11 +25,11 @@ export class RedisMock {
     return this.store.has(key) ? 1 : 0;
   }
 
-  async expire(key: string, seconds: number): Promise<number> {
+  async expire(_key: string, _seconds: number): Promise<number> {
     return 1;
   }
 
-  async ttl(key: string): Promise<number> {
+  async ttl(_key: string): Promise<number> {
     return -1;
   }
 

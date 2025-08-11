@@ -30,7 +30,7 @@ export const authenticate = async (
         id: 'dev-user-123',
         email: 'dev@example.com',
         role: 'admin',
-        name: 'Development User'
+        name: 'Development User',
       };
       req.userId = 'dev-user-123';
       logger.debug('Skipping auth in development mode');
@@ -43,7 +43,7 @@ export const authenticate = async (
         id: 'anonymous-dev',
         email: 'anonymous@dev.local',
         role: 'admin',
-        name: 'Anonymous Developer'
+        name: 'Anonymous Developer',
       };
       req.userId = 'anonymous-dev';
       logger.warn('No token provided in development, using anonymous user');
@@ -52,11 +52,11 @@ export const authenticate = async (
 
     // Extract token
     const token = extractToken(req);
-    
+
     if (!token) {
       res.status(401).json({
         success: false,
-        error: 'No authentication token provided'
+        error: 'No authentication token provided',
       });
       return;
     }
@@ -73,27 +73,27 @@ export const authenticate = async (
         res.status(401).json({
           success: false,
           error: 'Token has expired',
-          code: 'TOKEN_EXPIRED'
+          code: 'TOKEN_EXPIRED',
         });
         return;
       }
-      
+
       if (jwtError.name === 'JsonWebTokenError') {
         res.status(401).json({
           success: false,
           error: 'Invalid token',
-          code: 'INVALID_TOKEN'
+          code: 'INVALID_TOKEN',
         });
         return;
       }
-      
+
       throw jwtError;
     }
   } catch (error) {
     logger.error('Auth middleware error:', error);
     res.status(500).json({
       success: false,
-      error: 'Authentication error'
+      error: 'Authentication error',
     });
   }
 };
@@ -108,7 +108,7 @@ export const optionalAuth = async (
 ): Promise<void> => {
   try {
     const token = extractToken(req);
-    
+
     if (token) {
       try {
         const decoded = jwt.verify(token, config.jwt.secret) as any;
@@ -120,7 +120,7 @@ export const optionalAuth = async (
         logger.debug('Invalid token in optional auth, continuing without auth');
       }
     }
-    
+
     next();
   } catch (error) {
     logger.error('Optional auth error:', error);
@@ -136,23 +136,23 @@ export const authorize = (...roles: string[]) => {
     if (!req.user) {
       res.status(401).json({
         success: false,
-        error: 'Authentication required'
+        error: 'Authentication required',
       });
       return;
     }
-    
+
     const userRole = req.user.role || 'user';
-    
+
     if (!roles.includes(userRole)) {
       res.status(403).json({
         success: false,
         error: 'Insufficient permissions',
         required: roles,
-        current: userRole
+        current: userRole,
       });
       return;
     }
-    
+
     next();
   };
 };
@@ -169,23 +169,23 @@ function extractToken(req: Request): string | null {
       return parts[1];
     }
   }
-  
+
   // 2. Query parameter (for development/testing)
   if (req.query.token && typeof req.query.token === 'string') {
     return req.query.token;
   }
-  
+
   // 3. Cookie
   if (req.cookies && req.cookies.token) {
     return req.cookies.token;
   }
-  
+
   // 4. Custom header
   const customToken = req.headers['x-auth-token'];
   if (customToken && typeof customToken === 'string') {
     return customToken;
   }
-  
+
   return null;
 }
 
@@ -200,5 +200,5 @@ export default {
   authorize,
   authMiddleware,
   requireAuth,
-  requireRole
+  requireRole,
 };

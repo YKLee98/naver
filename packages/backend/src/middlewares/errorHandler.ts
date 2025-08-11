@@ -73,7 +73,11 @@ export function errorHandler(
   }
 
   // Handle JWT errors by checking error name
-  if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError' || err.name === 'NotBeforeError') {
+  if (
+    err.name === 'JsonWebTokenError' ||
+    err.name === 'TokenExpiredError' ||
+    err.name === 'NotBeforeError'
+  ) {
     handleJWTError(err, res);
     return;
   }
@@ -96,7 +100,7 @@ function logError(err: ApiError, req: Request): void {
     userId: (req as any).user?.id,
     requestId: req.id,
     stack: err.stack,
-    details: err.details
+    details: err.details,
   };
 
   if (err.statusCode && err.statusCode >= 500) {
@@ -112,10 +116,10 @@ function logError(err: ApiError, req: Request): void {
  * Handle Zod validation errors
  */
 function handleZodError(err: ZodError, res: Response): void {
-  const errors = err.errors.map(error => ({
+  const errors = err.errors.map((error) => ({
     field: error.path.join('.'),
     message: error.message,
-    code: error.code
+    code: error.code,
   }));
 
   res.status(400).json({
@@ -123,8 +127,8 @@ function handleZodError(err: ZodError, res: Response): void {
     error: {
       code: 'VALIDATION_ERROR',
       message: 'Validation failed',
-      details: errors
-    }
+      details: errors,
+    },
   });
 }
 
@@ -135,10 +139,10 @@ function handleMongooseValidationError(
   err: mongoose.Error.ValidationError,
   res: Response
 ): void {
-  const errors = Object.values(err.errors).map(error => ({
+  const errors = Object.values(err.errors).map((error) => ({
     field: error.path,
     message: error.message,
-    value: (error as any).value
+    value: (error as any).value,
   }));
 
   res.status(400).json({
@@ -146,8 +150,8 @@ function handleMongooseValidationError(
     error: {
       code: 'VALIDATION_ERROR',
       message: 'Database validation failed',
-      details: errors
-    }
+      details: errors,
+    },
   });
 }
 
@@ -166,9 +170,9 @@ function handleMongooseCastError(
       details: {
         path: err.path,
         value: err.value,
-        kind: err.kind
-      }
-    }
+        kind: err.kind,
+      },
+    },
   });
 }
 
@@ -186,9 +190,9 @@ function handleMongoDuplicateError(err: any, res: Response): void {
       message: `${field} already exists`,
       details: {
         field,
-        value
-      }
-    }
+        value,
+      },
+    },
   });
 }
 
@@ -230,19 +234,15 @@ function handleJWTError(err: any, res: Response): void {
     error: {
       code,
       message,
-      ...(config.isDevelopment && { originalError: err.message })
-    }
+      ...(config.isDevelopment && { originalError: err.message }),
+    },
   });
 }
 
 /**
  * Send error response
  */
-function sendErrorResponse(
-  err: ApiError,
-  req: Request,
-  res: Response
-): void {
+function sendErrorResponse(err: ApiError, req: Request, res: Response): void {
   const isDevelopment = config.isDevelopment;
   const statusCode = err.statusCode || 500;
 
@@ -252,14 +252,14 @@ function sendErrorResponse(
       code: err.code,
       message: err.message || 'Internal server error',
       ...(isDevelopment && { details: err.details }),
-      ...(isDevelopment && statusCode === 500 && { stack: err.stack })
+      ...(isDevelopment && statusCode === 500 && { stack: err.stack }),
     },
     meta: {
       timestamp: new Date().toISOString(),
       path: req.path,
       method: req.method,
-      requestId: req.id
-    }
+      requestId: req.id,
+    },
   };
 
   // Remove sensitive information in production

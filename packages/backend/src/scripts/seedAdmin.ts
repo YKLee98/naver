@@ -11,9 +11,10 @@ dotenv.config();
 async function createAdminUser() {
   try {
     // MongoDB 연결
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/hallyu-pomaholic';
+    const mongoUri =
+      process.env.MONGODB_URI || 'mongodb://localhost:27017/hallyu-pomaholic';
     await mongoose.connect(mongoUri);
-    
+
     logger.info('Connected to MongoDB');
 
     // 관리자 계정 정보
@@ -27,25 +28,25 @@ async function createAdminUser() {
 
     // 기존 관리자 계정 확인
     const existingAdmin = await User.findOne({ email: adminData.email });
-    
+
     if (existingAdmin) {
       logger.info('Admin user already exists');
-      
+
       // 비밀번호 업데이트
       const hashedPassword = await bcrypt.hash(adminData.password, 10);
       existingAdmin.password = hashedPassword;
       await existingAdmin.save();
-      
+
       logger.info('Admin password updated');
     } else {
       // 새 관리자 계정 생성
       const hashedPassword = await bcrypt.hash(adminData.password, 10);
-      
+
       const adminUser = await User.create({
         ...adminData,
         password: hashedPassword,
       });
-      
+
       logger.info('Admin user created successfully');
       logger.info(`Email: ${adminData.email}`);
       logger.info(`Password: ${adminData.password}`);
@@ -61,15 +62,15 @@ async function createAdminUser() {
     };
 
     const existingUser = await User.findOne({ email: userData.email });
-    
+
     if (!existingUser) {
       const hashedUserPassword = await bcrypt.hash(userData.password, 10);
-      
+
       await User.create({
         ...userData,
         password: hashedUserPassword,
       });
-      
+
       logger.info('Regular user created successfully');
       logger.info(`Email: ${userData.email}`);
       logger.info(`Password: ${userData.password}`);
@@ -82,7 +83,6 @@ async function createAdminUser() {
     logger.info('\n일반 사용자 계정:');
     logger.info('- 이메일: user@hallyu.com');
     logger.info('- 비밀번호: user123456');
-
   } catch (error) {
     logger.error('Error creating admin user:', error);
   } finally {

@@ -1,6 +1,9 @@
 // ===== 11. packages/backend/src/routes/product.routes.ts =====
 import { Router } from 'express';
-import { searchShopifyProducts, searchNaverProducts } from '../controllers/ProductController.js';
+import {
+  searchShopifyProducts,
+  searchNaverProducts,
+} from '../controllers/ProductController.js';
 
 const router = Router();
 

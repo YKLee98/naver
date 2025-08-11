@@ -3,7 +3,10 @@ import { Router } from 'express';
 import { authMiddleware, adminMiddleware } from '../middlewares/index.js';
 import { PriceSyncController } from '../controllers/PriceSyncController.js';
 import { PriceSyncService } from '../services/sync/index.js';
-import { NaverAuthService, NaverProductService } from '../services/naver/index.js';
+import {
+  NaverAuthService,
+  NaverProductService,
+} from '../services/naver/index.js';
 import { ShopifyGraphQLService } from '../services/shopify/index.js';
 import { getRedisClient } from '../config/redis.js';
 import { validateRequest } from '../middlewares/validation.middleware.js';
@@ -37,7 +40,7 @@ export default function setupPriceSyncRoutes(): Router {
     [
       query('skus').optional().isString(),
       query('limit').optional().isInt({ min: 1, max: 1000 }),
-      query('offset').optional().isInt({ min: 0 })
+      query('offset').optional().isInt({ min: 0 }),
     ],
     validateRequest,
     priceSyncController.getInitialPrices
@@ -54,7 +57,7 @@ export default function setupPriceSyncRoutes(): Router {
       body('exchangeRateSource').optional().isIn(['api', 'manual']),
       body('customExchangeRate').optional().isFloat({ min: 0.00001, max: 1 }),
       body('roundingStrategy').optional().isIn(['up', 'down', 'nearest']),
-      body('applyRules').optional().isBoolean()
+      body('applyRules').optional().isBoolean(),
     ],
     validateRequest,
     priceSyncController.syncPrices
@@ -66,7 +69,7 @@ export default function setupPriceSyncRoutes(): Router {
     [
       body('updates').isArray({ min: 1 }),
       body('updates.*.sku').notEmpty().isString(),
-      body('updates.*.margin').isFloat({ min: -99, max: 999 })
+      body('updates.*.margin').isFloat({ min: -99, max: 999 }),
     ],
     validateRequest,
     priceSyncController.applyMargins
@@ -81,7 +84,7 @@ export default function setupPriceSyncRoutes(): Router {
       query('startDate').optional().isISO8601(),
       query('endDate').optional().isISO8601(),
       query('limit').optional().isInt({ min: 1, max: 1000 }),
-      query('offset').optional().isInt({ min: 0 })
+      query('offset').optional().isInt({ min: 0 }),
     ],
     validateRequest,
     priceSyncController.getPriceHistory
@@ -90,9 +93,7 @@ export default function setupPriceSyncRoutes(): Router {
   // 동기화 작업 상태 조회
   router.get(
     '/jobs/:jobId',
-    [
-      param('jobId').isUUID()
-    ],
+    [param('jobId').isUUID()],
     validateRequest,
     priceSyncController.getJobStatus
   );
@@ -108,7 +109,7 @@ export default function setupPriceSyncRoutes(): Router {
       body('marginRate').isFloat({ min: 0.01, max: 10 }),
       body('priority').optional().isInt({ min: 0 }),
       body('enabled').optional().isBoolean(),
-      body('conditions').optional().isObject()
+      body('conditions').optional().isObject(),
     ],
     validateRequest,
     priceSyncController.createPriceRule
@@ -125,7 +126,7 @@ export default function setupPriceSyncRoutes(): Router {
       body('marginRate').optional().isFloat({ min: 0.01, max: 10 }),
       body('priority').optional().isInt({ min: 0 }),
       body('enabled').optional().isBoolean(),
-      body('conditions').optional().isObject()
+      body('conditions').optional().isObject(),
     ],
     validateRequest,
     priceSyncController.updatePriceRule
@@ -134,9 +135,7 @@ export default function setupPriceSyncRoutes(): Router {
   router.delete(
     '/rules/:id',
     adminMiddleware,
-    [
-      param('id').isMongoId()
-    ],
+    [param('id').isMongoId()],
     validateRequest,
     priceSyncController.deletePriceRule
   );

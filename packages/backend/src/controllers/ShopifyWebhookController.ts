@@ -30,7 +30,9 @@ export class ShopifyWebhookController {
    */
   private verifyWebhookSignature(rawBody: string, signature: string): boolean {
     if (!this.webhookSecret) {
-      logger.warn('Shopify webhook secret not configured, skipping verification');
+      logger.warn(
+        'Shopify webhook secret not configured, skipping verification'
+      );
       return true; // Skip verification in development
     }
 
@@ -61,7 +63,7 @@ export class ShopifyWebhookController {
         processed: true,
         success,
         error,
-        processingTime: Date.now()
+        processingTime: Date.now(),
       });
     } catch (err) {
       logger.error('Failed to log webhook:', err);
@@ -72,26 +74,33 @@ export class ShopifyWebhookController {
    * Handle order creation
    * POST /webhooks/shopify/orders/create
    */
-  async handleOrderCreate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleOrderCreate(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     const startTime = Date.now();
-    
+
     try {
       const signature = req.headers['x-shopify-hmac-sha256'] as string;
       const topic = req.headers['x-shopify-topic'] as string;
       const shopDomain = req.headers['x-shopify-shop-domain'] as string;
-      
+
       logger.info('Shopify webhook received:', { topic, shopDomain });
 
       // Verify signature
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      if (this.webhookSecret && !this.verifyWebhookSignature(rawBody, signature)) {
+      if (
+        this.webhookSecret &&
+        !this.verifyWebhookSignature(rawBody, signature)
+      ) {
         logger.warn('Invalid Shopify webhook signature');
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const order = req.body;
-      
+
       // Process order items for inventory sync
       const lineItems = order.line_items || [];
       const inventoryUpdates = [];
@@ -102,7 +111,7 @@ export class ShopifyWebhookController {
             sku: item.sku,
             quantity: item.quantity,
             platform: 'shopify' as const,
-            type: 'order'
+            type: 'order',
           });
         }
       }
@@ -116,9 +125,9 @@ export class ShopifyWebhookController {
           orderId: order.id,
           orderNumber: order.name,
           totalAmount: order.total_price,
-          itemCount: lineItems.length
+          itemCount: lineItems.length,
         },
-        success: true
+        success: true,
       });
 
       // Send notification
@@ -128,7 +137,7 @@ export class ShopifyWebhookController {
         message: `Shopify 주문 ${order.name}이(가) 접수되었습니다. (${lineItems.length}개 상품)`,
         metadata: { orderId: order.id, orderNumber: order.name },
         channel: 'orders',
-        priority: 'normal'
+        priority: 'normal',
       });
 
       // Log webhook
@@ -143,14 +152,14 @@ export class ShopifyWebhookController {
       const processingTime = Date.now() - startTime;
       logger.info(`Order create webhook processed in ${processingTime}ms`);
 
-      res.status(200).json({ 
+      res.status(200).json({
         success: true,
         message: 'Order webhook processed',
-        processingTime
+        processingTime,
       });
     } catch (error) {
       logger.error('Order create webhook error:', error);
-      
+
       await this.logWebhook(
         'orders/create',
         req.body,
@@ -158,7 +167,7 @@ export class ShopifyWebhookController {
         false,
         (error as Error).message
       );
-      
+
       next(error);
     }
   }
@@ -167,18 +176,25 @@ export class ShopifyWebhookController {
    * Handle order update
    * POST /webhooks/shopify/orders/update
    */
-  async handleOrderUpdate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleOrderUpdate(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const signature = req.headers['x-shopify-hmac-sha256'] as string;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      
-      if (this.webhookSecret && !this.verifyWebhookSignature(rawBody, signature)) {
+
+      if (
+        this.webhookSecret &&
+        !this.verifyWebhookSignature(rawBody, signature)
+      ) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const order = req.body;
-      
+
       logger.info(`Shopify order updated: ${order.name}`);
 
       // Log activity
@@ -187,7 +203,7 @@ export class ShopifyWebhookController {
         action: 'Order updated via webhook',
         details: `Shopify order ${order.name} updated`,
         metadata: { orderId: order.id, status: order.fulfillment_status },
-        success: true
+        success: true,
       });
 
       await this.logWebhook('orders/update', order, req.headers, true);
@@ -195,7 +211,13 @@ export class ShopifyWebhookController {
       res.status(200).json({ success: true });
     } catch (error) {
       logger.error('Order update webhook error:', error);
-      await this.logWebhook('orders/update', req.body, req.headers, false, (error as Error).message);
+      await this.logWebhook(
+        'orders/update',
+        req.body,
+        req.headers,
+        false,
+        (error as Error).message
+      );
       next(error);
     }
   }
@@ -204,18 +226,25 @@ export class ShopifyWebhookController {
    * Handle order cancellation
    * POST /webhooks/shopify/orders/cancel
    */
-  async handleOrderCancel(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleOrderCancel(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const signature = req.headers['x-shopify-hmac-sha256'] as string;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      
-      if (this.webhookSecret && !this.verifyWebhookSignature(rawBody, signature)) {
+
+      if (
+        this.webhookSecret &&
+        !this.verifyWebhookSignature(rawBody, signature)
+      ) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const order = req.body;
-      
+
       logger.info(`Shopify order cancelled: ${order.name}`);
 
       // Restore inventory for cancelled items
@@ -223,7 +252,9 @@ export class ShopifyWebhookController {
       for (const item of lineItems) {
         if (item.sku) {
           // TODO: Implement inventory restoration logic
-          logger.info(`Restoring inventory for SKU ${item.sku}, quantity: ${item.quantity}`);
+          logger.info(
+            `Restoring inventory for SKU ${item.sku}, quantity: ${item.quantity}`
+          );
         }
       }
 
@@ -234,7 +265,7 @@ export class ShopifyWebhookController {
         message: `Shopify 주문 ${order.name}이(가) 취소되었습니다.`,
         metadata: { orderId: order.id, orderNumber: order.name },
         channel: 'orders',
-        priority: 'high'
+        priority: 'high',
       });
 
       await this.logWebhook('orders/cancel', order, req.headers, true);
@@ -242,7 +273,13 @@ export class ShopifyWebhookController {
       res.status(200).json({ success: true });
     } catch (error) {
       logger.error('Order cancel webhook error:', error);
-      await this.logWebhook('orders/cancel', req.body, req.headers, false, (error as Error).message);
+      await this.logWebhook(
+        'orders/cancel',
+        req.body,
+        req.headers,
+        false,
+        (error as Error).message
+      );
       next(error);
     }
   }
@@ -251,18 +288,25 @@ export class ShopifyWebhookController {
    * Handle product creation
    * POST /webhooks/shopify/products/create
    */
-  async handleProductCreate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleProductCreate(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const signature = req.headers['x-shopify-hmac-sha256'] as string;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      
-      if (this.webhookSecret && !this.verifyWebhookSignature(rawBody, signature)) {
+
+      if (
+        this.webhookSecret &&
+        !this.verifyWebhookSignature(rawBody, signature)
+      ) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const product = req.body;
-      
+
       logger.info(`Shopify product created: ${product.title}`);
 
       // Log activity
@@ -270,13 +314,13 @@ export class ShopifyWebhookController {
         type: 'mapping',
         action: 'Product created via webhook',
         details: `Shopify product "${product.title}" created`,
-        metadata: { 
+        metadata: {
           productId: product.id,
           title: product.title,
           vendor: product.vendor,
-          variantCount: product.variants?.length || 0
+          variantCount: product.variants?.length || 0,
         },
-        success: true
+        success: true,
       });
 
       // Send notification
@@ -286,7 +330,7 @@ export class ShopifyWebhookController {
         message: `Shopify 상품 "${product.title}"이(가) 생성되었습니다.`,
         metadata: { productId: product.id },
         channel: 'products',
-        priority: 'normal'
+        priority: 'normal',
       });
 
       await this.logWebhook('products/create', product, req.headers, true);
@@ -294,7 +338,13 @@ export class ShopifyWebhookController {
       res.status(200).json({ success: true });
     } catch (error) {
       logger.error('Product create webhook error:', error);
-      await this.logWebhook('products/create', req.body, req.headers, false, (error as Error).message);
+      await this.logWebhook(
+        'products/create',
+        req.body,
+        req.headers,
+        false,
+        (error as Error).message
+      );
       next(error);
     }
   }
@@ -303,18 +353,25 @@ export class ShopifyWebhookController {
    * Handle product update
    * POST /webhooks/shopify/products/update
    */
-  async handleProductUpdate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleProductUpdate(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const signature = req.headers['x-shopify-hmac-sha256'] as string;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      
-      if (this.webhookSecret && !this.verifyWebhookSignature(rawBody, signature)) {
+
+      if (
+        this.webhookSecret &&
+        !this.verifyWebhookSignature(rawBody, signature)
+      ) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const product = req.body;
-      
+
       logger.info(`Shopify product updated: ${product.title}`);
 
       // Check if price or inventory changed
@@ -325,7 +382,7 @@ export class ShopifyWebhookController {
         action: 'Product updated via webhook',
         details: `Shopify product "${product.title}" updated`,
         metadata: { productId: product.id },
-        success: true
+        success: true,
       });
 
       await this.logWebhook('products/update', product, req.headers, true);
@@ -333,7 +390,13 @@ export class ShopifyWebhookController {
       res.status(200).json({ success: true });
     } catch (error) {
       logger.error('Product update webhook error:', error);
-      await this.logWebhook('products/update', req.body, req.headers, false, (error as Error).message);
+      await this.logWebhook(
+        'products/update',
+        req.body,
+        req.headers,
+        false,
+        (error as Error).message
+      );
       next(error);
     }
   }
@@ -342,18 +405,25 @@ export class ShopifyWebhookController {
    * Handle product deletion
    * POST /webhooks/shopify/products/delete
    */
-  async handleProductDelete(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleProductDelete(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const signature = req.headers['x-shopify-hmac-sha256'] as string;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      
-      if (this.webhookSecret && !this.verifyWebhookSignature(rawBody, signature)) {
+
+      if (
+        this.webhookSecret &&
+        !this.verifyWebhookSignature(rawBody, signature)
+      ) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const product = req.body;
-      
+
       logger.info(`Shopify product deleted: ${product.id}`);
 
       // Send notification
@@ -363,7 +433,7 @@ export class ShopifyWebhookController {
         message: `Shopify 상품이 삭제되었습니다. (ID: ${product.id})`,
         metadata: { productId: product.id },
         channel: 'products',
-        priority: 'high'
+        priority: 'high',
       });
 
       await this.logWebhook('products/delete', product, req.headers, true);
@@ -371,7 +441,13 @@ export class ShopifyWebhookController {
       res.status(200).json({ success: true });
     } catch (error) {
       logger.error('Product delete webhook error:', error);
-      await this.logWebhook('products/delete', req.body, req.headers, false, (error as Error).message);
+      await this.logWebhook(
+        'products/delete',
+        req.body,
+        req.headers,
+        false,
+        (error as Error).message
+      );
       next(error);
     }
   }
@@ -380,18 +456,25 @@ export class ShopifyWebhookController {
    * Handle inventory update
    * POST /webhooks/shopify/inventory/update
    */
-  async handleInventoryUpdate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async handleInventoryUpdate(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const signature = req.headers['x-shopify-hmac-sha256'] as string;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      
-      if (this.webhookSecret && !this.verifyWebhookSignature(rawBody, signature)) {
+
+      if (
+        this.webhookSecret &&
+        !this.verifyWebhookSignature(rawBody, signature)
+      ) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const inventoryLevel = req.body;
-      
+
       logger.info('Shopify inventory updated:', inventoryLevel);
 
       // Trigger inventory sync for affected SKU
@@ -402,15 +485,26 @@ export class ShopifyWebhookController {
         action: 'Inventory updated via webhook',
         details: `Shopify inventory level updated`,
         metadata: inventoryLevel,
-        success: true
+        success: true,
       });
 
-      await this.logWebhook('inventory/update', inventoryLevel, req.headers, true);
+      await this.logWebhook(
+        'inventory/update',
+        inventoryLevel,
+        req.headers,
+        true
+      );
 
       res.status(200).json({ success: true });
     } catch (error) {
       logger.error('Inventory update webhook error:', error);
-      await this.logWebhook('inventory/update', req.body, req.headers, false, (error as Error).message);
+      await this.logWebhook(
+        'inventory/update',
+        req.body,
+        req.headers,
+        false,
+        (error as Error).message
+      );
       next(error);
     }
   }
@@ -420,23 +514,48 @@ export class ShopifyWebhookController {
    */
   async registerWebhooks(): Promise<void> {
     try {
-      const baseUrl = process.env.WEBHOOK_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      
+      const baseUrl =
+        process.env.WEBHOOK_BASE_URL ||
+        `http://localhost:${process.env.PORT || 3000}`;
+
       const webhooks = [
-        { topic: 'orders/create', address: `${baseUrl}/webhooks/shopify/orders/create` },
-        { topic: 'orders/updated', address: `${baseUrl}/webhooks/shopify/orders/update` },
-        { topic: 'orders/cancelled', address: `${baseUrl}/webhooks/shopify/orders/cancel` },
-        { topic: 'products/create', address: `${baseUrl}/webhooks/shopify/products/create` },
-        { topic: 'products/update', address: `${baseUrl}/webhooks/shopify/products/update` },
-        { topic: 'products/delete', address: `${baseUrl}/webhooks/shopify/products/delete` },
-        { topic: 'inventory_levels/update', address: `${baseUrl}/webhooks/shopify/inventory/update` }
+        {
+          topic: 'orders/create',
+          address: `${baseUrl}/webhooks/shopify/orders/create`,
+        },
+        {
+          topic: 'orders/updated',
+          address: `${baseUrl}/webhooks/shopify/orders/update`,
+        },
+        {
+          topic: 'orders/cancelled',
+          address: `${baseUrl}/webhooks/shopify/orders/cancel`,
+        },
+        {
+          topic: 'products/create',
+          address: `${baseUrl}/webhooks/shopify/products/create`,
+        },
+        {
+          topic: 'products/update',
+          address: `${baseUrl}/webhooks/shopify/products/update`,
+        },
+        {
+          topic: 'products/delete',
+          address: `${baseUrl}/webhooks/shopify/products/delete`,
+        },
+        {
+          topic: 'inventory_levels/update',
+          address: `${baseUrl}/webhooks/shopify/inventory/update`,
+        },
       ];
 
       // TODO: Implement webhook registration with Shopify API
       logger.info('Webhook registration not implemented yet');
-      
+
       for (const webhook of webhooks) {
-        logger.info(`Would register webhook: ${webhook.topic} -> ${webhook.address}`);
+        logger.info(
+          `Would register webhook: ${webhook.topic} -> ${webhook.address}`
+        );
       }
     } catch (error) {
       logger.error('Failed to register webhooks:', error);

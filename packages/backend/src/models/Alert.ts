@@ -2,7 +2,12 @@
 import { Schema, model, Document } from 'mongoose';
 
 export interface IAlert extends Document {
-  type: 'low_stock' | 'out_of_stock' | 'price_discrepancy' | 'sync_failure' | 'system';
+  type:
+    | 'low_stock'
+    | 'out_of_stock'
+    | 'price_discrepancy'
+    | 'sync_failure'
+    | 'system';
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: 'active' | 'acknowledged' | 'dismissed' | 'resolved';
   title: string;
@@ -29,40 +34,46 @@ const AlertSchema = new Schema<IAlert>(
     type: {
       type: String,
       required: true,
-      enum: ['low_stock', 'out_of_stock', 'price_discrepancy', 'sync_failure', 'system'],
-      index: true
+      enum: [
+        'low_stock',
+        'out_of_stock',
+        'price_discrepancy',
+        'sync_failure',
+        'system',
+      ],
+      index: true,
     },
     severity: {
       type: String,
       required: true,
       enum: ['low', 'medium', 'high', 'critical'],
-      index: true
+      index: true,
     },
     status: {
       type: String,
       required: true,
       enum: ['active', 'acknowledged', 'dismissed', 'resolved'],
       default: 'active',
-      index: true
+      index: true,
     },
     title: {
       type: String,
-      required: true
+      required: true,
     },
     message: {
       type: String,
-      required: true
+      required: true,
     },
     details: {
       type: Schema.Types.Mixed,
-      default: {}
+      default: {},
     },
     relatedEntity: {
       type: {
-        type: String
+        type: String,
       },
       id: String,
-      name: String
+      name: String,
     },
     acknowledgedAt: Date,
     acknowledgedBy: String,
@@ -72,11 +83,11 @@ const AlertSchema = new Schema<IAlert>(
     resolvedBy: String,
     expiresAt: {
       type: Date,
-      index: true
-    }
+      index: true,
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 
@@ -89,7 +100,7 @@ AlertSchema.index({ 'relatedEntity.type': 1, 'relatedEntity.id': 1 });
 AlertSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // Static methods
-AlertSchema.statics.createAlert = async function(
+AlertSchema.statics.createAlert = async function (
   type: IAlert['type'],
   severity: IAlert['severity'],
   title: string,
@@ -105,7 +116,7 @@ AlertSchema.statics.createAlert = async function(
     details,
     relatedEntity,
     status: 'active',
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
   });
 };
 

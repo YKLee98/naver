@@ -51,24 +51,27 @@ export class NaverOrderService {
   constructor(authService: NaverAuthService) {
     this.authService = authService;
     this.rateLimiter = new NaverRateLimiter();
-    this.apiBaseUrl = process.env.NAVER_API_BASE_URL || 'https://api.commerce.naver.com';
-    
+    this.apiBaseUrl =
+      process.env['NAVER_API_BASE_URL'] || 'https://api.commerce.naver.com';
+
     this.axiosInstance = axios.create({
       baseURL: this.apiBaseUrl,
       timeout: 30000,
     });
 
     // 인터셉터 설정
-    this.axiosInstance.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
-      const headers = await this.authService.getAuthHeaders();
-      
-      // 헤더 병합
-      Object.keys(headers).forEach(key => {
-        config.headers[key] = headers[key];
-      });
-      
-      return config;
-    });
+    this.axiosInstance.interceptors.request.use(
+      async (config: InternalAxiosRequestConfig) => {
+        const headers = await this.authService.getAuthHeaders();
+
+        // 헤더 병합
+        Object.keys(headers).forEach((key) => {
+          config.headers[key] = headers[key];
+        });
+
+        return config;
+      }
+    );
 
     // 응답 인터셉터 - 에러 처리
     this.axiosInstance.interceptors.response.use(
@@ -78,12 +81,12 @@ export class NaverOrderService {
           // 토큰 갱신 후 재시도
           logger.warn('Naver API token expired, refreshing...');
           await this.authService.refreshToken();
-          
+
           const headers = await this.authService.getAuthHeaders();
-          Object.keys(headers).forEach(key => {
+          Object.keys(headers).forEach((key) => {
             error.config.headers[key] = headers[key];
           });
-          
+
           return this.axiosInstance.request(error.config);
         }
         throw error;
@@ -106,14 +109,19 @@ export class NaverOrderService {
     const queryParams = new URLSearchParams({
       lastChangedFrom: params.lastChangedFrom.toISOString(),
       lastChangedTo: params.lastChangedTo.toISOString(),
-      ...(params.lastChangedType && { lastChangedType: params.lastChangedType }),
+      ...(params.lastChangedType && {
+        lastChangedType: params.lastChangedType,
+      }),
       page: (params.page || 1).toString(),
       size: (params.size || 100).toString(),
     });
 
     try {
       const response = await retry(
-        () => this.axiosInstance.get(`/external/v1/pay-order/seller/orders?${queryParams}`),
+        () =>
+          this.axiosInstance.get(
+            `/external/v1/pay-order/seller/orders?${queryParams}`
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -153,7 +161,7 @@ export class NaverOrderService {
 
       // Rate limiting을 위한 딜레이
       if (hasMore) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
 
@@ -168,7 +176,10 @@ export class NaverOrderService {
 
     try {
       const response = await retry(
-        () => this.axiosInstance.get(`/external/v1/pay-order/seller/orders/${orderId}`),
+        () =>
+          this.axiosInstance.get(
+            `/external/v1/pay-order/seller/orders/${orderId}`
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -196,14 +207,15 @@ export class NaverOrderService {
 
     try {
       await retry(
-        () => this.axiosInstance.put('/external/v1/pay-order/seller/dispatch', {
-          dispatchProductOrders: params.productOrderIds.map(id => ({
-            productOrderId: id,
-            deliveryCompanyCode: params.deliveryCompanyCode,
-            trackingNumber: params.trackingNumber,
-            dispatchDate: (params.dispatchDate || new Date()).toISOString(),
-          })),
-        }),
+        () =>
+          this.axiosInstance.put('/external/v1/pay-order/seller/dispatch', {
+            dispatchProductOrders: params.productOrderIds.map((id) => ({
+              productOrderId: id,
+              deliveryCompanyCode: params.deliveryCompanyCode,
+              trackingNumber: params.trackingNumber,
+              dispatchDate: (params.dispatchDate || new Date()).toISOString(),
+            })),
+          }),
         {
           retries: 3,
           minTimeout: 1000,
@@ -226,9 +238,13 @@ export class NaverOrderService {
 
     try {
       await retry(
-        () => this.axiosInstance.post(`/external/v1/pay-order/seller/cancel/approve`, {
-          productOrderId,
-        }),
+        () =>
+          this.axiosInstance.post(
+            `/external/v1/pay-order/seller/cancel/approve`,
+            {
+              productOrderId,
+            }
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -246,15 +262,22 @@ export class NaverOrderService {
   /**
    * 주문 취소 거부
    */
-  async rejectCancellation(productOrderId: string, rejectReason: string): Promise<void> {
+  async rejectCancellation(
+    productOrderId: string,
+    rejectReason: string
+  ): Promise<void> {
     await this.rateLimiter.consume();
 
     try {
       await retry(
-        () => this.axiosInstance.post(`/external/v1/pay-order/seller/cancel/reject`, {
-          productOrderId,
-          rejectReason,
-        }),
+        () =>
+          this.axiosInstance.post(
+            `/external/v1/pay-order/seller/cancel/reject`,
+            {
+              productOrderId,
+              rejectReason,
+            }
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -272,15 +295,22 @@ export class NaverOrderService {
   /**
    * 반품 승인
    */
-  async approveReturn(productOrderId: string, collectDeliveryCompanyCode?: string): Promise<void> {
+  async approveReturn(
+    productOrderId: string,
+    collectDeliveryCompanyCode?: string
+  ): Promise<void> {
     await this.rateLimiter.consume();
 
     try {
       await retry(
-        () => this.axiosInstance.post(`/external/v1/pay-order/seller/return/approve`, {
-          productOrderId,
-          ...(collectDeliveryCompanyCode && { collectDeliveryCompanyCode }),
-        }),
+        () =>
+          this.axiosInstance.post(
+            `/external/v1/pay-order/seller/return/approve`,
+            {
+              productOrderId,
+              ...(collectDeliveryCompanyCode && { collectDeliveryCompanyCode }),
+            }
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -298,15 +328,22 @@ export class NaverOrderService {
   /**
    * 반품 거부
    */
-  async rejectReturn(productOrderId: string, rejectReason: string): Promise<void> {
+  async rejectReturn(
+    productOrderId: string,
+    rejectReason: string
+  ): Promise<void> {
     await this.rateLimiter.consume();
 
     try {
       await retry(
-        () => this.axiosInstance.post(`/external/v1/pay-order/seller/return/reject`, {
-          productOrderId,
-          rejectReason,
-        }),
+        () =>
+          this.axiosInstance.post(
+            `/external/v1/pay-order/seller/return/reject`,
+            {
+              productOrderId,
+              rejectReason,
+            }
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -334,7 +371,11 @@ export class NaverOrderService {
 
     try {
       await retry(
-        () => this.axiosInstance.post(`/external/v1/pay-order/seller/exchange/approve`, params),
+        () =>
+          this.axiosInstance.post(
+            `/external/v1/pay-order/seller/exchange/approve`,
+            params
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -344,7 +385,10 @@ export class NaverOrderService {
 
       logger.info(`Approved exchange for order: ${params.productOrderId}`);
     } catch (error) {
-      logger.error(`Failed to approve exchange: ${params.productOrderId}`, error);
+      logger.error(
+        `Failed to approve exchange: ${params.productOrderId}`,
+        error
+      );
       throw error;
     }
   }
@@ -352,15 +396,22 @@ export class NaverOrderService {
   /**
    * 교환 거부
    */
-  async rejectExchange(productOrderId: string, rejectReason: string): Promise<void> {
+  async rejectExchange(
+    productOrderId: string,
+    rejectReason: string
+  ): Promise<void> {
     await this.rateLimiter.consume();
 
     try {
       await retry(
-        () => this.axiosInstance.post(`/external/v1/pay-order/seller/exchange/reject`, {
-          productOrderId,
-          rejectReason,
-        }),
+        () =>
+          this.axiosInstance.post(
+            `/external/v1/pay-order/seller/exchange/reject`,
+            {
+              productOrderId,
+              rejectReason,
+            }
+          ),
         {
           retries: 3,
           minTimeout: 1000,
@@ -378,8 +429,10 @@ export class NaverOrderService {
   /**
    * 주문별 SKU 추출
    */
-  extractSkusFromOrder(order: NaverOrder): Array<{ sku: string; quantity: number }> {
-    return order.orderItems.map(item => ({
+  extractSkusFromOrder(
+    order: NaverOrder
+  ): Array<{ sku: string; quantity: number }> {
+    return order.orderItems.map((item) => ({
       sku: item.sellerProductCode,
       quantity: item.quantity,
     }));

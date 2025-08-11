@@ -70,7 +70,7 @@ export class InventorySyncService {
       logger.info(`Inventory synced for Naver sale: ${sku} (-${quantity})`);
     } catch (error) {
       logger.error(`Failed to sync inventory for Naver sale: ${sku}`, error);
-      
+
       // 실패 트랜잭션 기록
       await InventoryTransaction.create({
         sku,
@@ -85,7 +85,7 @@ export class InventorySyncService {
         syncStatus: 'failed',
         errorMessage: error.message,
       });
-      
+
       throw error;
     }
   }
@@ -99,11 +99,11 @@ export class InventorySyncService {
     orderId: string
   ): Promise<void> {
     // Variant로 매핑 조회
-    const mapping = await ProductMapping.findOne({ 
-      shopifyVariantId: variantId, 
-      isActive: true 
+    const mapping = await ProductMapping.findOne({
+      shopifyVariantId: variantId,
+      isActive: true,
     });
-    
+
     if (!mapping) {
       logger.warn(`Mapping not found for variant: ${variantId}`);
       return;
@@ -144,10 +144,15 @@ export class InventorySyncService {
         syncedAt: new Date(),
       });
 
-      logger.info(`Inventory synced for Shopify sale: ${mapping.sku} (-${quantity})`);
+      logger.info(
+        `Inventory synced for Shopify sale: ${mapping.sku} (-${quantity})`
+      );
     } catch (error) {
-      logger.error(`Failed to sync inventory for Shopify sale: ${mapping.sku}`, error);
-      
+      logger.error(
+        `Failed to sync inventory for Shopify sale: ${mapping.sku}`,
+        error
+      );
+
       // 실패 트랜잭션 기록
       await InventoryTransaction.create({
         sku: mapping.sku,
@@ -162,7 +167,7 @@ export class InventorySyncService {
         syncStatus: 'failed',
         errorMessage: error.message,
       });
-      
+
       throw error;
     }
   }
@@ -227,7 +232,9 @@ export class InventorySyncService {
       syncedAt: new Date(),
     });
 
-    logger.info(`Inventory adjusted: ${sku} (${adjustment > 0 ? '+' : ''}${adjustment})`);
+    logger.info(
+      `Inventory adjusted: ${sku} (${adjustment > 0 ? '+' : ''}${adjustment})`
+    );
   }
 
   /**

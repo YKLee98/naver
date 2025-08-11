@@ -15,7 +15,7 @@ export function validateWebhookSignature(source: 'shopify' | 'naver') {
         const signature = req.get('X-Shopify-Hmac-Sha256');
         const topic = req.get('X-Shopify-Topic');
         const shopId = req.get('X-Shopify-Shop-Domain');
-        
+
         if (!signature) {
           logger.warn('Missing Shopify webhook signature');
           return res.status(401).json({ error: 'Unauthorized' });
@@ -39,17 +39,16 @@ export function validateWebhookSignature(source: 'shopify' | 'naver') {
             topic,
             shopId,
             expected: hash,
-            received: signature
+            received: signature,
           });
           return res.status(401).json({ error: 'Invalid signature' });
         }
 
         logger.debug('Shopify webhook signature verified', { topic, shopId });
-        
       } else if (source === 'naver') {
         const signature = req.get('X-Naver-Signature');
         const timestamp = req.get('X-Naver-Timestamp');
-        
+
         if (!signature || !timestamp) {
           logger.warn('Missing Naver webhook headers');
           // Naver might not always send signatures, so we allow it
@@ -86,13 +85,17 @@ export function validateWebhookSignature(source: 'shopify' | 'naver') {
   };
 }
 
-export function captureRawBody(req: Request, res: Response, next: NextFunction) {
+export function captureRawBody(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   let data = '';
-  
+
   req.on('data', (chunk) => {
     data += chunk;
   });
-  
+
   req.on('end', () => {
     (req as any).rawBody = data;
     next();

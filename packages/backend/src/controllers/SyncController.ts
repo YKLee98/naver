@@ -15,53 +15,60 @@ export class SyncController {
    * Perform full sync
    * POST /api/v1/sync/full
    */
-  async performFullSync(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async performFullSync(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
-      const { 
-        includeInventory = true, 
+      const {
+        includeInventory = true,
         includePrice = true,
         vendor,
-        batchSize = 50
+        batchSize = 50,
       } = req.body;
 
-      logger.info('Starting full sync', { 
-        includeInventory, 
-        includePrice, 
-        vendor,
-        batchSize 
-      });
-
-      // Start sync process
-      const jobId = `sync-full-${Date.now()}`;
-      
-      // Run sync in background
-      this.syncService.performFullSync({
+      logger.info('Starting full sync', {
         includeInventory,
         includePrice,
         vendor,
         batchSize,
-        jobId
-      }).then(async (result) => {
-        // Log activity
-        await Activity.create({
-          type: 'sync',
-          action: 'Full sync completed',
-          details: `Synced ${result.successCount}/${result.totalItems} items`,
-          metadata: result,
-          success: result.success,
-          userId: (req as any).user?.id
-        });
-      }).catch(async (error) => {
-        logger.error('Full sync failed:', error);
-        await Activity.create({
-          type: 'sync',
-          action: 'Full sync failed',
-          details: error.message,
-          success: false,
-          errorMessage: error.message,
-          userId: (req as any).user?.id
-        });
       });
+
+      // Start sync process
+      const jobId = `sync-full-${Date.now()}`;
+
+      // Run sync in background
+      this.syncService
+        .performFullSync({
+          includeInventory,
+          includePrice,
+          vendor,
+          batchSize,
+          jobId,
+        })
+        .then(async (result) => {
+          // Log activity
+          await Activity.create({
+            type: 'sync',
+            action: 'Full sync completed',
+            details: `Synced ${result.successCount}/${result.totalItems} items`,
+            metadata: result,
+            success: result.success,
+            userId: (req as any).user?.id,
+          });
+        })
+        .catch(async (error) => {
+          logger.error('Full sync failed:', error);
+          await Activity.create({
+            type: 'sync',
+            action: 'Full sync failed',
+            details: error.message,
+            success: false,
+            errorMessage: error.message,
+            userId: (req as any).user?.id,
+          });
+        });
 
       res.json({
         success: true,
@@ -70,8 +77,8 @@ export class SyncController {
           jobId,
           status: 'processing',
           includeInventory,
-          includePrice
-        }
+          includePrice,
+        },
       });
     } catch (error) {
       logger.error('Perform full sync error:', error);
@@ -83,7 +90,11 @@ export class SyncController {
    * Sync single SKU
    * POST /api/v1/sync/sku/:sku
    */
-  async syncSingleSku(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async syncSingleSku(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { sku } = req.params;
       const { syncInventory = true, syncPrice = true } = req.body;
@@ -92,7 +103,7 @@ export class SyncController {
 
       const result = await this.syncService.syncSingleProduct(sku, {
         syncInventory,
-        syncPrice
+        syncPrice,
       });
 
       // Log activity
@@ -102,13 +113,13 @@ export class SyncController {
         details: `Synced SKU: ${sku}`,
         metadata: result,
         success: result.success,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
         success: true,
         message: `SKU ${sku} 동기화가 완료되었습니다.`,
-        data: result
+        data: result,
       });
     } catch (error) {
       logger.error('Sync single SKU error:', error);
@@ -120,13 +131,17 @@ export class SyncController {
    * Get sync status
    * GET /api/v1/sync/status
    */
-  async getSyncStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getSyncStatus(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const status = await this.syncService.getCurrentSyncStatus();
 
       res.json({
         success: true,
-        data: status
+        data: status,
       });
     } catch (error) {
       logger.error('Get sync status error:', error);
@@ -138,23 +153,27 @@ export class SyncController {
    * Get sync job status
    * GET /api/v1/sync/status/:jobId
    */
-  async getSyncJobStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getSyncJobStatus(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { jobId } = req.params;
-      
+
       const status = await this.syncService.getSyncJobStatus(jobId);
-      
+
       if (!status) {
         res.status(404).json({
           success: false,
-          error: 'Sync job not found'
+          error: 'Sync job not found',
         });
         return;
       }
 
       res.json({
         success: true,
-        data: status
+        data: status,
       });
     } catch (error) {
       logger.error('Get sync job status error:', error);
@@ -166,13 +185,17 @@ export class SyncController {
    * Get sync settings
    * GET /api/v1/sync/settings
    */
-  async getSyncSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getSyncSettings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const settings = await this.syncService.getSyncSettings();
 
       res.json({
         success: true,
-        data: settings
+        data: settings,
       });
     } catch (error) {
       logger.error('Get sync settings error:', error);
@@ -184,7 +207,11 @@ export class SyncController {
    * Update sync settings
    * PUT /api/v1/sync/settings
    */
-  async updateSyncSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async updateSyncSettings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const updates = req.body;
 
@@ -197,13 +224,13 @@ export class SyncController {
         details: `Updated sync settings`,
         metadata: updates,
         success: true,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
         success: true,
         message: '동기화 설정이 업데이트되었습니다.',
-        data: settings
+        data: settings,
       });
     } catch (error) {
       logger.error('Update sync settings error:', error);
@@ -215,15 +242,19 @@ export class SyncController {
    * Get sync history
    * GET /api/v1/sync/history
    */
-  async getSyncHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getSyncHistory(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
-      const { 
-        page = 1, 
-        limit = 20, 
+      const {
+        page = 1,
+        limit = 20,
         status,
         type,
         startDate,
-        endDate
+        endDate,
       } = req.query;
 
       const history = await this.syncService.getSyncHistory({
@@ -232,12 +263,12 @@ export class SyncController {
         status: status as string,
         type: type as string,
         startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined
+        endDate: endDate ? new Date(endDate as string) : undefined,
       });
 
       res.json({
         success: true,
-        data: history
+        data: history,
       });
     } catch (error) {
       logger.error('Get sync history error:', error);
@@ -249,7 +280,11 @@ export class SyncController {
    * Retry sync job
    * POST /api/v1/sync/retry/:jobId
    */
-  async retrySyncJob(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async retrySyncJob(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { jobId } = req.params;
 
@@ -262,13 +297,13 @@ export class SyncController {
         details: `Retried sync job: ${jobId}`,
         metadata: { jobId, newJobId: result.newJobId },
         success: true,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
         success: true,
         message: `동기화 작업 ${jobId}가 재시도됩니다.`,
-        data: result
+        data: result,
       });
     } catch (error) {
       logger.error('Retry sync job error:', error);
@@ -280,7 +315,11 @@ export class SyncController {
    * Cancel sync job
    * POST /api/v1/sync/cancel/:jobId
    */
-  async cancelSyncJob(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async cancelSyncJob(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { jobId } = req.params;
 
@@ -293,7 +332,7 @@ export class SyncController {
         details: `Cancelled sync job: ${jobId}`,
         metadata: { jobId },
         success: true,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
@@ -301,8 +340,8 @@ export class SyncController {
         message: `동기화 작업 ${jobId}가 취소되었습니다.`,
         data: {
           jobId,
-          status: 'cancelled'
-        }
+          status: 'cancelled',
+        },
       });
     } catch (error) {
       logger.error('Cancel sync job error:', error);
@@ -314,13 +353,17 @@ export class SyncController {
    * Sync prices
    * POST /api/v1/sync/prices
    */
-  async syncPrices(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async syncPrices(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { vendor, skus } = req.body;
 
       const result = await this.syncService.syncPrices({
         vendor,
-        skus
+        skus,
       });
 
       // Log activity
@@ -330,13 +373,13 @@ export class SyncController {
         details: `Synced prices for ${result.successCount} products`,
         metadata: result,
         success: result.success,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
         success: true,
         message: '가격 동기화가 완료되었습니다.',
-        data: result
+        data: result,
       });
     } catch (error) {
       logger.error('Sync prices error:', error);
@@ -348,13 +391,17 @@ export class SyncController {
    * Sync inventory
    * POST /api/v1/sync/inventory
    */
-  async syncInventory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async syncInventory(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { vendor, skus } = req.body;
 
       const result = await this.syncService.syncInventory({
         vendor,
-        skus
+        skus,
       });
 
       // Log activity
@@ -364,13 +411,13 @@ export class SyncController {
         details: `Synced inventory for ${result.successCount} products`,
         metadata: result,
         success: result.success,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
         success: true,
         message: '재고 동기화가 완료되었습니다.',
-        data: result
+        data: result,
       });
     } catch (error) {
       logger.error('Sync inventory error:', error);

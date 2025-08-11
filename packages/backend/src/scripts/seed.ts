@@ -56,7 +56,7 @@ class DataSeeder {
 
   private async clearExistingData(): Promise<void> {
     logger.warn('Clearing existing data...');
-    
+
     const result = await ProductMapping.deleteMany({});
     logger.info(`Deleted ${result.deletedCount} product mappings`);
   }
@@ -77,7 +77,7 @@ class DataSeeder {
 
     if (!this.options.dryRun) {
       const defaultRate = 0.00075; // 1 KRW = 0.00075 USD (approximate)
-      
+
       await ExchangeRate.create({
         baseCurrency: 'KRW',
         targetCurrency: 'USD',
@@ -116,7 +116,7 @@ class DataSeeder {
     } else {
       logger.info('Dry run mode - mappings not saved');
       // 샘플 출력
-      mappings.slice(0, 5).forEach(mapping => {
+      mappings.slice(0, 5).forEach((mapping) => {
         logger.info('Sample mapping:', mapping);
       });
     }
@@ -132,7 +132,7 @@ class DataSeeder {
 
     const productMap = new Map<string, any>();
 
-    products.forEach(product => {
+    products.forEach((product) => {
       product.variants.edges.forEach((edge: any) => {
         const variant = edge.node;
         if (variant.sku) {
@@ -143,8 +143,11 @@ class DataSeeder {
             sku: variant.sku,
             price: variant.price,
             inventoryItemId: variant.inventoryItem.id,
-            locationId: variant.inventoryItem.inventoryLevels.edges[0]?.node.location.id,
-            available: variant.inventoryItem.inventoryLevels.edges[0]?.node.available || 0,
+            locationId:
+              variant.inventoryItem.inventoryLevels.edges[0]?.node.location.id,
+            available:
+              variant.inventoryItem.inventoryLevels.edges[0]?.node.available ||
+              0,
           });
         }
       });
@@ -172,12 +175,12 @@ class DataSeeder {
           });
         }
       }
-      
+
       totalFetched += batch.length;
       logger.info(`Fetched ${totalFetched} products from Naver...`);
-      
+
       // Rate limit 준수
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
     return productMap;
@@ -191,14 +194,16 @@ class DataSeeder {
 
     naverProducts.forEach((naverProduct, sku) => {
       const shopifyProduct = shopifyProducts.get(sku);
-      
+
       if (shopifyProduct) {
         mappings.push({
           sku,
           naverProductId: naverProduct.productId,
           shopifyProductId: this.extractNumericId(shopifyProduct.productId),
           shopifyVariantId: this.extractNumericId(shopifyProduct.variantId),
-          shopifyInventoryItemId: this.extractNumericId(shopifyProduct.inventoryItemId),
+          shopifyInventoryItemId: this.extractNumericId(
+            shopifyProduct.inventoryItemId
+          ),
           shopifyLocationId: this.extractNumericId(shopifyProduct.locationId),
           productName: naverProduct.name,
           vendor: this.options.vendor,
@@ -240,7 +245,7 @@ class DataSeeder {
         if (error.code === 11000) {
           // 중복 키 에러 처리
           logger.warn('Some mappings already exist, updating...');
-          
+
           for (const mapping of batch) {
             await ProductMapping.findOneAndUpdate(
               { sku: mapping.sku },
@@ -262,8 +267,8 @@ class DataSeeder {
     naverProducts: Map<string, any>,
     mappings: any[]
   ): void {
-    const mappedSkus = new Set(mappings.map(m => m.sku));
-    
+    const mappedSkus = new Set(mappings.map((m) => m.sku));
+
     // Shopify에만 있는 상품
     const shopifyOnly: string[] = [];
     shopifyProducts.forEach((product, sku) => {
@@ -282,7 +287,7 @@ class DataSeeder {
 
     if (shopifyOnly.length > 0) {
       logger.warn(`Found ${shopifyOnly.length} products only in Shopify:`);
-      shopifyOnly.slice(0, 10).forEach(sku => {
+      shopifyOnly.slice(0, 10).forEach((sku) => {
         logger.warn(`  - ${sku}: ${shopifyProducts.get(sku).productTitle}`);
       });
       if (shopifyOnly.length > 10) {
@@ -292,7 +297,7 @@ class DataSeeder {
 
     if (naverOnly.length > 0) {
       logger.warn(`Found ${naverOnly.length} products only in Naver:`);
-      naverOnly.slice(0, 10).forEach(sku => {
+      naverOnly.slice(0, 10).forEach((sku) => {
         logger.warn(`  - ${sku}: ${naverProducts.get(sku).name}`);
       });
       if (naverOnly.length > 10) {
@@ -324,10 +329,10 @@ async function main() {
 
   try {
     await connectDatabase();
-    
+
     const seeder = new DataSeeder(options);
     await seeder.seed();
-    
+
     logger.info('Seeding completed successfully');
   } catch (error) {
     logger.error('Seeding failed:', error);
@@ -360,4 +365,3 @@ Examples:
 }
 
 main();
-

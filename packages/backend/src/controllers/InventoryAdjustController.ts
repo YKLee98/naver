@@ -30,7 +30,11 @@ export class InventoryAdjustController {
   /**
    * 재고 조정
    */
-  async adjustInventory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async adjustInventory(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const adjustData = req.body as AdjustInventoryRequest;
       const userId = (req as any).user?.id;
@@ -42,23 +46,35 @@ export class InventoryAdjustController {
       if (!mapping) {
         res.status(404).json({
           success: false,
-          error: '해당 SKU의 매핑 정보를 찾을 수 없습니다.'
+          error: '해당 SKU의 매핑 정보를 찾을 수 없습니다.',
         });
         return;
       }
 
       const results: any = {
         naver: null,
-        shopify: null
+        shopify: null,
       };
 
       // 네이버 재고 조정
-      if ((adjustData.platform === 'naver' || adjustData.platform === 'both') && adjustData.naverQuantity !== undefined) {
+      if (
+        (adjustData.platform === 'naver' || adjustData.platform === 'both') &&
+        adjustData.naverQuantity !== undefined
+      ) {
         try {
-          const currentStock = await this.naverProductService.getProductStock(mapping.naverProductId);
-          const newQuantity = this.calculateNewQuantity(currentStock, adjustData.naverQuantity, adjustData.adjustType);
+          const currentStock = await this.naverProductService.getProductStock(
+            mapping.naverProductId
+          );
+          const newQuantity = this.calculateNewQuantity(
+            currentStock,
+            adjustData.naverQuantity,
+            adjustData.adjustType
+          );
 
-          await this.naverProductService.updateProductStock(mapping.naverProductId, newQuantity);
+          await this.naverProductService.updateProductStock(
+            mapping.naverProductId,
+            newQuantity
+          );
 
           // 트랜잭션 기록
           await InventoryTransaction.create({
@@ -70,38 +86,47 @@ export class InventoryAdjustController {
             adjustmentQuantity: adjustData.naverQuantity,
             reason: adjustData.reason,
             userId,
-            productId: mapping.naverProductId
+            productId: mapping.naverProductId,
           });
 
           results.naver = {
             success: true,
             previousQuantity: currentStock,
             newQuantity,
-            adjustmentQuantity: adjustData.naverQuantity
+            adjustmentQuantity: adjustData.naverQuantity,
           };
 
-          logger.info(`Naver inventory adjusted for SKU ${adjustData.sku}: ${currentStock} -> ${newQuantity}`);
+          logger.info(
+            `Naver inventory adjusted for SKU ${adjustData.sku}: ${currentStock} -> ${newQuantity}`
+          );
         } catch (error) {
-          logger.error(`Failed to adjust Naver inventory for SKU ${adjustData.sku}:`, error);
+          logger.error(
+            `Failed to adjust Naver inventory for SKU ${adjustData.sku}:`,
+            error
+          );
           results.naver = {
             success: false,
-            error: error instanceof Error ? error.message : 'Unknown error'
+            error: error instanceof Error ? error.message : 'Unknown error',
           };
         }
       }
 
       // Shopify 재고 조정
-      if ((adjustData.platform === 'shopify' || adjustData.platform === 'both') && adjustData.shopifyQuantity !== undefined) {
+      if (
+        (adjustData.platform === 'shopify' || adjustData.platform === 'both') &&
+        adjustData.shopifyQuantity !== undefined
+      ) {
         try {
           // 현재 재고 조회
-          const currentInventory = await this.shopifyInventoryService.getInventoryLevel(
-            mapping.shopifyInventoryItemId,
-            mapping.shopifyLocationId
-          );
+          const currentInventory =
+            await this.shopifyInventoryService.getInventoryLevel(
+              mapping.shopifyInventoryItemId,
+              mapping.shopifyLocationId
+            );
 
           const newQuantity = this.calculateNewQuantity(
-            currentInventory.available, 
-            adjustData.shopifyQuantity, 
+            currentInventory.available,
+            adjustData.shopifyQuantity,
             adjustData.adjustType
           );
 
@@ -122,36 +147,43 @@ export class InventoryAdjustController {
             adjustmentQuantity: adjustData.shopifyQuantity,
             reason: adjustData.reason,
             userId,
-            productId: mapping.shopifyProductId
+            productId: mapping.shopifyProductId,
           });
 
           results.shopify = {
             success: true,
             previousQuantity: currentInventory.available,
             newQuantity,
-            adjustmentQuantity: adjustData.shopifyQuantity
+            adjustmentQuantity: adjustData.shopifyQuantity,
           };
 
-          logger.info(`Shopify inventory adjusted for SKU ${adjustData.sku}: ${currentInventory.available} -> ${newQuantity}`);
+          logger.info(
+            `Shopify inventory adjusted for SKU ${adjustData.sku}: ${currentInventory.available} -> ${newQuantity}`
+          );
         } catch (error) {
-          logger.error(`Failed to adjust Shopify inventory for SKU ${adjustData.sku}:`, error);
+          logger.error(
+            `Failed to adjust Shopify inventory for SKU ${adjustData.sku}:`,
+            error
+          );
           results.shopify = {
             success: false,
-            error: error instanceof Error ? error.message : 'Unknown error'
+            error: error instanceof Error ? error.message : 'Unknown error',
           };
         }
       }
 
       // 응답 처리
-      const allSuccess = (!results.naver || results.naver.success) && 
-                        (!results.shopify || results.shopify.success);
+      const allSuccess =
+        (!results.naver || results.naver.success) &&
+        (!results.shopify || results.shopify.success);
 
       res.status(allSuccess ? 200 : 207).json({
         success: allSuccess,
-        message: allSuccess ? '재고 조정이 완료되었습니다.' : '일부 플랫폼에서 오류가 발생했습니다.',
-        data: results
+        message: allSuccess
+          ? '재고 조정이 완료되었습니다.'
+          : '일부 플랫폼에서 오류가 발생했습니다.',
+        data: results,
       });
-
     } catch (error) {
       logger.error('Failed to adjust inventory:', error);
       next(error);
@@ -161,7 +193,11 @@ export class InventoryAdjustController {
   /**
    * 재고 조정 이력 조회
    */
-  async getAdjustmentHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getAdjustmentHistory(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { sku } = req.params;
       const { page = 1, limit = 20 } = req.query;
@@ -182,11 +218,10 @@ export class InventoryAdjustController {
             page: Number(page),
             limit: Number(limit),
             total,
-            totalPages: Math.ceil(total / Number(limit))
-          }
-        }
+            totalPages: Math.ceil(total / Number(limit)),
+          },
+        },
       });
-
     } catch (error) {
       logger.error('Failed to get adjustment history:', error);
       next(error);
@@ -196,7 +231,11 @@ export class InventoryAdjustController {
   /**
    * 새 수량 계산
    */
-  private calculateNewQuantity(current: number, adjustment: number, type: string): number {
+  private calculateNewQuantity(
+    current: number,
+    adjustment: number,
+    type: string
+  ): number {
     switch (type) {
       case 'set':
         return adjustment;

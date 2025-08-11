@@ -268,6 +268,9 @@ importers:
       '@types/async-retry':
         specifier: ^1.4.9
         version: 1.4.9
+      '@types/bcrypt':
+        specifier: ^6.0.0
+        version: 6.0.0
       '@types/bcryptjs':
         specifier: ^2.4.6
         version: 2.4.6
@@ -280,6 +283,9 @@ importers:
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.23
+      '@types/hpp':
+        specifier: ^0.2.6
+        version: 0.2.6
       '@types/jsonwebtoken':
         specifier: ^9.0.5
         version: 9.0.10
@@ -2131,6 +2137,9 @@ packages:
   '@types/babel__traverse@7.20.7':
     resolution: {integrity: sha512-dkO5fhS7+/oos4ciWxyEyjWe48zmG6wbCheo/G2ZnHx4fs3EU6YC6UM8rk56gAjNJ9P3MTH2jo5jb92/K6wbng==}
 
+  '@types/bcrypt@6.0.0':
+    resolution: {integrity: sha512-/oJGukuH3D2+D+3H4JWLaAsJ/ji86dhRidzZ/Od7H/i8g+aCmvkeCc6Ni/f9uxGLSQVCRZkX2/lqEFG2BvWtlQ==}
+
   '@types/bcryptjs@2.4.6':
     resolution: {integrity: sha512-9xlo6R2qDs5uixm0bcIqCeMCE6HiQsIyel9KQySStiyqNl2tnj2mP3DX1Nf56MD6KMenNNlBBsy3LJ7gUEQPXQ==}
 
@@ -2196,6 +2205,9 @@ packages:
     resolution: {integrity: sha512-PQTyIulDkIDro8P+IHbKCsw7U2xxBYflVzW/FgWdCAePD9xGSidgA76/GeJ6lBKoblyhf9pBY763gbrN+1dI8g==}
     peerDependencies:
       '@types/react': '*'
+
+  '@types/hpp@0.2.6':
+    resolution: {integrity: sha512-6gn1RuHA1/XFCVCqCkSV+AWy07YwtGg4re4SHhLMoiARTg9XlrbYMtVR+Uvws0VlERXzzcA+1UYvxEV6O+sgPg==}
 
   '@types/http-errors@2.0.5':
     resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
@@ -9269,6 +9281,10 @@ snapshots:
     dependencies:
       '@babel/types': 7.28.2
 
+  '@types/bcrypt@6.0.0':
+    dependencies:
+      '@types/node': 20.19.9
+
   '@types/bcryptjs@2.4.6': {}
 
   '@types/bcryptjs@3.0.0':
@@ -9343,6 +9359,10 @@ snapshots:
     dependencies:
       '@types/react': 18.3.23
       hoist-non-react-statics: 3.3.2
+
+  '@types/hpp@0.2.6':
+    dependencies:
+      '@types/express': 4.17.23
 
   '@types/http-errors@2.0.5': {}
 

@@ -18,37 +18,37 @@ const SyncActivitySchema = new Schema<ISyncActivity>(
     type: {
       type: String,
       required: true,
-      index: true
+      index: true,
     },
     source: {
       type: String,
-      required: true
+      required: true,
     },
     target: {
       type: String,
-      required: true
+      required: true,
     },
     status: {
       type: String,
       required: true,
       enum: ['pending', 'processing', 'completed', 'failed', 'queued'],
       default: 'pending',
-      index: true
+      index: true,
     },
     details: {
       type: Map,
       of: Schema.Types.Mixed,
-      default: {}
+      default: {},
     },
     metadata: {
       type: Map,
-      of: Schema.Types.Mixed
+      of: Schema.Types.Mixed,
     },
-    error: String
+    error: String,
   },
   {
     timestamps: true,
-    collection: 'sync_activities'
+    collection: 'sync_activities',
   }
 );
 
@@ -59,4 +59,7 @@ SyncActivitySchema.index({ source: 1, target: 1, createdAt: -1 });
 // TTL 인덱스 - 30일 후 자동 삭제
 SyncActivitySchema.index({ createdAt: 1 }, { expireAfterSeconds: 2592000 });
 
-export const SyncActivity = model<ISyncActivity>('SyncActivity', SyncActivitySchema);
+export const SyncActivity = model<ISyncActivity>(
+  'SyncActivity',
+  SyncActivitySchema
+);

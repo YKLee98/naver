@@ -49,26 +49,26 @@ const SyncHistorySchema = new Schema<ISyncHistory>(
       type: String,
       required: true,
       unique: true,
-      index: true
+      index: true,
     },
     type: {
       type: String,
       required: true,
       enum: ['full', 'partial', 'inventory', 'price', 'manual'],
-      index: true
+      index: true,
     },
     status: {
       type: String,
       required: true,
       enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
       default: 'pending',
-      index: true
+      index: true,
     },
     source: {
       type: String,
       required: true,
       enum: ['scheduled', 'manual', 'webhook', 'api'],
-      default: 'manual'
+      default: 'manual',
     },
     statistics: {
       totalItems: { type: Number, default: 0 },
@@ -77,35 +77,39 @@ const SyncHistorySchema = new Schema<ISyncHistory>(
       failedCount: { type: Number, default: 0 },
       skippedCount: { type: Number, default: 0 },
       createdCount: { type: Number, default: 0 },
-      updatedCount: { type: Number, default: 0 }
+      updatedCount: { type: Number, default: 0 },
     },
     performance: {
       startTime: { type: Date, required: true },
       endTime: Date,
       duration: Number,
-      itemsPerSecond: Number
+      itemsPerSecond: Number,
     },
-    errors: [{
-      timestamp: { type: Date, default: Date.now },
-      entity: String,
-      error: String,
-      details: Schema.Types.Mixed
-    }],
-    warnings: [{
-      timestamp: { type: Date, default: Date.now },
-      entity: String,
-      warning: String,
-      details: Schema.Types.Mixed
-    }],
+    errors: [
+      {
+        timestamp: { type: Date, default: Date.now },
+        entity: String,
+        error: String,
+        details: Schema.Types.Mixed,
+      },
+    ],
+    warnings: [
+      {
+        timestamp: { type: Date, default: Date.now },
+        entity: String,
+        warning: String,
+        details: Schema.Types.Mixed,
+      },
+    ],
     metadata: {
       triggerUser: String,
       triggerReason: String,
       options: Schema.Types.Mixed,
-      results: Schema.Types.Mixed
-    }
+      results: Schema.Types.Mixed,
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 
@@ -118,23 +122,32 @@ SyncHistorySchema.index({ source: 1, createdAt: -1 });
 SyncHistorySchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
 
 // Virtual fields
-SyncHistorySchema.virtual('successRate').get(function() {
+SyncHistorySchema.virtual('successRate').get(function () {
   if (this.statistics.processedItems === 0) return 0;
-  return Math.round((this.statistics.successCount / this.statistics.processedItems) * 100);
+  return Math.round(
+    (this.statistics.successCount / this.statistics.processedItems) * 100
+  );
 });
 
 // Pre-save hook to calculate duration
-SyncHistorySchema.pre('save', function(next) {
+SyncHistorySchema.pre('save', function (next) {
   if (this.performance.startTime && this.performance.endTime) {
-    this.performance.duration = this.performance.endTime.getTime() - this.performance.startTime.getTime();
-    
+    this.performance.duration =
+      this.performance.endTime.getTime() - this.performance.startTime.getTime();
+
     if (this.statistics.processedItems > 0 && this.performance.duration > 0) {
-      this.performance.itemsPerSecond = Math.round(
-        (this.statistics.processedItems / (this.performance.duration / 1000)) * 100
-      ) / 100;
+      this.performance.itemsPerSecond =
+        Math.round(
+          (this.statistics.processedItems /
+            (this.performance.duration / 1000)) *
+            100
+        ) / 100;
     }
   }
   next();
 });
 
-export const SyncHistory = model<ISyncHistory>('SyncHistory', SyncHistorySchema);
+export const SyncHistory = model<ISyncHistory>(
+  'SyncHistory',
+  SyncHistorySchema
+);

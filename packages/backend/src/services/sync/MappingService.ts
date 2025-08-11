@@ -50,7 +50,10 @@ export class MappingService {
       // 유효성 검사
       const validation = await this.validateMappingData(data);
       if (!validation.isValid) {
-        throw new AppError(`Invalid mapping data: ${validation.errors.join(', ')}`, 400);
+        throw new AppError(
+          `Invalid mapping data: ${validation.errors.join(', ')}`,
+          400
+        );
       }
 
       // 매핑 생성
@@ -58,18 +61,19 @@ export class MappingService {
         sku: data.sku,
         naverProductId: data.naverProductId,
         shopifyProductId: data.shopifyProductId,
-        shopifyVariantId: data.shopifyVariantId || validation.shopifyProduct?.variants?.[0]?.id,
+        shopifyVariantId:
+          data.shopifyVariantId || validation.shopifyProduct?.variants?.[0]?.id,
         productName: validation.naverProduct?.name || '',
         vendor: this.extractVendor(data.sku),
         priceMargin: data.priceMargin || 15,
         isActive: data.isActive !== false,
         status: 'ACTIVE',
-        lastSyncAt: new Date()
+        lastSyncAt: new Date(),
       });
 
       await mapping.save();
       logger.info(`Mapping created: ${data.sku}`);
-      
+
       return mapping;
     } catch (error) {
       logger.error('Error creating mapping:', error);
@@ -80,7 +84,10 @@ export class MappingService {
   /**
    * 매핑 업데이트
    */
-  async updateMapping(id: string, updateData: Partial<MappingData>): Promise<ProductMapping> {
+  async updateMapping(
+    id: string,
+    updateData: Partial<MappingData>
+  ): Promise<ProductMapping> {
     const mapping = await ProductMapping.findById(id);
     if (!mapping) {
       throw new AppError('Mapping not found', 404);
@@ -90,20 +97,23 @@ export class MappingService {
     if (updateData.naverProductId || updateData.shopifyProductId) {
       const validation = await this.validateMappingData({
         ...mapping.toObject(),
-        ...updateData
+        ...updateData,
       });
-      
+
       if (!validation.isValid) {
-        throw new AppError(`Invalid update data: ${validation.errors.join(', ')}`, 400);
+        throw new AppError(
+          `Invalid update data: ${validation.errors.join(', ')}`,
+          400
+        );
       }
     }
 
     Object.assign(mapping, updateData);
     mapping.updatedAt = new Date();
-    
+
     await mapping.save();
     logger.info(`Mapping updated: ${mapping.sku}`);
-    
+
     return mapping;
   }
 
@@ -121,7 +131,9 @@ export class MappingService {
   /**
    * 매핑 데이터 유효성 검사
    */
-  private async validateMappingData(data: MappingData): Promise<ValidationResult> {
+  private async validateMappingData(
+    data: MappingData
+  ): Promise<ValidationResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
     let naverProduct = null;
@@ -129,7 +141,9 @@ export class MappingService {
 
     try {
       // 네이버 상품 확인
-      naverProduct = await this.naverProductService.getProduct(data.naverProductId);
+      naverProduct = await this.naverProductService.getProduct(
+        data.naverProductId
+      );
       if (!naverProduct) {
         errors.push('Naver product not found');
       } else if (naverProduct.saleStatus !== 'SALE') {
@@ -141,7 +155,9 @@ export class MappingService {
 
     try {
       // Shopify 상품 확인
-      shopifyProduct = await this.shopifyGraphQLService.getProduct(data.shopifyProductId);
+      shopifyProduct = await this.shopifyGraphQLService.getProduct(
+        data.shopifyProductId
+      );
       if (!shopifyProduct) {
         errors.push('Shopify product not found');
       } else if (shopifyProduct.status !== 'ACTIVE') {
@@ -156,7 +172,7 @@ export class MappingService {
       errors,
       warnings,
       naverProduct,
-      shopifyProduct
+      shopifyProduct,
     };
   }
 
@@ -169,7 +185,7 @@ export class MappingService {
       return {
         isValid: false,
         errors: ['Mapping not found'],
-        warnings: []
+        warnings: [],
       };
     }
 
@@ -177,7 +193,7 @@ export class MappingService {
       sku: mapping.sku,
       naverProductId: mapping.naverProductId,
       shopifyProductId: mapping.shopifyProductId,
-      shopifyVariantId: mapping.shopifyVariantId
+      shopifyVariantId: mapping.shopifyVariantId,
     });
   }
 
@@ -214,37 +230,39 @@ export class MappingService {
   /**
    * 자동 매핑 탐색
    */
-  async autoDiscoverMappings(options: AutoDiscoverOptions = {}): Promise<any[]> {
+  async autoDiscoverMappings(
+    options: AutoDiscoverOptions = {}
+  ): Promise<any[]> {
     const {
       matchBySku = true,
       matchByName = false,
       nameSimilarity = 80,
-      priceDifference = 20
+      priceDifference = 20,
     } = options;
 
     const discoveries = [];
 
     try {
       // 네이버 상품 목록 조회
-      const naverProducts = await this.naverProductService.listProducts({ 
+      const naverProducts = await this.naverProductService.listProducts({
         limit: 100,
-        saleStatus: 'SALE' 
+        saleStatus: 'SALE',
       });
 
       // Shopify 상품 목록 조회
-      const shopifyProducts = await this.shopifyGraphQLService.listProducts({ 
+      const shopifyProducts = await this.shopifyGraphQLService.listProducts({
         limit: 100,
-        status: 'ACTIVE' 
+        status: 'ACTIVE',
       });
 
       // 이미 매핑된 SKU 조회
       const existingMappings = await ProductMapping.find({}, 'sku').lean();
-      const mappedSkus = new Set(existingMappings.map(m => m.sku));
+      const mappedSkus = new Set(existingMappings.map((m) => m.sku));
 
       for (const naverProduct of naverProducts.items) {
         // SKU 추출 (네이버 상품명이나 옵션에서)
         const extractedSku = this.extractSku(naverProduct);
-        
+
         if (!extractedSku || mappedSkus.has(extractedSku)) {
           continue;
         }
@@ -253,16 +271,17 @@ export class MappingService {
 
         // SKU 매칭
         if (matchBySku && extractedSku) {
-          const skuMatches = shopifyProducts.products.filter(sp => 
-            sp.title.includes(extractedSku) || 
-            sp.variants.some(v => v.sku === extractedSku)
+          const skuMatches = shopifyProducts.products.filter(
+            (sp) =>
+              sp.title.includes(extractedSku) ||
+              sp.variants.some((v) => v.sku === extractedSku)
           );
           matches.push(...skuMatches);
         }
 
         // 상품명 유사도 매칭
         if (matchByName && matches.length === 0) {
-          const nameMatches = shopifyProducts.products.filter(sp => {
+          const nameMatches = shopifyProducts.products.filter((sp) => {
             const sim = similarity.compareTwoStrings(
               naverProduct.name.toLowerCase(),
               sp.title.toLowerCase()
@@ -274,10 +293,12 @@ export class MappingService {
 
         // 가격 차이 확인
         if (priceDifference && matches.length > 0) {
-          matches = matches.filter(sp => {
+          matches = matches.filter((sp) => {
             const shopifyPrice = parseFloat(sp.variants[0].price);
             const naverPrice = naverProduct.salePrice;
-            const diff = Math.abs((shopifyPrice - naverPrice) / naverPrice * 100);
+            const diff = Math.abs(
+              ((shopifyPrice - naverPrice) / naverPrice) * 100
+            );
             return diff <= priceDifference;
           });
         }
@@ -288,21 +309,26 @@ export class MappingService {
             naverProduct: {
               id: naverProduct.id,
               name: naverProduct.name,
-              price: naverProduct.salePrice
+              price: naverProduct.salePrice,
             },
-            shopifyMatches: matches.map(m => ({
+            shopifyMatches: matches.map((m) => ({
               id: m.id,
               title: m.title,
               price: m.variants[0].price,
-              similarity: matchByName ? 
-                similarity.compareTwoStrings(naverProduct.name.toLowerCase(), m.title.toLowerCase()) * 100 : 
-                100
-            }))
+              similarity: matchByName
+                ? similarity.compareTwoStrings(
+                    naverProduct.name.toLowerCase(),
+                    m.title.toLowerCase()
+                  ) * 100
+                : 100,
+            })),
           });
         }
       }
 
-      logger.info(`Auto-discovery found ${discoveries.length} potential mappings`);
+      logger.info(
+        `Auto-discovery found ${discoveries.length} potential mappings`
+      );
       return discoveries;
     } catch (error) {
       logger.error('Error in auto-discovery:', error);
@@ -317,7 +343,7 @@ export class MappingService {
     // 상품명에서 SKU 패턴 찾기 (예: ALBUM-001, MD-055 등)
     const skuPattern = /[A-Z]+-\d+/;
     const match = product.name.match(skuPattern);
-    
+
     if (match) {
       return match[0];
     }

@@ -24,43 +24,40 @@ const SessionSchema = new Schema<ISession>(
     userId: {
       type: String,
       required: true,
-      index: true
+      index: true,
     },
     token: {
       type: String,
       required: true,
-      unique: true
+      unique: true,
     },
     refreshToken: String,
     deviceInfo: {
       userAgent: String,
       ip: String,
-      device: String
+      device: String,
     },
     isActive: {
       type: Boolean,
-      default: true
+      default: true,
     },
     lastActivity: {
       type: Date,
-      default: Date.now
+      default: Date.now,
     },
     expiresAt: {
       type: Date,
-      required: true
+      required: true,
       // Removed index: true to avoid duplicate
-    }
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 
 // Create TTL index using schema.index() only
-SessionSchema.index(
-  { expiresAt: 1 },
-  { expireAfterSeconds: 0 }
-);
+SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // Additional indexes
 SessionSchema.index({ userId: 1, isActive: 1 });

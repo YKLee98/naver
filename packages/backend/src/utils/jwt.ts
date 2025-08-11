@@ -27,10 +27,10 @@ export function generateToken(
 ): string {
   try {
     const defaultOptions: jwt.SignOptions = {
-      expiresIn: config.jwt.expiresIn,
+      expiresIn: config.jwt.expiresIn as string | number,
       issuer: 'hallyu-fomaholic',
       audience: 'hallyu-fomaholic-api',
-      ...options
+      ...options,
     };
 
     return jwt.sign(payload, config.jwt.secret, defaultOptions);
@@ -47,7 +47,7 @@ export function verifyToken(token: string): JWTPayload {
   try {
     const decoded = jwt.verify(token, config.jwt.secret, {
       issuer: 'hallyu-fomaholic',
-      audience: 'hallyu-fomaholic-api'
+      audience: 'hallyu-fomaholic-api',
     }) as JWTPayload;
 
     return decoded;
@@ -76,7 +76,7 @@ export function decodeToken(token: string): JWTPayload | null {
 export function isTokenExpired(token: string): boolean {
   try {
     const decoded = jwt.decode(token) as any;
-    
+
     if (!decoded || !decoded.exp) {
       return true;
     }
@@ -95,7 +95,7 @@ export function isTokenExpired(token: string): boolean {
 export function getTokenExpiration(token: string): Date | null {
   try {
     const decoded = jwt.decode(token) as any;
-    
+
     if (!decoded || !decoded.exp) {
       return null;
     }
@@ -112,25 +112,30 @@ export function getTokenExpiration(token: string): Date | null {
  */
 export function generateAccessToken(payload: Omit<JWTPayload, 'type'>): string {
   return generateToken(
-    { ...payload, type: 'access' },
-    { expiresIn: config.jwt.expiresIn }
+    { ...payload, type: 'access' } as JWTPayload,
+    { expiresIn: config.jwt.expiresIn as string | number }
   );
 }
 
 /**
  * Generate refresh token
  */
-export function generateRefreshToken(payload: Omit<JWTPayload, 'type'>): string {
+export function generateRefreshToken(
+  payload: Omit<JWTPayload, 'type'>
+): string {
   return generateToken(
-    { ...payload, type: 'refresh' },
-    { expiresIn: config.jwt.refreshExpiresIn }
+    { ...payload, type: 'refresh' } as JWTPayload,
+    { expiresIn: config.jwt.refreshExpiresIn as string | number }
   );
 }
 
 /**
  * Validate token type
  */
-export function validateTokenType(token: string, expectedType: 'access' | 'refresh'): boolean {
+export function validateTokenType(
+  token: string,
+  expectedType: 'access' | 'refresh'
+): boolean {
   try {
     const decoded = verifyToken(token);
     return decoded.type === expectedType;
@@ -147,5 +152,5 @@ export default {
   getTokenExpiration,
   generateAccessToken,
   generateRefreshToken,
-  validateTokenType
+  validateTokenType,
 };

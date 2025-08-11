@@ -7,28 +7,31 @@ import { logger } from '../../utils/logger';
  */
 export function registerSyncEvents(io: Server, socket: Socket): void {
   // Sync start event
-  socket.on('sync:start', async (data: { type: string; sku?: string }, callback) => {
-    try {
-      logger.info(`Sync start requested by ${socket.id}`, data);
-      
-      // Broadcast to all clients that sync has started
-      io.emit('sync:started', {
-        type: data.type,
-        sku: data.sku,
-        startedBy: socket.id,
-        timestamp: Date.now()
-      });
+  socket.on(
+    'sync:start',
+    async (data: { type: string; sku?: string }, callback) => {
+      try {
+        logger.info(`Sync start requested by ${socket.id}`, data);
 
-      if (typeof callback === 'function') {
-        callback({ success: true });
-      }
-    } catch (error: any) {
-      logger.error('Error handling sync:start', error);
-      if (typeof callback === 'function') {
-        callback({ success: false, error: error.message });
+        // Broadcast to all clients that sync has started
+        io.emit('sync:started', {
+          type: data.type,
+          sku: data.sku,
+          startedBy: socket.id,
+          timestamp: Date.now(),
+        });
+
+        if (typeof callback === 'function') {
+          callback({ success: true });
+        }
+      } catch (error: any) {
+        logger.error('Error handling sync:start', error);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: error.message });
+        }
       }
     }
-  });
+  );
 
   // Sync status request
   socket.on('sync:status', async (callback) => {
@@ -38,7 +41,7 @@ export function registerSyncEvents(io: Server, socket: Socket): void {
         isRunning: false,
         currentJob: null,
         lastSync: new Date().toISOString(),
-        queue: []
+        queue: [],
       };
 
       if (typeof callback === 'function') {
@@ -56,12 +59,12 @@ export function registerSyncEvents(io: Server, socket: Socket): void {
   socket.on('sync:cancel', async (data: { jobId: string }, callback) => {
     try {
       logger.info(`Sync cancel requested for job ${data.jobId}`);
-      
+
       // Broadcast cancellation
       io.emit('sync:cancelled', {
         jobId: data.jobId,
         cancelledBy: socket.id,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
 
       if (typeof callback === 'function') {
@@ -80,7 +83,9 @@ export function registerSyncEvents(io: Server, socket: Socket): void {
     try {
       const room = `sync:sku:${data.sku}`;
       await socket.join(room);
-      logger.info(`Socket ${socket.id} subscribed to sync updates for SKU ${data.sku}`);
+      logger.info(
+        `Socket ${socket.id} subscribed to sync updates for SKU ${data.sku}`
+      );
 
       if (typeof callback === 'function') {
         callback({ success: true, room });
@@ -98,7 +103,9 @@ export function registerSyncEvents(io: Server, socket: Socket): void {
     try {
       const room = `sync:sku:${data.sku}`;
       await socket.leave(room);
-      logger.info(`Socket ${socket.id} unsubscribed from sync updates for SKU ${data.sku}`);
+      logger.info(
+        `Socket ${socket.id} unsubscribed from sync updates for SKU ${data.sku}`
+      );
 
       if (typeof callback === 'function') {
         callback({ success: true });
@@ -130,7 +137,7 @@ export function broadcastSyncProgress(
   const event = {
     ...data,
     timestamp: Date.now(),
-    percentage: Math.round((data.progress / data.total) * 100)
+    percentage: Math.round((data.progress / data.total) * 100),
   };
 
   // Emit to all clients
@@ -161,7 +168,7 @@ export function broadcastSyncComplete(
 ): void {
   const event = {
     ...data,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 
   // Emit to all clients
@@ -190,7 +197,7 @@ export function broadcastSyncError(
 ): void {
   const event = {
     ...data,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 
   // Emit error to all clients
@@ -218,7 +225,7 @@ export function notifySyncStatusChange(
 ): void {
   socket.emit('sync:status:changed', {
     ...status,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 }
 
@@ -241,17 +248,17 @@ export function broadcastBatchSyncUpdate(
     ...data,
     timestamp: Date.now(),
     batchProgress: Math.round((data.itemsProcessed / data.itemsInBatch) * 100),
-    overallProgress: Math.round((data.batchNumber / data.totalBatches) * 100)
+    overallProgress: Math.round((data.batchNumber / data.totalBatches) * 100),
   };
 
   io.emit('sync:batch:update', event);
 
   // Notify SKU-specific rooms if applicable
   if (data.skus && data.skus.length > 0) {
-    data.skus.forEach(sku => {
+    data.skus.forEach((sku) => {
       io.to(`sync:sku:${sku}`).emit('sync:sku:batch:update', {
         ...event,
-        sku
+        sku,
       });
     });
   }

@@ -16,9 +16,7 @@ export function createProductSearchRouter(redis: Redis): Router {
   // 네이버 상품 검색
   router.get(
     '/naver/search',
-    [
-      query('sku').notEmpty().withMessage('SKU는 필수입니다'),
-    ],
+    [query('sku').notEmpty().withMessage('SKU는 필수입니다')],
     validateRequest,
     productSearchController.searchNaverProducts.bind(productSearchController)
   );
@@ -26,9 +24,7 @@ export function createProductSearchRouter(redis: Redis): Router {
   // Shopify 상품 검색
   router.get(
     '/shopify/search',
-    [
-      query('sku').notEmpty().withMessage('SKU는 필수입니다'),
-    ],
+    [query('sku').notEmpty().withMessage('SKU는 필수입니다')],
     validateRequest,
     productSearchController.searchShopifyProducts.bind(productSearchController)
   );

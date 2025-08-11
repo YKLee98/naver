@@ -19,24 +19,30 @@ export class ProductSearchController {
   /**
    * 네이버 상품 검색
    */
-  async searchNaverProducts(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async searchNaverProducts(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { sku } = req.query;
       logger.info(`Searching Naver products with SKU: ${sku}`);
 
       // 네이버 API 호출
-      const products = await this.naverProductService.searchProductsBySku(sku as string);
+      const products = await this.naverProductService.searchProductsBySku(
+        sku as string
+      );
 
       res.json({
         success: true,
-        data: products.map(product => ({
+        data: products.map((product) => ({
           id: product.productNo,
           name: product.name,
           sku: product.sellerManagementCode,
           imageUrl: product.representativeImage?.url,
           price: product.salePrice,
-          stockQuantity: product.stockQuantity
-        }))
+          stockQuantity: product.stockQuantity,
+        })),
       });
     } catch (error) {
       logger.error('Failed to search Naver products:', error);
@@ -47,7 +53,11 @@ export class ProductSearchController {
   /**
    * Shopify 상품 검색
    */
-  async searchShopifyProducts(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async searchShopifyProducts(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { sku } = req.query;
       logger.info(`Searching Shopify products with SKU: ${sku}`);
@@ -85,7 +95,7 @@ export class ProductSearchController {
       `;
 
       const variables = {
-        query: `sku:${sku}*`
+        query: `sku:${sku}*`,
       };
 
       const response = await this.shopifyService.query(query, variables);
@@ -93,14 +103,14 @@ export class ProductSearchController {
 
       // SKU가 일치하는 variant가 있는 상품만 필터링
       const matchingProducts = products
-        .filter(({ node }: any) => 
-          node.variants.edges.some(({ node: variant }: any) => 
-            variant.sku && variant.sku.includes(sku)
+        .filter(({ node }: any) =>
+          node.variants.edges.some(
+            ({ node: variant }: any) => variant.sku && variant.sku.includes(sku)
           )
         )
         .map(({ node: product }: any) => {
-          const matchingVariant = product.variants.edges.find(({ node: variant }: any) => 
-            variant.sku && variant.sku.includes(sku)
+          const matchingVariant = product.variants.edges.find(
+            ({ node: variant }: any) => variant.sku && variant.sku.includes(sku)
           )?.node;
 
           return {
@@ -109,13 +119,13 @@ export class ProductSearchController {
             sku: matchingVariant?.sku || '',
             imageUrl: product.images.edges[0]?.node.url,
             price: matchingVariant?.price,
-            stockQuantity: matchingVariant?.inventoryQuantity || 0
+            stockQuantity: matchingVariant?.inventoryQuantity || 0,
           };
         });
 
       res.json({
         success: true,
-        data: matchingProducts
+        data: matchingProducts,
       });
     } catch (error) {
       logger.error('Failed to search Shopify products:', error);

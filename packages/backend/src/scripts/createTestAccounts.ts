@@ -11,54 +11,58 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config();
 
 // User 모델 정의 (스크립트용 간소화 버전)
-const UserSchema = new mongoose.Schema({
-  email: { 
-    type: String, 
-    required: true, 
-    unique: true,
-    lowercase: true,
-    trim: true
+const UserSchema = new mongoose.Schema(
+  {
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    password: {
+      type: String,
+      required: true,
+      select: false,
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    role: {
+      type: String,
+      enum: ['admin', 'user'],
+      default: 'user',
+    },
+    status: {
+      type: String,
+      enum: ['active', 'inactive', 'suspended'],
+      default: 'active',
+    },
+    refreshToken: {
+      type: String,
+      select: false,
+    },
+    lastLogin: Date,
   },
-  password: { 
-    type: String, 
-    required: true,
-    select: false
-  },
-  name: { 
-    type: String, 
-    required: true,
-    trim: true
-  },
-  role: { 
-    type: String, 
-    enum: ['admin', 'user'], 
-    default: 'user' 
-  },
-  status: { 
-    type: String, 
-    enum: ['active', 'inactive', 'suspended'], 
-    default: 'active' 
-  },
-  refreshToken: {
-    type: String,
-    select: false
-  },
-  lastLogin: Date,
-}, { 
-  timestamps: true 
-});
+  {
+    timestamps: true,
+  }
+);
 
 const User = mongoose.model('User', UserSchema);
 
 async function createTestAccounts() {
   try {
     // MongoDB 연결
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/hallyu-pomaholic';
+    const mongoUri =
+      process.env.MONGODB_URI || 'mongodb://localhost:27017/hallyu-pomaholic';
     console.log('========================================');
     console.log('🔌 Connecting to MongoDB...');
     console.log('URI:', mongoUri);
     console.log('========================================\n');
-    
+
     await mongoose.connect(mongoUri);
     console.log('✅ Successfully connected to MongoDB\n');
 
@@ -69,29 +73,29 @@ async function createTestAccounts() {
         password: 'password123',
         name: 'Test Admin',
         role: 'admin',
-        status: 'active'
+        status: 'active',
       },
       {
         email: 'user@example.com',
         password: 'password123',
         name: 'Test User',
         role: 'user',
-        status: 'active'
+        status: 'active',
       },
       {
         email: 'admin@hallyu.com',
         password: 'admin123456',
         name: '관리자',
         role: 'admin',
-        status: 'active'
+        status: 'active',
       },
       {
         email: 'user@hallyu.com',
         password: 'user123456',
         name: '일반 사용자',
         role: 'user',
-        status: 'active'
-      }
+        status: 'active',
+      },
     ];
 
     console.log('📝 Creating/Updating test accounts...\n');
@@ -100,11 +104,11 @@ async function createTestAccounts() {
       try {
         // 기존 계정 확인
         const existing = await User.findOne({ email: account.email });
-        
+
         if (existing) {
           // 비밀번호 업데이트
           const hashedPassword = await bcrypt.hash(account.password, 10);
-          
+
           await User.updateOne(
             { email: account.email },
             {
@@ -112,26 +116,30 @@ async function createTestAccounts() {
                 password: hashedPassword,
                 name: account.name,
                 role: account.role,
-                status: 'active'
-              }
+                status: 'active',
+              },
             }
           );
-          
-          console.log(`  ✅ Updated account: ${account.email} (${account.role})`);
+
+          console.log(
+            `  ✅ Updated account: ${account.email} (${account.role})`
+          );
         } else {
           // 새 계정 생성
           const hashedPassword = await bcrypt.hash(account.password, 10);
-          
+
           const newUser = new User({
             email: account.email,
             password: hashedPassword,
             name: account.name,
             role: account.role,
-            status: account.status
+            status: account.status,
           });
-          
+
           await newUser.save();
-          console.log(`  ✅ Created account: ${account.email} (${account.role})`);
+          console.log(
+            `  ✅ Created account: ${account.email} (${account.role})`
+          );
         }
       } catch (err) {
         console.error(`  ❌ Error with account ${account.email}:`, err.message);
@@ -140,12 +148,16 @@ async function createTestAccounts() {
 
     // 생성된 계정 확인
     console.log('\n📊 Verifying accounts in database...\n');
-    const allUsers = await User.find({}, 'email name role status').sort({ email: 1 });
-    
+    const allUsers = await User.find({}, 'email name role status').sort({
+      email: 1,
+    });
+
     if (allUsers.length > 0) {
       console.log('  Found users:');
-      allUsers.forEach(user => {
-        console.log(`    - ${user.email} | ${user.name} | ${user.role} | ${user.status}`);
+      allUsers.forEach((user) => {
+        console.log(
+          `    - ${user.email} | ${user.name} | ${user.role} | ${user.status}`
+        );
       });
     } else {
       console.log('  ⚠️  No users found in database');
@@ -158,23 +170,22 @@ async function createTestAccounts() {
     console.log('  📧 Email: admin@example.com');
     console.log('  🔑 Password: password123');
     console.log('  👤 Role: admin\n');
-    
+
     console.log('Admin Account 2:');
     console.log('  📧 Email: admin@hallyu.com');
     console.log('  🔑 Password: admin123456');
     console.log('  👤 Role: admin\n');
-    
+
     console.log('User Account 1:');
     console.log('  📧 Email: user@example.com');
     console.log('  🔑 Password: password123');
     console.log('  👤 Role: user\n');
-    
+
     console.log('User Account 2:');
     console.log('  📧 Email: user@hallyu.com');
     console.log('  🔑 Password: user123456');
     console.log('  👤 Role: user');
     console.log('========================================\n');
-
   } catch (error) {
     console.error('\n❌ Fatal Error:', error);
     console.error('\n💡 Troubleshooting tips:');

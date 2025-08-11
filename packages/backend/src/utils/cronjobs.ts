@@ -6,7 +6,7 @@ import { ServiceContainer } from '../services/ServiceContainer.js';
 const scheduledJobs: cron.ScheduledTask[] = [];
 
 export function setupCronJobs(services: ServiceContainer): void {
-  if (process.env.ENABLE_CRON_JOBS !== 'true') {
+  if (process.env['ENABLE_CRON_JOBS'] !== 'true') {
     logger.info('Cron jobs are disabled');
     return;
   }
@@ -14,7 +14,7 @@ export function setupCronJobs(services: ServiceContainer): void {
   logger.info('Setting up cron jobs...');
 
   // 재고 동기화 작업 (30분마다)
-  const syncPattern = process.env.SYNC_CRON_PATTERN || '*/30 * * * *';
+  const syncPattern = process.env['SYNC_CRON_PATTERN'] || '*/30 * * * *';
   const syncJob = cron.schedule(syncPattern, async () => {
     logger.info('Running inventory sync job...');
     try {
@@ -27,7 +27,8 @@ export function setupCronJobs(services: ServiceContainer): void {
   scheduledJobs.push(syncJob);
 
   // 환율 업데이트 작업 (6시간마다)
-  const exchangeRatePattern = process.env.EXCHANGE_RATE_CRON_PATTERN || '0 */6 * * *';
+  const exchangeRatePattern =
+    process.env['EXCHANGE_RATE_CRON_PATTERN'] || '0 */6 * * *';
   const exchangeRateJob = cron.schedule(exchangeRatePattern, async () => {
     logger.info('Updating exchange rates...');
     try {
@@ -40,7 +41,7 @@ export function setupCronJobs(services: ServiceContainer): void {
   scheduledJobs.push(exchangeRateJob);
 
   // 정리 작업 (매일 새벽 2시)
-  const cleanupPattern = process.env.CLEANUP_CRON_PATTERN || '0 2 * * *';
+  const cleanupPattern = process.env['CLEANUP_CRON_PATTERN'] || '0 2 * * *';
   const cleanupJob = cron.schedule(cleanupPattern, async () => {
     logger.info('Running cleanup job...');
     try {

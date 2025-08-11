@@ -1,16 +1,23 @@
 // packages/backend/src/controllers/DashboardController.ts
 import { Request, Response, NextFunction } from 'express';
-import { 
+import {
   PriceSyncJob,
   InventoryTransaction,
   ProductMapping,
   PriceHistory,
   Activity,
-  SyncHistory
+  SyncHistory,
 } from '../models/index.js';
 import { logger } from '../utils/logger.js';
 import { getRedisClient } from '../config/redis.js';
-import { subDays, startOfDay, endOfDay, format, subMonths, subHours } from 'date-fns';
+import {
+  subDays,
+  startOfDay,
+  endOfDay,
+  format,
+  subMonths,
+  subHours,
+} from 'date-fns';
 
 interface DashboardStats {
   totalInventory: number;
@@ -69,7 +76,11 @@ export class DashboardController {
   /**
    * Get comprehensive dashboard statistics
    */
-  getStatistics = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getStatistics = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       // Check Redis cache first
       const cacheKey = 'dashboard:statistics';
@@ -78,7 +89,7 @@ export class DashboardController {
         if (cached) {
           res.json({
             success: true,
-            data: JSON.parse(cached)
+            data: JSON.parse(cached),
           });
           return;
         }
@@ -95,20 +106,22 @@ export class DashboardController {
         recentActivities,
         pendingSyncs,
         priceDiscrepancies,
-        inventoryValue
+        inventoryValue,
       ] = await Promise.all([
         ProductMapping.countDocuments(),
         ProductMapping.countDocuments({ isActive: true, status: 'ACTIVE' }),
-        PriceSyncJob.findOne({ status: 'completed' }).sort({ completedAt: -1 }).lean(),
+        PriceSyncJob.findOne({ status: 'completed' })
+          .sort({ completedAt: -1 })
+          .lean(),
         this.getLowStockCount(),
         this.getOutOfStockCount(),
         this.getTodayTransactions(),
         Activity.countDocuments({
-          createdAt: { $gte: subDays(new Date(), 1) }
+          createdAt: { $gte: subDays(new Date(), 1) },
         }),
         PriceSyncJob.countDocuments({ status: 'pending' }),
         this.getPriceDiscrepancyCount(),
-        this.calculateInventoryValue()
+        this.calculateInventoryValue(),
       ]);
 
       const syncSuccessRate = await this.calculateSyncSuccessRate();
@@ -128,17 +141,21 @@ export class DashboardController {
         activeProducts: activeMappings,
         totalProducts: totalMappings,
         priceDiscrepancies,
-        pendingSyncs
+        pendingSyncs,
       };
 
       // Cache the result
       if (this.redis) {
-        await this.redis.setex(cacheKey, this.cacheTimeout, JSON.stringify(statistics));
+        await this.redis.setex(
+          cacheKey,
+          this.cacheTimeout,
+          JSON.stringify(statistics)
+        );
       }
 
       res.json({
         success: true,
-        data: statistics
+        data: statistics,
       });
     } catch (error) {
       logger.error('Error fetching dashboard statistics:', error);
@@ -149,7 +166,11 @@ export class DashboardController {
   /**
    * Get statistics by type
    */
-  getStatisticsByType = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getStatisticsByType = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { type } = req.params;
       let data;
@@ -173,14 +194,14 @@ export class DashboardController {
         default:
           res.status(400).json({
             success: false,
-            error: 'Invalid statistics type'
+            error: 'Invalid statistics type',
           });
           return;
       }
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error fetching statistics by type:', error);
@@ -191,7 +212,11 @@ export class DashboardController {
   /**
    * Get recent activities with pagination
    */
-  getRecentActivities = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getRecentActivities = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { limit = 20, offset = 0, type } = req.query;
       const query: any = {};
@@ -206,13 +231,13 @@ export class DashboardController {
           .limit(Number(limit))
           .skip(Number(offset))
           .lean(),
-        Activity.countDocuments(query)
+        Activity.countDocuments(query),
       ]);
 
       res.json({
         success: true,
         data: {
-          activities: activities.map(activity => ({
+          activities: activities.map((activity) => ({
             _id: activity._id,
             id: activity._id,
             type: activity.type,
@@ -221,15 +246,15 @@ export class DashboardController {
             metadata: activity.metadata,
             userId: activity.userId,
             createdAt: activity.createdAt,
-            timestamp: activity.createdAt
+            timestamp: activity.createdAt,
           })),
           pagination: {
             limit: Number(limit),
             offset: Number(offset),
             total,
-            pages: Math.ceil(total / Number(limit))
-          }
-        }
+            pages: Math.ceil(total / Number(limit)),
+          },
+        },
       });
     } catch (error) {
       logger.error('Error fetching recent activities:', error);
@@ -240,7 +265,11 @@ export class DashboardController {
   /**
    * Get activity by ID
    */
-  getActivityById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getActivityById = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { id } = req.params;
       const activity = await Activity.findById(id).lean();
@@ -248,14 +277,14 @@ export class DashboardController {
       if (!activity) {
         res.status(404).json({
           success: false,
-          error: 'Activity not found'
+          error: 'Activity not found',
         });
         return;
       }
 
       res.json({
         success: true,
-        data: activity
+        data: activity,
       });
     } catch (error) {
       logger.error('Error fetching activity by ID:', error);
@@ -266,18 +295,22 @@ export class DashboardController {
   /**
    * Get sales chart data with real data
    */
-  getSalesChartData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getSalesChartData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { period = 'day', platform } = req.query;
-      
+
       const data = await this.generateSalesChartData(
-        period as string, 
+        period as string,
         platform as string
       );
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error fetching sales chart data:', error);
@@ -288,18 +321,22 @@ export class DashboardController {
   /**
    * Get inventory chart data with real data
    */
-  getInventoryChartData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getInventoryChartData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { period = '7d', sku } = req.query;
-      
+
       const data = await this.generateInventoryChartData(
-        period as string, 
+        period as string,
         sku as string
       );
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error fetching inventory chart data:', error);
@@ -310,18 +347,22 @@ export class DashboardController {
   /**
    * Get price chart data
    */
-  getPriceChartData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getPriceChartData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { period = '7d', sku } = req.query;
-      
+
       const data = await this.generatePriceChartData(
-        period as string, 
+        period as string,
         sku as string
       );
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error fetching price chart data:', error);
@@ -332,15 +373,19 @@ export class DashboardController {
   /**
    * Get sync chart data
    */
-  getSyncChartData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getSyncChartData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { period = '7d' } = req.query;
-      
+
       const data = await this.generateSyncChartData(period as string);
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error fetching sync chart data:', error);
@@ -351,15 +396,19 @@ export class DashboardController {
   /**
    * Get performance chart data
    */
-  getPerformanceChartData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getPerformanceChartData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { metric = 'response_time' } = req.query;
-      
+
       const data = await this.generatePerformanceChartData(metric as string);
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error fetching performance chart data:', error);
@@ -374,18 +423,22 @@ export class DashboardController {
   /**
    * Get alerts
    */
-  getAlerts = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getAlerts = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { status = 'active', severity } = req.query;
-      
+
       const alerts = await this.fetchAlerts(
-        status as string, 
+        status as string,
         severity as string
       );
 
       res.json({
         success: true,
-        data: alerts
+        data: alerts,
       });
     } catch (error) {
       logger.error('Error fetching alerts:', error);
@@ -396,7 +449,11 @@ export class DashboardController {
   /**
    * Get alert by ID
    */
-  getAlertById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getAlertById = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { id } = req.params;
       const alert = await this.fetchAlertById(id);
@@ -404,14 +461,14 @@ export class DashboardController {
       if (!alert) {
         res.status(404).json({
           success: false,
-          error: 'Alert not found'
+          error: 'Alert not found',
         });
         return;
       }
 
       res.json({
         success: true,
-        data: alert
+        data: alert,
       });
     } catch (error) {
       logger.error('Error fetching alert by ID:', error);
@@ -422,14 +479,18 @@ export class DashboardController {
   /**
    * Dismiss alert
    */
-  dismissAlert = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  dismissAlert = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { id } = req.params;
       const result = await this.updateAlertStatus(id, 'dismissed');
 
       res.json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       logger.error('Error dismissing alert:', error);
@@ -440,14 +501,18 @@ export class DashboardController {
   /**
    * Acknowledge alert
    */
-  acknowledgeAlert = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  acknowledgeAlert = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { id } = req.params;
       const result = await this.updateAlertStatus(id, 'acknowledged');
 
       res.json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       logger.error('Error acknowledging alert:', error);
@@ -462,13 +527,17 @@ export class DashboardController {
   /**
    * Get widgets
    */
-  getWidgets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getWidgets = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const widgets = await this.fetchWidgets();
 
       res.json({
         success: true,
-        data: widgets
+        data: widgets,
       });
     } catch (error) {
       logger.error('Error fetching widgets:', error);
@@ -479,14 +548,18 @@ export class DashboardController {
   /**
    * Get widget data
    */
-  getWidgetData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getWidgetData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { widgetId } = req.params;
       const data = await this.fetchWidgetData(widgetId);
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error fetching widget data:', error);
@@ -497,14 +570,18 @@ export class DashboardController {
   /**
    * Refresh widget
    */
-  refreshWidget = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  refreshWidget = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { widgetId } = req.params;
       const data = await this.refreshWidgetData(widgetId);
 
       res.json({
         success: true,
-        data
+        data,
       });
     } catch (error) {
       logger.error('Error refreshing widget:', error);
@@ -519,13 +596,17 @@ export class DashboardController {
   /**
    * Get dashboard config
    */
-  getDashboardConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getDashboardConfig = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const config = await this.fetchDashboardConfig();
 
       res.json({
         success: true,
-        data: config
+        data: config,
       });
     } catch (error) {
       logger.error('Error fetching dashboard config:', error);
@@ -536,14 +617,18 @@ export class DashboardController {
   /**
    * Update dashboard config
    */
-  updateDashboardConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  updateDashboardConfig = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const config = req.body;
       const updated = await this.saveDashboardConfig(config);
 
       res.json({
         success: true,
-        data: updated
+        data: updated,
       });
     } catch (error) {
       logger.error('Error updating dashboard config:', error);
@@ -554,13 +639,17 @@ export class DashboardController {
   /**
    * Reset dashboard config
    */
-  resetDashboardConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  resetDashboardConfig = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const config = await this.resetConfig();
 
       res.json({
         success: true,
-        data: config
+        data: config,
       });
     } catch (error) {
       logger.error('Error resetting dashboard config:', error);
@@ -575,14 +664,18 @@ export class DashboardController {
   /**
    * Export dashboard data
    */
-  exportDashboardData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  exportDashboardData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { format = 'json', dateRange } = req.body;
       const exportId = await this.createExport(format, dateRange);
 
       res.json({
         success: true,
-        data: { exportId }
+        data: { exportId },
       });
     } catch (error) {
       logger.error('Error exporting dashboard data:', error);
@@ -593,14 +686,18 @@ export class DashboardController {
   /**
    * Get export status
    */
-  getExportStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  getExportStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { exportId } = req.params;
       const status = await this.checkExportStatus(exportId);
 
       res.json({
         success: true,
-        data: status
+        data: status,
       });
     } catch (error) {
       logger.error('Error fetching export status:', error);
@@ -611,7 +708,11 @@ export class DashboardController {
   /**
    * Download export
    */
-  downloadExport = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  downloadExport = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const { exportId } = req.params;
       const exportFile = await this.getExportFile(exportId);
@@ -619,7 +720,7 @@ export class DashboardController {
       if (!exportFile) {
         res.status(404).json({
           success: false,
-          error: 'Export not found'
+          error: 'Export not found',
         });
         return;
       }
@@ -642,8 +743,11 @@ export class DashboardController {
     for (const mapping of mappings) {
       const transactions = await InventoryTransaction.find({
         sku: mapping.sku,
-        platform: 'shopify'
-      }).sort({ createdAt: -1 }).limit(1).lean();
+        platform: 'shopify',
+      })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .lean();
 
       if (transactions.length > 0 && transactions[0].newQuantity < 10) {
         lowStockCount++;
@@ -660,8 +764,11 @@ export class DashboardController {
     for (const mapping of mappings) {
       const transactions = await InventoryTransaction.find({
         sku: mapping.sku,
-        platform: 'shopify'
-      }).sort({ createdAt: -1 }).limit(1).lean();
+        platform: 'shopify',
+      })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .lean();
 
       if (transactions.length > 0 && transactions[0].newQuantity === 0) {
         outOfStockCount++;
@@ -677,18 +784,20 @@ export class DashboardController {
     const endOfToday = endOfDay(today);
 
     return InventoryTransaction.countDocuments({
-      createdAt: { $gte: startOfToday, $lte: endOfToday }
+      createdAt: { $gte: startOfToday, $lte: endOfToday },
     });
   }
 
   private async calculateSyncSuccessRate(): Promise<number> {
     const recentJobs = await PriceSyncJob.find({
-      createdAt: { $gte: subDays(new Date(), 7) }
+      createdAt: { $gte: subDays(new Date(), 7) },
     }).lean();
 
     if (recentJobs.length === 0) return 100;
 
-    const successfulJobs = recentJobs.filter(job => job.status === 'completed');
+    const successfulJobs = recentJobs.filter(
+      (job) => job.status === 'completed'
+    );
     return Math.round((successfulJobs.length / recentJobs.length) * 100);
   }
 
@@ -699,17 +808,22 @@ export class DashboardController {
 
     const salesTransactions = await InventoryTransaction.find({
       transactionType: 'sale',
-      createdAt: { $gte: startOfToday, $lte: endOfToday }
+      createdAt: { $gte: startOfToday, $lte: endOfToday },
     }).lean();
 
-    return salesTransactions.reduce((total, trans) => total + Math.abs(trans.quantity), 0);
+    return salesTransactions.reduce(
+      (total, trans) => total + Math.abs(trans.quantity),
+      0
+    );
   }
 
   private determineSyncStatus(recentSync: any): 'normal' | 'warning' | 'error' {
     if (!recentSync) return 'error';
 
-    const hoursSinceSync = (Date.now() - new Date(recentSync.completedAt).getTime()) / (1000 * 60 * 60);
-    
+    const hoursSinceSync =
+      (Date.now() - new Date(recentSync.completedAt).getTime()) /
+      (1000 * 60 * 60);
+
     if (hoursSinceSync > 24) return 'error';
     if (hoursSinceSync > 12) return 'warning';
     return 'normal';
@@ -722,8 +836,10 @@ export class DashboardController {
     for (const mapping of mappings) {
       const latestTransaction = await InventoryTransaction.findOne({
         sku: mapping.sku,
-        platform: 'shopify'
-      }).sort({ createdAt: -1 }).lean();
+        platform: 'shopify',
+      })
+        .sort({ createdAt: -1 })
+        .lean();
 
       if (latestTransaction) {
         totalInventory += latestTransaction.newQuantity;
@@ -740,7 +856,7 @@ export class DashboardController {
     const outOfStockCount = await this.getOutOfStockCount();
     const failedSyncs = await PriceSyncJob.countDocuments({
       status: 'failed',
-      createdAt: { $gte: subDays(new Date(), 1) }
+      createdAt: { $gte: subDays(new Date(), 1) },
     });
 
     return lowStockCount + outOfStockCount + failedSyncs;
@@ -749,7 +865,7 @@ export class DashboardController {
   private async getPriceDiscrepancyCount(): Promise<number> {
     const recentPriceChanges = await PriceHistory.find({
       createdAt: { $gte: subDays(new Date(), 7) },
-      changePercent: { $gte: 10 }
+      changePercent: { $gte: 10 },
     }).countDocuments();
 
     return recentPriceChanges;
@@ -763,12 +879,16 @@ export class DashboardController {
       const [latestTransaction, latestPrice] = await Promise.all([
         InventoryTransaction.findOne({
           sku: mapping.sku,
-          platform: 'shopify'
-        }).sort({ createdAt: -1 }).lean(),
+          platform: 'shopify',
+        })
+          .sort({ createdAt: -1 })
+          .lean(),
         PriceHistory.findOne({
           sku: mapping.sku,
-          platform: 'shopify'
-        }).sort({ createdAt: -1 }).lean()
+          platform: 'shopify',
+        })
+          .sort({ createdAt: -1 })
+          .lean(),
       ]);
 
       if (latestTransaction && latestPrice) {
@@ -785,7 +905,7 @@ export class DashboardController {
       ProductMapping.countDocuments({ status: 'ACTIVE' }),
       ProductMapping.countDocuments({ status: 'INACTIVE' }),
       ProductMapping.countDocuments({ status: 'ERROR' }),
-      ProductMapping.countDocuments({ status: 'PENDING' })
+      ProductMapping.countDocuments({ status: 'PENDING' }),
     ]);
 
     return {
@@ -794,7 +914,7 @@ export class DashboardController {
       inactive,
       error,
       pending,
-      activePercentage: total > 0 ? Math.round((active / total) * 100) : 0
+      activePercentage: total > 0 ? Math.round((active / total) * 100) : 0,
     };
   }
 
@@ -809,26 +929,31 @@ export class DashboardController {
       lowStockProducts: lowStock,
       outOfStockProducts: outOfStock,
       totalValue: inventoryValue,
-      averageValue: totalInventory > 0 ? Math.round((inventoryValue / totalInventory) * 100) / 100 : 0
+      averageValue:
+        totalInventory > 0
+          ? Math.round((inventoryValue / totalInventory) * 100) / 100
+          : 0,
     };
   }
 
   private async getSyncStatistics() {
-    const [totalSyncs, successfulSyncs, failedSyncs, pendingSyncs] = await Promise.all([
-      PriceSyncJob.countDocuments(),
-      PriceSyncJob.countDocuments({ status: 'completed' }),
-      PriceSyncJob.countDocuments({ status: 'failed' }),
-      PriceSyncJob.countDocuments({ status: 'pending' })
-    ]);
+    const [totalSyncs, successfulSyncs, failedSyncs, pendingSyncs] =
+      await Promise.all([
+        PriceSyncJob.countDocuments(),
+        PriceSyncJob.countDocuments({ status: 'completed' }),
+        PriceSyncJob.countDocuments({ status: 'failed' }),
+        PriceSyncJob.countDocuments({ status: 'pending' }),
+      ]);
 
-    const successRate = totalSyncs > 0 ? Math.round((successfulSyncs / totalSyncs) * 100) : 0;
+    const successRate =
+      totalSyncs > 0 ? Math.round((successfulSyncs / totalSyncs) * 100) : 0;
 
     return {
       total: totalSyncs,
       successful: successfulSyncs,
       failed: failedSyncs,
       pending: pendingSyncs,
-      successRate
+      successRate,
     };
   }
 
@@ -838,30 +963,35 @@ export class DashboardController {
     const weekAgo = subDays(today, 7);
     const monthAgo = subMonths(today, 1);
 
-    const [todaySales, yesterdaySales, weekSales, monthSales] = await Promise.all([
-      this.getSalesForPeriod(startOfDay(today), endOfDay(today)),
-      this.getSalesForPeriod(startOfDay(yesterday), endOfDay(yesterday)),
-      this.getSalesForPeriod(weekAgo, today),
-      this.getSalesForPeriod(monthAgo, today)
-    ]);
+    const [todaySales, yesterdaySales, weekSales, monthSales] =
+      await Promise.all([
+        this.getSalesForPeriod(startOfDay(today), endOfDay(today)),
+        this.getSalesForPeriod(startOfDay(yesterday), endOfDay(yesterday)),
+        this.getSalesForPeriod(weekAgo, today),
+        this.getSalesForPeriod(monthAgo, today),
+      ]);
 
-    const dailyChange = yesterdaySales > 0 
-      ? Math.round(((todaySales - yesterdaySales) / yesterdaySales) * 100) 
-      : 0;
+    const dailyChange =
+      yesterdaySales > 0
+        ? Math.round(((todaySales - yesterdaySales) / yesterdaySales) * 100)
+        : 0;
 
     return {
       today: todaySales,
       yesterday: yesterdaySales,
       week: weekSales,
       month: monthSales,
-      dailyChangePercent: dailyChange
+      dailyChangePercent: dailyChange,
     };
   }
 
-  private async getSalesForPeriod(startDate: Date, endDate: Date): Promise<number> {
+  private async getSalesForPeriod(
+    startDate: Date,
+    endDate: Date
+  ): Promise<number> {
     const sales = await InventoryTransaction.find({
       transactionType: 'sale',
-      createdAt: { $gte: startDate, $lte: endDate }
+      createdAt: { $gte: startDate, $lte: endDate },
     }).lean();
 
     return sales.reduce((total, sale) => total + Math.abs(sale.quantity), 0);
@@ -874,15 +1004,18 @@ export class DashboardController {
       responseTime: {
         average: 120,
         p95: 250,
-        p99: 450
+        p99: 450,
       },
       uptime: 99.95,
       errorRate: 0.02,
-      requestsPerSecond: 45
+      requestsPerSecond: 45,
     };
   }
 
-  private async generateSalesChartData(period: string, platform?: string): Promise<ChartData> {
+  private async generateSalesChartData(
+    period: string,
+    platform?: string
+  ): Promise<ChartData> {
     const endDate = new Date();
     let startDate: Date;
     let groupBy: string;
@@ -952,48 +1085,64 @@ export class DashboardController {
 
     const total = salesData.reduce((sum, val) => sum + val, 0);
     const average = total / salesData.length;
-    const trend = salesData[salesData.length - 1] > salesData[0] ? 'up' : 
-                 salesData[salesData.length - 1] < salesData[0] ? 'down' : 'stable';
+    const trend =
+      salesData[salesData.length - 1] > salesData[0]
+        ? 'up'
+        : salesData[salesData.length - 1] < salesData[0]
+          ? 'down'
+          : 'stable';
 
     return {
       labels,
-      datasets: [{
-        label: 'Sales',
-        data: salesData,
-        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-        borderColor: 'rgba(75, 192, 192, 1)',
-        borderWidth: 2,
-        fill: true
-      }],
+      datasets: [
+        {
+          label: 'Sales',
+          data: salesData,
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 2,
+          fill: true,
+        },
+      ],
       summary: {
         total,
         average: Math.round(average * 100) / 100,
         trend,
-        changePercent: salesData[0] > 0 
-          ? Math.round(((salesData[salesData.length - 1] - salesData[0]) / salesData[0]) * 100)
-          : 0
-      }
+        changePercent:
+          salesData[0] > 0
+            ? Math.round(
+                ((salesData[salesData.length - 1] - salesData[0]) /
+                  salesData[0]) *
+                  100
+              )
+            : 0,
+      },
     };
   }
 
-  private async generateInventoryChartData(period: string, sku?: string): Promise<ChartData> {
+  private async generateInventoryChartData(
+    period: string,
+    sku?: string
+  ): Promise<ChartData> {
     // Get inventory status distribution
-    const mappings = await ProductMapping.find({ 
+    const mappings = await ProductMapping.find({
       isActive: true,
-      ...(sku && { sku })
+      ...(sku && { sku }),
     }).lean();
 
     const inventoryByStatus = {
       inStock: 0,
       lowStock: 0,
-      outOfStock: 0
+      outOfStock: 0,
     };
 
     for (const mapping of mappings) {
       const latestTransaction = await InventoryTransaction.findOne({
         sku: mapping.sku,
-        platform: 'shopify'
-      }).sort({ createdAt: -1 }).lean();
+        platform: 'shopify',
+      })
+        .sort({ createdAt: -1 })
+        .lean();
 
       if (latestTransaction) {
         if (latestTransaction.newQuantity === 0) {
@@ -1008,45 +1157,53 @@ export class DashboardController {
 
     return {
       labels: ['정상재고', '재고부족', '품절'],
-      datasets: [{
-        label: '재고 현황',
-        data: [
-          inventoryByStatus.inStock,
-          inventoryByStatus.lowStock,
-          inventoryByStatus.outOfStock
-        ],
-        backgroundColor: [
-          'rgba(75, 192, 192, 0.8)',
-          'rgba(255, 206, 86, 0.8)',
-          'rgba(255, 99, 132, 0.8)'
-        ],
-        borderColor: [
-          'rgba(75, 192, 192, 1)',
-          'rgba(255, 206, 86, 1)',
-          'rgba(255, 99, 132, 1)'
-        ],
-        borderWidth: 1
-      }],
+      datasets: [
+        {
+          label: '재고 현황',
+          data: [
+            inventoryByStatus.inStock,
+            inventoryByStatus.lowStock,
+            inventoryByStatus.outOfStock,
+          ],
+          backgroundColor: [
+            'rgba(75, 192, 192, 0.8)',
+            'rgba(255, 206, 86, 0.8)',
+            'rgba(255, 99, 132, 0.8)',
+          ],
+          borderColor: [
+            'rgba(75, 192, 192, 1)',
+            'rgba(255, 206, 86, 1)',
+            'rgba(255, 99, 132, 1)',
+          ],
+          borderWidth: 1,
+        },
+      ],
       summary: {
         total: mappings.length,
         average: 0,
-        trend: 'stable'
-      }
+        trend: 'stable',
+      },
     };
   }
 
-  private async generatePriceChartData(period: string, sku?: string): Promise<ChartData> {
+  private async generatePriceChartData(
+    period: string,
+    sku?: string
+  ): Promise<ChartData> {
     const endDate = new Date();
-    const startDate = period === '30d' ? subDays(endDate, 30) : subDays(endDate, 7);
+    const startDate =
+      period === '30d' ? subDays(endDate, 30) : subDays(endDate, 7);
 
     const priceHistory = await PriceHistory.find({
       ...(sku && { sku }),
-      createdAt: { $gte: startDate, $lte: endDate }
-    }).sort({ createdAt: 1 }).lean();
+      createdAt: { $gte: startDate, $lte: endDate },
+    })
+      .sort({ createdAt: 1 })
+      .lean();
 
     const groupedByDate = new Map<string, number[]>();
 
-    priceHistory.forEach(history => {
+    priceHistory.forEach((history) => {
       const dateKey = format(history.createdAt, 'yyyy-MM-dd');
       if (!groupedByDate.has(dateKey)) {
         groupedByDate.set(dateKey, []);
@@ -1059,42 +1216,58 @@ export class DashboardController {
 
     groupedByDate.forEach((prices, date) => {
       labels.push(format(new Date(date), 'MM/dd'));
-      const avgPrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+      const avgPrice =
+        prices.reduce((sum, price) => sum + price, 0) / prices.length;
       avgPrices.push(Math.round(avgPrice * 100) / 100);
     });
 
     return {
       labels,
-      datasets: [{
-        label: '평균 가격',
-        data: avgPrices,
-        backgroundColor: 'rgba(153, 102, 255, 0.2)',
-        borderColor: 'rgba(153, 102, 255, 1)',
-        borderWidth: 2,
-        fill: false
-      }],
+      datasets: [
+        {
+          label: '평균 가격',
+          data: avgPrices,
+          backgroundColor: 'rgba(153, 102, 255, 0.2)',
+          borderColor: 'rgba(153, 102, 255, 1)',
+          borderWidth: 2,
+          fill: false,
+        },
+      ],
       summary: {
         total: priceHistory.length,
-        average: avgPrices.length > 0 
-          ? avgPrices.reduce((sum, price) => sum + price, 0) / avgPrices.length
-          : 0,
-        trend: avgPrices.length > 1 && avgPrices[avgPrices.length - 1] > avgPrices[0] ? 'up' :
-               avgPrices.length > 1 && avgPrices[avgPrices.length - 1] < avgPrices[0] ? 'down' : 'stable'
-      }
+        average:
+          avgPrices.length > 0
+            ? avgPrices.reduce((sum, price) => sum + price, 0) /
+              avgPrices.length
+            : 0,
+        trend:
+          avgPrices.length > 1 && avgPrices[avgPrices.length - 1] > avgPrices[0]
+            ? 'up'
+            : avgPrices.length > 1 &&
+                avgPrices[avgPrices.length - 1] < avgPrices[0]
+              ? 'down'
+              : 'stable',
+      },
     };
   }
 
   private async generateSyncChartData(period: string): Promise<ChartData> {
     const endDate = new Date();
-    const startDate = period === '30d' ? subDays(endDate, 30) : subDays(endDate, 7);
+    const startDate =
+      period === '30d' ? subDays(endDate, 30) : subDays(endDate, 7);
 
     const syncJobs = await PriceSyncJob.find({
-      createdAt: { $gte: startDate, $lte: endDate }
-    }).sort({ createdAt: 1 }).lean();
+      createdAt: { $gte: startDate, $lte: endDate },
+    })
+      .sort({ createdAt: 1 })
+      .lean();
 
-    const groupedByDate = new Map<string, { success: number; failed: number }>();
+    const groupedByDate = new Map<
+      string,
+      { success: number; failed: number }
+    >();
 
-    syncJobs.forEach(job => {
+    syncJobs.forEach((job) => {
       const dateKey = format(job.createdAt, 'yyyy-MM-dd');
       if (!groupedByDate.has(dateKey)) {
         groupedByDate.set(dateKey, { success: 0, failed: 0 });
@@ -1125,20 +1298,22 @@ export class DashboardController {
           data: successData,
           backgroundColor: 'rgba(75, 192, 192, 0.8)',
           borderColor: 'rgba(75, 192, 192, 1)',
-          borderWidth: 1
+          borderWidth: 1,
         },
         {
           label: '실패',
           data: failedData,
           backgroundColor: 'rgba(255, 99, 132, 0.8)',
           borderColor: 'rgba(255, 99, 132, 1)',
-          borderWidth: 1
-        }
-      ]
+          borderWidth: 1,
+        },
+      ],
     };
   }
 
-  private async generatePerformanceChartData(metric: string): Promise<ChartData> {
+  private async generatePerformanceChartData(
+    metric: string
+  ): Promise<ChartData> {
     // This would typically come from monitoring tools
     // For now, return mock data
     const labels = ['1h ago', '45m ago', '30m ago', '15m ago', 'Now'];
@@ -1146,14 +1321,16 @@ export class DashboardController {
 
     return {
       labels,
-      datasets: [{
-        label: 'Response Time (ms)',
-        data,
-        backgroundColor: 'rgba(255, 159, 64, 0.2)',
-        borderColor: 'rgba(255, 159, 64, 1)',
-        borderWidth: 2,
-        fill: true
-      }]
+      datasets: [
+        {
+          label: 'Response Time (ms)',
+          data,
+          backgroundColor: 'rgba(255, 159, 64, 0.2)',
+          borderColor: 'rgba(255, 159, 64, 1)',
+          borderWidth: 2,
+          fill: true,
+        },
+      ],
     };
   }
 
@@ -1178,7 +1355,7 @@ export class DashboardController {
       { id: 'stats', type: 'statistics', position: 1 },
       { id: 'sales', type: 'chart', position: 2 },
       { id: 'inventory', type: 'chart', position: 3 },
-      { id: 'activities', type: 'list', position: 4 }
+      { id: 'activities', type: 'list', position: 4 },
     ];
   }
 
@@ -1209,7 +1386,7 @@ export class DashboardController {
     return {
       refreshInterval: 60000,
       theme: 'light',
-      widgets: await this.fetchWidgets()
+      widgets: await this.fetchWidgets(),
     };
   }
 
@@ -1243,9 +1420,9 @@ export class DashboardController {
 
   private async getExportFile(exportId: string) {
     // Get export file path
-    return { 
-      path: `/tmp/${exportId}.json`, 
-      name: `dashboard-export-${exportId}.json` 
+    return {
+      path: `/tmp/${exportId}.json`,
+      name: `dashboard-export-${exportId}.json`,
     };
   }
 }

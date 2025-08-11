@@ -27,8 +27,9 @@ export interface HealthStatus {
 
 export async function performHealthCheck(): Promise<HealthStatus> {
   const memUsage = process.memoryUsage();
-  const formatMemory = (bytes: number) => (bytes / 1024 / 1024).toFixed(2) + ' MB';
-  
+  const formatMemory = (bytes: number) =>
+    (bytes / 1024 / 1024).toFixed(2) + ' MB';
+
   const status: HealthStatus = {
     healthy: true,
     timestamp: new Date().toISOString(),
@@ -54,22 +55,30 @@ export async function performHealthCheck(): Promise<HealthStatus> {
     }
   } catch (error) {
     status.services.database.status = 'unhealthy';
-    status.services.database.message = error instanceof Error ? error.message : 'Unknown error';
+    status.services.database.message =
+      error instanceof Error ? error.message : 'Unknown error';
     status.healthy = false;
   }
 
   // Check Redis
   try {
     const redis = getRedisClient();
-    const pong = await redis.ping();
-    if (pong !== 'PONG') {
+    if (!redis) {
       status.services.redis.status = 'unhealthy';
-      status.services.redis.message = 'Unexpected response';
+      status.services.redis.message = 'Redis client not available';
       status.healthy = false;
+    } else {
+      const pong = await redis.ping();
+      if (pong !== 'PONG') {
+        status.services.redis.status = 'unhealthy';
+        status.services.redis.message = 'Unexpected response';
+        status.healthy = false;
+      }
     }
   } catch (error) {
     status.services.redis.status = 'unhealthy';
-    status.services.redis.message = error instanceof Error ? error.message : 'Unknown error';
+    status.services.redis.message =
+      error instanceof Error ? error.message : 'Unknown error';
     status.healthy = false;
   }
 

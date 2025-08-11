@@ -1,259 +1,141 @@
 // packages/backend/src/server.ts
-import 'dotenv/config';
-import { createServer } from 'http';
-import cluster from 'cluster';
-import os from 'os';
-import { connectDB } from './config/database.js';
+import express from 'express';
+import { Server as HttpServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import { config } from 'dotenv';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { logger } from './utils/logger.js';
+import { initializeMongoDB } from './config/mongodb.js';
 import { initializeRedis } from './config/redis.js';
 import { ServiceContainer } from './services/ServiceContainer.js';
 import { App } from './app.js';
-import { logger } from './utils/logger.js';
-import { validateConfig, config } from './config/index.js';
-import { setupCronJobs } from './cron/index.js';
-import { gracefulShutdown } from './utils/shutdown.js';
+import { CronManager } from './cron/index.js';
+import { ShutdownManager } from './utils/shutdown.js';
+import type { ServiceName } from './services/ServiceContainer.js';
 
-// Server configuration
-const PORT = parseInt(process.env.PORT || '3000', 10);
-const HOST = process.env.HOST || 'localhost';
-const ENABLE_CLUSTER = process.env.CLUSTER_ENABLED === 'true';
-const WORKER_COUNT = Number(process.env.WORKER_COUNT) || os.cpus().length;
+// Load environment variables
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+config({ path: join(__dirname, '../../.env') });
 
 /**
- * Enterprise Server Class
- * Handles complete server lifecycle with clustering, monitoring, and graceful shutdown
+ * Enterprise-grade Server Class
+ * Handles initialization, lifecycle, and graceful shutdown
  */
 class Server {
-  private app?: App;
-  private httpServer?: any;
-  private services?: ServiceContainer;
-  private metricsCollector?: any;
-  private healthCheckService?: any;
-  private isShuttingDown = false;
-  private startTime: number = 0;
+  private httpServer: HttpServer | null = null;
+  private io: SocketIOServer | null = null;
+  private services: ServiceContainer | null = null;
+  private app: App | null = null;
+  private cronManager: CronManager | null = null;
+  private shutdownManager: ShutdownManager;
+  private healthService: any = null;
+  private isStarted: boolean = false;
+
+  constructor() {
+    this.shutdownManager = ShutdownManager.getInstance();
+    this.setupShutdownHandlers();
+    this.logConfiguration();
+  }
 
   /**
-   * Start the server with complete initialization sequence
+   * Start the server
    */
   async start(): Promise<void> {
-    this.startTime = Date.now();
+    if (this.isStarted) {
+      logger.warn('Server already started');
+      return;
+    }
 
     try {
-      // 1. Validate configuration
-      await this.validateConfiguration();
+      logger.info('🚀 Starting server...');
 
-      // 2. Setup clustering if enabled
-      if (ENABLE_CLUSTER && cluster.isPrimary) {
-        this.setupClustering();
-        return;
-      }
-
-      // 3. Initialize infrastructure (DB, Redis, etc.)
+      // Initialize infrastructure
       await this.initializeInfrastructure();
 
-      // 4. Initialize services
+      // Initialize services
       await this.initializeServices();
 
-      // 5. Initialize Express App
+      // Initialize application
       await this.initializeApplication();
 
-      // 6. Create HTTP Server
-      this.httpServer = createServer(this.app!.getApp());
-
-      // 7. Initialize WebSocket if enabled
+      // Initialize WebSocket
       await this.initializeWebSocket();
 
-      // 8. Setup cron jobs
-      await this.setupCronJobs();
+      // Setup health check endpoints
+      this.setupHealthCheckEndpoints();
 
-      // 9. Start listening
-      await this.listen();
+      // Initialize cron jobs
+      await this.initializeCronJobs();
 
-      // 10. Log startup success
-      const elapsed = Date.now() - this.startTime;
-      this.logStartupSuccess(elapsed);
+      // Start HTTP server
+      await this.startHttpServer();
 
-      // 11. Setup shutdown handlers
-      this.setupShutdownHandlers();
-
-      // 12. Setup health monitoring
-      this.setupHealthMonitoring();
-
+      this.isStarted = true;
+      logger.info('✨ Server started successfully');
+      this.logStartupSummary();
     } catch (error) {
       logger.error('❌ Failed to start server:', error);
-      await this.cleanup();
+      await this.shutdown('startup-failure');
       process.exit(1);
     }
   }
 
   /**
-   * Validate configuration
-   */
-  private async validateConfiguration(): Promise<void> {
-    logger.info('🔍 Validating configuration...');
-    const configErrors = validateConfig();
-    
-    if (configErrors.length > 0) {
-      logger.error('Configuration validation failed:', configErrors);
-      
-      // Check for critical errors
-      const criticalErrors = configErrors.filter(err => 
-        err.includes('NAVER_CLIENT_ID') || 
-        err.includes('NAVER_CLIENT_SECRET') || 
-        err.includes('SHOPIFY_STORE_DOMAIN') || 
-        err.includes('SHOPIFY_ACCESS_TOKEN') ||
-        err.includes('JWT_SECRET')
-      );
-
-      if (criticalErrors.length > 0) {
-        logger.error('❌ Critical configuration errors found. Cannot start server.');
-        logger.error('Please check your .env file and ensure all required variables are set.');
-        logger.error('Critical errors:', criticalErrors);
-        process.exit(1);
-      } else {
-        logger.warn('⚠️ Non-critical configuration warnings. Server will start with limited functionality.');
-        logger.warn('Warnings:', configErrors);
-      }
-    } else {
-      logger.info('✅ Configuration validated successfully');
-    }
-  }
-
-  /**
-   * Setup clustering for production
-   */
-  private setupClustering(): void {
-    logger.info(`🎯 Master process ${process.pid} is running`);
-    logger.info(`🔧 Forking ${WORKER_COUNT} workers...`);
-
-    // Fork workers
-    for (let i = 0; i < WORKER_COUNT; i++) {
-      const worker = cluster.fork();
-      logger.info(`Worker ${i + 1} forked with PID ${worker.process.pid}`);
-    }
-
-    // Handle worker events
-    cluster.on('exit', (worker, code, signal) => {
-      logger.error(`Worker ${worker.process.pid} died (${signal || code})`);
-      
-      if (!this.isShuttingDown) {
-        logger.info('Restarting worker...');
-        const newWorker = cluster.fork();
-        logger.info(`New worker started with PID ${newWorker.process.pid}`);
-      }
-    });
-
-    cluster.on('online', (worker) => {
-      logger.info(`Worker ${worker.process.pid} is online`);
-    });
-
-    cluster.on('disconnect', (worker) => {
-      logger.warn(`Worker ${worker.process.pid} disconnected`);
-    });
-
-    // Handle master process signals
-    process.on('SIGTERM', () => this.shutdownCluster('SIGTERM'));
-    process.on('SIGINT', () => this.shutdownCluster('SIGINT'));
-  }
-
-  /**
-   * Shutdown cluster gracefully
-   */
-  private async shutdownCluster(signal: string): Promise<void> {
-    if (this.isShuttingDown) return;
-    
-    this.isShuttingDown = true;
-    logger.info(`${signal} received, shutting down cluster...`);
-
-    // Disconnect all workers
-    for (const id in cluster.workers) {
-      const worker = cluster.workers[id];
-      if (worker) {
-        worker.disconnect();
-        
-        // Force kill after timeout
-        setTimeout(() => {
-          if (!worker.isDead()) {
-            worker.kill();
-          }
-        }, 5000);
-      }
-    }
-
-    // Wait for all workers to exit
-    await new Promise<void>((resolve) => {
-      let remainingWorkers = Object.keys(cluster.workers).length;
-      
-      if (remainingWorkers === 0) {
-        resolve();
-        return;
-      }
-
-      cluster.on('exit', () => {
-        remainingWorkers--;
-        if (remainingWorkers === 0) {
-          resolve();
-        }
-      });
-    });
-
-    logger.info('All workers shut down');
-    process.exit(0);
-  }
-
-  /**
-   * Initialize infrastructure components
+   * Initialize infrastructure with graceful handling of optional services
    */
   private async initializeInfrastructure(): Promise<void> {
     logger.info('🔌 Initializing infrastructure...');
-    
+
     try {
-      // Connect to MongoDB
-      await connectDB();
-      logger.info('✅ MongoDB connected');
+      // Initialize MongoDB
+      await initializeMongoDB();
 
       // Initialize Redis
-      const redis = await initializeRedis();
-      logger.info('✅ Redis initialized');
+      await initializeRedis();
 
-      // Initialize metrics collector (optional)
-      await this.initializeMetrics();
+      // Try to initialize MetricsCollector (optional)
+      try {
+        const { MetricsCollector } = await import(
+          './monitoring/MetricsCollector.js'
+        );
+        const metricsCollector = MetricsCollector.getInstance();
+        await metricsCollector.initialize();
+        logger.info('✅ Metrics collector initialized');
+      } catch (error: any) {
+        if (error.code === 'ERR_MODULE_NOT_FOUND') {
+          logger.warn(
+            'Metrics collector not available - continuing without metrics'
+          );
+        } else {
+          logger.error('Metrics collector initialization failed:', error);
+        }
+      }
 
-      // Initialize health check service (optional)
-      await this.initializeHealthCheck();
+      // Try to initialize HealthCheckService (optional)
+      try {
+        const { HealthCheckService } = await import(
+          './health/HealthCheckService.js'
+        );
+        if (this.services) {
+          this.healthService = new HealthCheckService(this.services);
+          logger.info('✅ Health check service initialized');
+        }
+      } catch (error: any) {
+        if (error.code === 'ERR_MODULE_NOT_FOUND') {
+          logger.warn(
+            'Health check service not available - continuing without health checks'
+          );
+        } else {
+          logger.error('Health check service initialization failed:', error);
+        }
+      }
 
+      logger.info('✅ Infrastructure initialized');
     } catch (error) {
       logger.error('Infrastructure initialization failed:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Initialize metrics collector
-   */
-  private async initializeMetrics(): Promise<void> {
-    try {
-      const { MetricsCollector } = await import('./monitoring/MetricsCollector.js');
-      const redis = await initializeRedis();
-      this.metricsCollector = new MetricsCollector(redis);
-      await this.metricsCollector.initialize();
-      logger.info('✅ Metrics collector initialized');
-    } catch (error) {
-      logger.warn('Metrics collector not available:', error);
-    }
-  }
-
-  /**
-   * Initialize health check service
-   */
-  private async initializeHealthCheck(): Promise<void> {
-    try {
-      const { HealthCheckService } = await import('./health/HealthCheckService.js');
-      const redis = await initializeRedis();
-      this.healthCheckService = new HealthCheckService(redis);
-      await this.healthCheckService.initialize();
-      logger.info('✅ Health check service initialized');
-    } catch (error) {
-      logger.warn('Health check service not available:', error);
     }
   }
 
@@ -262,17 +144,30 @@ class Server {
    */
   private async initializeServices(): Promise<void> {
     logger.info('📦 Initializing services...');
-    
+
     try {
       // Get Redis instance
       const redis = await initializeRedis();
-      
+
       // Initialize Service Container
       this.services = await ServiceContainer.initialize(redis);
-      
+
       // Validate critical services
       await this.validateCriticalServices();
-      
+
+      // Initialize health service if not already done
+      if (!this.healthService && this.services) {
+        try {
+          const { HealthCheckService } = await import(
+            './health/HealthCheckService.js'
+          );
+          this.healthService = new HealthCheckService(this.services);
+          logger.info('✅ Health check service initialized (post-services)');
+        } catch (error: any) {
+          logger.debug('Health check service still not available');
+        }
+      }
+
       logger.info('✅ All services initialized successfully');
     } catch (error) {
       logger.error('Service initialization failed:', error);
@@ -288,24 +183,26 @@ class Server {
       throw new Error('ServiceContainer not initialized');
     }
 
-    const criticalServices = [
+    const criticalServices: ServiceName[] = [
       'naverAuthService',
       'naverProductService',
-      'syncService'
+      'syncService',
     ];
-    
+
     const missingServices: string[] = [];
-    
+
     for (const serviceName of criticalServices) {
-      if (!this.services.hasService(serviceName as any)) {
+      if (!this.services.hasService(serviceName)) {
         missingServices.push(serviceName);
       }
     }
-    
+
     if (missingServices.length > 0) {
-      throw new Error(`Critical services not available: ${missingServices.join(', ')}`);
+      throw new Error(
+        `Critical services not available: ${missingServices.join(', ')}`
+      );
     }
-    
+
     logger.info('✅ All critical services validated');
   }
 
@@ -314,14 +211,14 @@ class Server {
    */
   private async initializeApplication(): Promise<void> {
     logger.info('🚀 Initializing Express app...');
-    
+
     if (!this.services) {
       throw new Error('Services must be initialized before app');
     }
 
     this.app = new App(this.services);
     await this.app.initialize();
-    
+
     logger.info('✅ Express app initialized');
   }
 
@@ -329,340 +226,316 @@ class Server {
    * Initialize WebSocket server
    */
   private async initializeWebSocket(): Promise<void> {
-    if (process.env.ENABLE_WEBSOCKET !== 'true') {
+    if (process.env['ENABLE_WEBSOCKET'] !== 'true') {
       logger.info('WebSocket is disabled');
       return;
     }
 
-    try {
-      logger.info('🔌 Initializing WebSocket server...');
-      
-      if (!this.app || !this.httpServer) {
-        throw new Error('App and HTTP server must be initialized first');
-      }
+    logger.info('🔌 Initializing WebSocket server...');
 
-      await this.app.initializeWebSocket(this.httpServer);
-      logger.info('✅ WebSocket server initialized');
-    } catch (error) {
-      logger.error('WebSocket initialization failed:', error);
-      // Don't throw - WebSocket is optional
+    if (!this.httpServer || !this.services) {
+      throw new Error(
+        'HTTP server and services must be initialized before WebSocket'
+      );
+    }
+
+    try {
+      const wsPort = parseInt(process.env['WS_PORT'] || '3001', 10);
+
+      this.io = new SocketIOServer(this.httpServer, {
+        cors: {
+          origin: process.env['CORS_ORIGIN']?.split(',') || [
+            'http://localhost:3000',
+          ],
+          credentials: true,
+        },
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
+      });
+
+      this.services.io = this.io;
+
+      const { setupWebSocketHandlers } = await import('./websocket/index.js');
+      setupWebSocketHandlers(this.io, this.services);
+
+      logger.info(`✅ WebSocket server initialized on port ${wsPort}`);
+    } catch (error: any) {
+      logger.error('Failed to initialize WebSocket:', error);
+      // WebSocket is optional, so don't fail the entire server
+      logger.warn('Continuing without WebSocket support');
     }
   }
 
   /**
-   * Setup cron jobs
+   * Setup health check endpoints
    */
-  private async setupCronJobs(): Promise<void> {
-    // Only setup cron jobs in primary worker or non-clustered mode
-    if (ENABLE_CLUSTER && cluster.worker?.id !== 1) {
-      logger.info('Skipping cron jobs (not primary worker)');
+  private setupHealthCheckEndpoints(): void {
+    if (!this.app || !this.app.express) {
+      logger.warn('Express app not available for health check endpoints');
       return;
     }
 
-    try {
-      logger.info('⏰ Setting up cron jobs...');
-      
-      if (!this.services) {
-        throw new Error('Services must be initialized before cron jobs');
-      }
+    // Basic health check endpoint (always available)
+    this.app.express.get('/health', (req, res) => {
+      res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env['NODE_ENV'] || 'development',
+        version: process.env.npm_package_version || '1.0.0',
+      });
+    });
 
-      setupCronJobs(this.services);
-      logger.info('✅ Cron jobs setup completed');
-    } catch (error) {
-      logger.error('Cron job setup failed:', error);
-      // Don't throw - cron jobs are optional
-    }
+    // Readiness check endpoint
+    this.app.express.get('/health/ready', (req, res) => {
+      if (this.isStarted && this.services) {
+        res.json({
+          status: 'ready',
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        res.status(503).json({
+          status: 'not_ready',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // Liveness check endpoint
+    this.app.express.get('/health/live', (req, res) => {
+      res.json({
+        status: 'alive',
+        timestamp: new Date().toISOString(),
+        pid: process.pid,
+      });
+    });
+
+    // Detailed health check endpoint (if service is available)
+    this.app.express.get('/health/detailed', async (req, res) => {
+      if (this.healthService) {
+        try {
+          const health = await this.healthService.getHealth();
+          res.json(health);
+        } catch (error: any) {
+          res.status(503).json({
+            status: 'unhealthy',
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } else {
+        res.json({
+          status: 'healthy',
+          message: 'Detailed health check service not available',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    logger.info('✅ Health check endpoints configured');
   }
 
   /**
-   * Start listening on configured port
+   * Initialize cron jobs
    */
-  private async listen(): Promise<void> {
+  private async initializeCronJobs(): Promise<void> {
+    if (process.env['ENABLE_CRON'] !== 'true') {
+      logger.info('Cron jobs are disabled');
+      return;
+    }
+
+    logger.info('⏰ Initializing cron jobs...');
+
+    if (!this.services) {
+      throw new Error('Services must be initialized before cron jobs');
+    }
+
+    this.cronManager = new CronManager(this.services);
+    await this.cronManager.start();
+
+    logger.info('✅ Cron jobs initialized');
+  }
+
+  /**
+   * Start HTTP server
+   */
+  private async startHttpServer(): Promise<void> {
+    if (!this.app) {
+      throw new Error('App must be initialized before starting HTTP server');
+    }
+
+    const port = parseInt(process.env['PORT'] || '3000', 10);
+    const host = process.env['HOST'] || 'localhost';
+
     return new Promise((resolve, reject) => {
-      if (!this.httpServer) {
-        reject(new Error('HTTP server not initialized'));
-        return;
-      }
-
-      this.httpServer.listen(PORT, HOST, () => {
-        resolve();
-      }).on('error', (error: NodeJS.ErrnoException) => {
-        if (error.code === 'EADDRINUSE') {
-          logger.error(`Port ${PORT} is already in use`);
-        } else if (error.code === 'EACCES') {
-          logger.error(`Port ${PORT} requires elevated privileges`);
-        } else {
-          logger.error('Server listen error:', error);
-        }
-        reject(error);
-      });
-    });
-  }
-
-  /**
-   * Log successful startup
-   */
-  private logStartupSuccess(elapsed: number): void {
-    const workerId = cluster.worker?.id ? ` (Worker ${cluster.worker.id})` : '';
-    const memoryUsage = process.memoryUsage();
-    const memoryMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
-    
-    logger.info(`
-╔════════════════════════════════════════════════════════════╗
-║                                                            ║
-║   🚀 Hallyu ERP Backend Server Started Successfully!      ║
-║                                                            ║
-╠════════════════════════════════════════════════════════════╣
-║   Environment:  ${config.env.padEnd(43)}║
-║   Port:         ${PORT.toString().padEnd(43)}║
-║   Host:         ${HOST.padEnd(43)}║
-║   Worker:       ${workerId.padEnd(43)}║
-║   Node Version: ${process.version.padEnd(43)}║
-║   Memory Usage: ${`${memoryMB} MB`.padEnd(43)}║
-║   Startup Time: ${`${elapsed}ms`.padEnd(43)}║
-║                                                            ║
-║   Services Status:                                         ║
-║   ✅ MongoDB    Connected                                 ║
-║   ✅ Redis      Connected                                 ║
-║   ✅ Services   Initialized                               ║
-║   ${process.env.ENABLE_WEBSOCKET === 'true' ? '✅' : '⏸️ '} WebSocket  ${process.env.ENABLE_WEBSOCKET === 'true' ? 'Connected' : 'Disabled'}                                  ║
-║   ${this.metricsCollector ? '✅' : '⏸️ '} Metrics    ${this.metricsCollector ? 'Active' : 'Disabled'}                                     ║
-║   ${this.healthCheckService ? '✅' : '⏸️ '} Health     ${this.healthCheckService ? 'Active' : 'Disabled'}                                     ║
-║                                                            ║
-║   API Endpoints:                                           ║
-║   REST:  http://${HOST}:${PORT}${config.apiPrefix || '/api/v1'}                            ║
-║   WS:    ws://${HOST}:${PORT}                                  ║
-║                                                            ║
-╚════════════════════════════════════════════════════════════╝
-    `);
-
-    // Log additional startup information
-    logger.info('Server Details:', {
-      pid: process.pid,
-      platform: process.platform,
-      arch: process.arch,
-      nodeVersion: process.version,
-      workerId: cluster.worker?.id,
-      cpus: os.cpus().length,
-      totalMemory: `${Math.round(os.totalmem() / 1024 / 1024)} MB`,
-      freeMemory: `${Math.round(os.freemem() / 1024 / 1024)} MB`
-    });
-  }
-
-  /**
-   * Setup graceful shutdown handlers
-   */
-  private setupShutdownHandlers(): void {
-    const shutdown = async (signal: string) => {
-      if (this.isShuttingDown) {
-        logger.info('Shutdown already in progress...');
-        return;
-      }
-
-      this.isShuttingDown = true;
-      logger.info(`${signal} signal received, starting graceful shutdown...`);
-
       try {
-        // Set shutdown timeout
-        const shutdownTimeout = setTimeout(() => {
-          logger.error('Graceful shutdown timeout, forcing exit');
-          process.exit(1);
-        }, 30000); // 30 seconds timeout
+        this.httpServer = this.app!.express.listen(port, host, () => {
+          logger.info(`🌐 HTTP server listening on http://${host}:${port}`);
+          logger.info(
+            `📝 API documentation available at http://${host}:${port}/api-docs`
+          );
+          resolve();
+        });
 
-        // Stop accepting new connections
-        await this.stopServer();
-
-        // Cleanup all resources
-        await this.cleanup();
-
-        clearTimeout(shutdownTimeout);
-        logger.info('✅ Graceful shutdown completed');
-        process.exit(0);
-      } catch (error) {
-        logger.error('Error during shutdown:', error);
-        process.exit(1);
-      }
-    };
-
-    // Register signal handlers
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGUSR2', () => shutdown('SIGUSR2')); // For nodemon
-
-    // Handle uncaught errors
-    process.on('uncaughtException', (error: Error) => {
-      logger.error('Uncaught Exception:', error);
-      
-      // Check if error is operational
-      const isOperational = (error as any).isOperational;
-      
-      if (!isOperational) {
-        shutdown('UNCAUGHT_EXCEPTION');
-      }
-    });
-
-    process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
-      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      
-      // Don't exit immediately - let the app try to recover
-      // But log this as a critical error
-      if (this.metricsCollector) {
-        this.metricsCollector.recordError('unhandled_rejection', reason);
-      }
-    });
-  }
-
-  /**
-   * Setup health monitoring
-   */
-  private setupHealthMonitoring(): void {
-    if (!this.healthCheckService) {
-      return;
-    }
-
-    // Schedule periodic health checks
-    setInterval(async () => {
-      try {
-        const health = await this.healthCheckService.checkHealth();
-        
-        if (!health.healthy) {
-          logger.warn('Health check failed:', health);
-          
-          // Trigger alerts if needed
-          if (this.services?.notificationService) {
-            await this.services.notificationService.sendAlert({
-              type: 'error',
-              title: 'Health Check Failed',
-              message: `Server health check failed: ${JSON.stringify(health)}`,
-              priority: 'high'
-            });
+        this.httpServer.on('error', (error: any) => {
+          if (error.code === 'EADDRINUSE') {
+            logger.error(`Port ${port} is already in use`);
+          } else {
+            logger.error('HTTP server error:', error);
           }
-        }
+          reject(error);
+        });
       } catch (error) {
-        logger.error('Health check error:', error);
+        reject(error);
       }
-    }, 60000); // Check every minute
-  }
-
-  /**
-   * Stop HTTP server
-   */
-  private async stopServer(): Promise<void> {
-    if (!this.httpServer) {
-      return;
-    }
-
-    logger.info('Stopping HTTP server...');
-    
-    return new Promise<void>((resolve) => {
-      this.httpServer.close((error?: Error) => {
-        if (error) {
-          logger.error('Error closing HTTP server:', error);
-        } else {
-          logger.info('✅ HTTP server stopped');
-        }
-        resolve();
-      });
-
-      // Force close after timeout
-      setTimeout(() => {
-        logger.warn('Force closing remaining connections');
-        resolve();
-      }, 10000); // 10 seconds
     });
   }
 
   /**
-   * Cleanup all resources
+   * Graceful shutdown
    */
-  private async cleanup(): Promise<void> {
-    logger.info('🧹 Cleaning up resources...');
-
-    const cleanupTasks: Promise<void>[] = [];
+  async shutdown(reason: string = 'manual'): Promise<void> {
+    logger.info(`🛑 Graceful shutdown initiated (${reason})`);
 
     try {
+      // Stop accepting new connections
+      if (this.httpServer) {
+        this.httpServer.close(() => {
+          logger.info('HTTP server closed');
+        });
+      }
+
+      // Close WebSocket connections
+      if (this.io) {
+        this.io.close(() => {
+          logger.info('WebSocket server closed');
+        });
+      }
+
+      // Stop cron jobs
+      if (this.cronManager) {
+        await this.cronManager.stop();
+        logger.info('Cron jobs stopped');
+      }
+
       // Cleanup services
       if (this.services) {
-        cleanupTasks.push(
-          this.services.cleanup().catch(error => {
-            logger.error('Service cleanup error:', error);
-          })
-        );
+        await this.services.cleanup();
+        logger.info('Services cleaned up');
       }
 
-      // Cleanup metrics collector
-      if (this.metricsCollector) {
-        cleanupTasks.push(
-          this.metricsCollector.cleanup().catch(error => {
-            logger.error('Metrics cleanup error:', error);
-          })
-        );
+      // Close app
+      if (this.app) {
+        await this.app.close();
+        logger.info('App closed');
       }
 
-      // Cleanup health check service
-      if (this.healthCheckService) {
-        cleanupTasks.push(
-          this.healthCheckService.cleanup().catch(error => {
-            logger.error('Health check cleanup error:', error);
-          })
-        );
-      }
-
-      // Close database connections
-      cleanupTasks.push(
-        gracefulShutdown().catch(error => {
-          logger.error('Database cleanup error:', error);
-        })
-      );
-
-      // Wait for all cleanup tasks
-      await Promise.all(cleanupTasks);
-
-      logger.info('✅ Cleanup completed');
+      logger.info('✅ Graceful shutdown completed');
     } catch (error) {
-      logger.error('Error during cleanup:', error);
+      logger.error('Error during shutdown:', error);
     }
   }
 
   /**
-   * Stop the server
+   * Setup shutdown handlers
    */
-  async stop(): Promise<void> {
-    logger.info('Stopping server...');
-    await this.stopServer();
-    await this.cleanup();
-    logger.info('Server stopped');
+  private setupShutdownHandlers(): void {
+    // Graceful shutdown on SIGTERM and SIGINT
+    process.on('SIGTERM', async () => {
+      logger.info('SIGTERM received');
+      await this.shutdown('SIGTERM');
+      process.exit(0);
+    });
+
+    process.on('SIGINT', async () => {
+      logger.info('SIGINT received');
+      await this.shutdown('SIGINT');
+      process.exit(0);
+    });
+
+    // Handle uncaught exceptions
+    process.on('uncaughtException', async (error) => {
+      logger.error('Uncaught exception:', error);
+      await this.shutdown('uncaught-exception');
+      process.exit(1);
+    });
+
+    // Handle unhandled promise rejections
+    process.on('unhandledRejection', async (reason, promise) => {
+      logger.error('Unhandled rejection at:', promise, 'reason:', reason);
+      await this.shutdown('unhandled-rejection');
+      process.exit(1);
+    });
   }
 
   /**
-   * Get server status
+   * Log startup configuration
    */
-  getStatus(): {
-    running: boolean;
-    uptime: number;
-    memory: NodeJS.MemoryUsage;
-    services?: any;
-    health?: any;
-  } {
-    return {
-      running: !this.isShuttingDown && !!this.httpServer,
-      uptime: this.startTime ? Date.now() - this.startTime : 0,
-      memory: process.memoryUsage(),
-      services: this.services?.getInitializationStatus(),
-      health: this.healthCheckService?.getLastCheck()
-    };
+  private logConfiguration(): void {
+    logger.info('📋 Configuration loaded:', {
+      env: process.env['NODE_ENV'] || 'development',
+      server: {
+        port: process.env['PORT'] || 3000,
+        wsPort: process.env['WS_PORT'] || 3001,
+        host: process.env['HOST'] || 'localhost',
+      },
+      naver: {
+        clientId:
+          process.env['NAVER_CLIENT_ID']?.substring(0, 20) + '...' || 'NOT_SET',
+        clientSecretLength: process.env['NAVER_CLIENT_SECRET']?.length || 0,
+        clientSecretPreview:
+          process.env['NAVER_CLIENT_SECRET']?.substring(0, 10) + '...' ||
+          'NOT_SET',
+        apiBaseUrl:
+          process.env['NAVER_API_BASE_URL'] || 'https://api.commerce.naver.com',
+        storeId: process.env['NAVER_STORE_ID'] || 'NOT_SET',
+      },
+      shopify: {
+        storeDomain: process.env['SHOPIFY_SHOP_DOMAIN'] || 'NOT_SET',
+        apiVersion: process.env['SHOPIFY_API_VERSION'] || '2025-04',
+        hasAccessToken: !!process.env['SHOPIFY_ACCESS_TOKEN'],
+      },
+      features: {
+        enableShopify: process.env['ENABLE_SHOPIFY'] === 'true',
+        enableClustering: process.env['ENABLE_CLUSTERING'] === 'true',
+        workerCount: parseInt(process.env['WORKER_COUNT'] || '4', 10),
+      },
+    });
+  }
+
+  /**
+   * Log startup summary
+   */
+  private logStartupSummary(): void {
+    const port = process.env['PORT'] || 3000;
+    const host = process.env['HOST'] || 'localhost';
+
+    logger.info('═══════════════════════════════════════════════════');
+    logger.info('🎉 Server started successfully!');
+    logger.info('═══════════════════════════════════════════════════');
+    logger.info(`📍 Address: http://${host}:${port}`);
+    logger.info(`📚 API Docs: http://${host}:${port}/api-docs`);
+    logger.info(`💚 Health: http://${host}:${port}/health`);
+    logger.info(`🔧 Environment: ${process.env['NODE_ENV'] || 'development'}`);
+    logger.info('═══════════════════════════════════════════════════');
   }
 }
 
-// Create and start server instance
-const server = new Server();
+/**
+ * Main entry point
+ */
+async function main(): Promise<void> {
+  try {
+    const server = new Server();
+    await server.start();
+  } catch (error) {
+    logger.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
 
-// Start server
-server.start().catch((error) => {
-  logger.error('Fatal error starting server:', error);
+// Start the server
+main().catch((error) => {
+  logger.error('Fatal error:', error);
   process.exit(1);
 });
-
-// Export for testing and external usage
-export { Server };
-export default server;

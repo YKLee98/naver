@@ -40,21 +40,23 @@ export class ShopifyProductSearchService {
   private graphqlUrl: string;
 
   constructor() {
-    this.shopDomain = process.env.SHOPIFY_SHOP_DOMAIN || '';
-    this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN || '';
-    this.apiVersion = process.env.SHOPIFY_API_VERSION || '2025-04';
-    
+    this.shopDomain = process.env['SHOPIFY_SHOP_DOMAIN'] || '';
+    this.accessToken = process.env['SHOPIFY_ACCESS_TOKEN'] || '';
+    this.apiVersion = process.env['SHOPIFY_API_VERSION'] || '2025-04';
+
     if (!this.shopDomain || !this.accessToken) {
       logger.error('Shopify credentials not configured');
-      throw new Error('SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN must be set');
+      throw new Error(
+        'SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN must be set'
+      );
     }
 
     this.restBaseUrl = `https://${this.shopDomain}/admin/api/${this.apiVersion}`;
     this.graphqlUrl = `${this.restBaseUrl}/graphql.json`;
-    
+
     logger.info('ShopifyProductSearchService initialized', {
       shop: this.shopDomain,
-      apiVersion: this.apiVersion
+      apiVersion: this.apiVersion,
     });
   }
 
@@ -63,7 +65,7 @@ export class ShopifyProductSearchService {
    */
   async searchBySKU(sku: string): Promise<any> {
     logger.info(`Searching for SKU: ${sku}`);
-    
+
     // 1. GraphQL productVariants 쿼리 시도
     try {
       const graphqlResult = await this.searchByGraphQL(sku);
@@ -72,7 +74,7 @@ export class ShopifyProductSearchService {
         return {
           found: true,
           method: 'graphql',
-          products: graphqlResult
+          products: graphqlResult,
         };
       }
     } catch (error) {
@@ -87,7 +89,7 @@ export class ShopifyProductSearchService {
         return {
           found: true,
           method: 'rest',
-          products: restResult
+          products: restResult,
         };
       }
     } catch (error) {
@@ -102,7 +104,7 @@ export class ShopifyProductSearchService {
         return {
           found: true,
           method: 'full_scan',
-          products: allProductsResult
+          products: allProductsResult,
         };
       }
     } catch (error) {
@@ -113,7 +115,7 @@ export class ShopifyProductSearchService {
     return {
       found: false,
       method: 'none',
-      products: []
+      products: [],
     };
   }
 
@@ -155,26 +157,28 @@ export class ShopifyProductSearchService {
           {
             query,
             variables: {
-              query: `sku:${sku}`
-            }
+              query: `sku:${sku}`,
+            },
           },
           {
             headers: {
               'X-Shopify-Access-Token': this.accessToken,
               'Content-Type': 'application/json',
             },
-            timeout: 10000
+            timeout: 10000,
           }
         );
       },
       {
         retries: 2,
-        minTimeout: 1000
+        minTimeout: 1000,
       }
     );
 
     if (response.data.errors) {
-      throw new Error(`GraphQL errors: ${JSON.stringify(response.data.errors)}`);
+      throw new Error(
+        `GraphQL errors: ${JSON.stringify(response.data.errors)}`
+      );
     }
 
     const edges = response.data.data?.productVariants?.edges || [];
@@ -189,9 +193,10 @@ export class ShopifyProductSearchService {
     let page = 1;
     let hasMore = true;
 
-    while (hasMore && page <= 5) { // 최대 5페이지까지만
+    while (hasMore && page <= 5) {
+      // 최대 5페이지까지만
       const url = `${this.restBaseUrl}/products.json`;
-      
+
       const response = await retry(
         async () => {
           return await axios.get(url, {
@@ -201,14 +206,14 @@ export class ShopifyProductSearchService {
             },
             params: {
               limit: 250,
-              page: page
+              page: page,
             },
-            timeout: 10000
+            timeout: 10000,
           });
         },
         {
           retries: 2,
-          minTimeout: 1000
+          minTimeout: 1000,
         }
       );
 
@@ -232,7 +237,7 @@ export class ShopifyProductSearchService {
             variant_title: variant.title,
             sku: variant.sku,
             price: variant.price,
-            inventory_quantity: variant.inventory_quantity || 0
+            inventory_quantity: variant.inventory_quantity || 0,
           });
         }
       }
@@ -281,36 +286,39 @@ export class ShopifyProductSearchService {
     let cursor = null;
     let pageCount = 0;
 
-    while (hasNextPage && pageCount < 10) { // 최대 10페이지
+    while (hasNextPage && pageCount < 10) {
+      // 최대 10페이지
       const response = await retry(
         async () => {
           return await axios.post(
             this.graphqlUrl,
             {
               query,
-              variables: { cursor }
+              variables: { cursor },
             },
             {
               headers: {
                 'X-Shopify-Access-Token': this.accessToken,
                 'Content-Type': 'application/json',
               },
-              timeout: 10000
+              timeout: 10000,
             }
           );
         },
         {
           retries: 2,
-          minTimeout: 1000
+          minTimeout: 1000,
         }
       );
 
       if (response.data.errors) {
-        throw new Error(`GraphQL errors: ${JSON.stringify(response.data.errors)}`);
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(response.data.errors)}`
+        );
       }
 
       const products = response.data.data?.products?.edges || [];
-      
+
       // SKU 매칭
       for (const productEdge of products) {
         const product = productEdge.node;
@@ -327,14 +335,15 @@ export class ShopifyProductSearchService {
               price: variant.price,
               inventory_quantity: variant.inventoryQuantity || 0,
               handle: product.handle,
-              status: product.status
+              status: product.status,
             });
           }
         }
         cursor = productEdge.cursor;
       }
 
-      hasNextPage = response.data.data?.products?.pageInfo?.hasNextPage || false;
+      hasNextPage =
+        response.data.data?.products?.pageInfo?.hasNextPage || false;
       pageCount++;
     }
 
@@ -353,7 +362,7 @@ export class ShopifyProductSearchService {
       variant_title: variant.title,
       sku: variant.sku,
       price: variant.price,
-      inventory_quantity: variant.inventoryQuantity || 0
+      inventory_quantity: variant.inventoryQuantity || 0,
     };
   }
 
@@ -362,17 +371,17 @@ export class ShopifyProductSearchService {
    */
   async searchMultipleSKUs(skus: string[]): Promise<Map<string, any>> {
     const results = new Map<string, any>();
-    
+
     // 병렬 처리 (최대 5개씩)
     const batchSize = 5;
     for (let i = 0; i < skus.length; i += batchSize) {
       const batch = skus.slice(i, i + batchSize);
-      const batchPromises = batch.map(sku => 
+      const batchPromises = batch.map((sku) =>
         this.searchBySKU(sku)
-          .then(result => ({ sku, result }))
-          .catch(error => ({ sku, error }))
+          .then((result) => ({ sku, result }))
+          .catch((error) => ({ sku, error }))
       );
-      
+
       const batchResults = await Promise.all(batchPromises);
       batchResults.forEach(({ sku, result, error }) => {
         if (error) {
@@ -383,7 +392,7 @@ export class ShopifyProductSearchService {
         }
       });
     }
-    
+
     return results;
   }
 }

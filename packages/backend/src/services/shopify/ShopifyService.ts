@@ -1,144 +1,394 @@
 // packages/backend/src/services/shopify/ShopifyService.ts
-import '@shopify/shopify-api/adapters/node';
-import { shopifyApi, ApiVersion, Session } from '@shopify/shopify-api';
-import { logger } from '../../utils/logger';
-import { shopifyConfig, validateShopifyConfig } from '../../config/shopify.config';
+import {
+  shopifyApi,
+  ApiVersion,
+  Session,
+  ShopifyRestResources,
+} from '@shopify/shopify-api';
+import { shopifyConfig } from '../../config/shopify.config.js';
+import { logger } from '../../utils/logger.js';
+import { BaseService } from '../base/BaseService.js';
 
 /**
- * Enterprise Shopify Service Base Class
- * Provides core Shopify API functionality with robust error handling and lifecycle management
+ * Enhanced Shopify Service with robust REST client initialization
  */
-export class ShopifyService {
-  protected shopify: any;
-  protected session: Session | null = null;
-  protected client: any;
+export class ShopifyService extends BaseService {
+  private shopify: any;
+  private client: any;
+  private session: Session | null = null;
   private isInitialized: boolean = false;
   private initializationPromise: Promise<void> | null = null;
   private retryCount: number = 0;
-  private readonly maxRetries: number = 3;
-  private readonly retryDelay: number = 1000; // 1 second
+  private readonly MAX_RETRIES = 3;
 
   constructor() {
-    // Constructor는 동기적으로 유지하고, 초기화는 별도 메서드로 분리
+    super({
+      name: 'ShopifyService',
+      version: '2.0.0',
+      config: shopifyConfig,
+    });
     logger.debug('ShopifyService constructor called');
   }
 
   /**
-   * Public initialization method - 엔터프라이즈 패턴
-   * 멱등성(idempotency) 보장: 여러 번 호출해도 한 번만 초기화
+   * Initialize the Shopify service
    */
-  public async initialize(): Promise<void> {
-    // 이미 초기화 중이면 기존 Promise 반환 (중복 초기화 방지)
+  async initialize(): Promise<void> {
+    // Prevent multiple initialization
     if (this.initializationPromise) {
-      logger.debug('ShopifyService initialization already in progress');
       return this.initializationPromise;
     }
 
-    // 이미 초기화 완료됨
     if (this.isInitialized) {
       logger.debug('ShopifyService already initialized');
-      return Promise.resolve();
+      return;
     }
 
-    // 초기화 시작
     this.initializationPromise = this.performInitialization();
-    
-    try {
-      await this.initializationPromise;
-      logger.info('✅ ShopifyService initialized successfully');
-    } catch (error) {
-      // 초기화 실패 시 재시도 가능하도록 상태 리셋
-      this.initializationPromise = null;
-      throw error;
-    }
-
     return this.initializationPromise;
   }
 
   /**
-   * 실제 초기화 수행 - 재시도 로직 포함
+   * Perform actual initialization
    */
   private async performInitialization(): Promise<void> {
-    while (this.retryCount < this.maxRetries) {
-      try {
-        await this.initializeShopify();
-        this.isInitialized = true;
-        return;
-      } catch (error: any) {
-        this.retryCount++;
-        
-        if (this.retryCount >= this.maxRetries) {
-          logger.error(`Failed to initialize ShopifyService after ${this.maxRetries} attempts`, {
-            error: error.message,
-            stack: error.stack
-          });
-          
-          // 최종 실패 시 Mock 모드로 전환
-          logger.warn('Falling back to mock mode');
-          this.setupMockMode();
-          this.isInitialized = true; // Mock 모드도 초기화 완료로 간주
-          return;
+    logger.info('Initializing ShopifyService...');
+
+    try {
+      // Validate configuration
+      const configValidation = this.validateConfiguration();
+      if (!configValidation.isValid) {
+        if (configValidation.isCritical) {
+          throw new Error(
+            `Critical Shopify configuration missing: ${configValidation.errors.join(', ')}`
+          );
         }
-
-        logger.warn(`ShopifyService initialization attempt ${this.retryCount} failed, retrying...`, {
-          error: error.message
-        });
-
-        // 지수 백오프로 재시도 대기
-        await this.delay(this.retryDelay * Math.pow(2, this.retryCount - 1));
+        logger.warn(
+          'Non-critical Shopify configuration issues, continuing with defaults',
+          {
+            issues: configValidation.errors,
+          }
+        );
       }
+
+      // Initialize Shopify API with proper structure
+      this.initializeShopifyApi();
+
+      // Create session
+      this.session = this.createSession();
+
+      // Initialize REST client with proper error handling
+      await this.initializeRestClient();
+
+      // Mark as initialized
+      this.isInitialized = true;
+
+      // Test connection (optional - don't fail if test fails)
+      try {
+        await this.testConnection();
+        logger.info('✅ ShopifyService initialized successfully');
+      } catch (error: any) {
+        logger.warn(
+          'Connection test failed, but continuing with initialization',
+          {
+            error: error.message,
+          }
+        );
+      }
+
+      logger.info('Shopify service initialized successfully', {
+        storeDomain: shopifyConfig.storeDomain,
+        apiVersion: shopifyConfig.apiVersion,
+        mode: this.client ? 'production' : 'mock',
+      });
+    } catch (error: any) {
+      logger.error('Failed to initialize ShopifyService:', error);
+      this.isInitialized = false;
+      this.initializationPromise = null;
+      throw error;
     }
   }
 
   /**
-   * Initialize Shopify API with proper error handling and validation
+   * Initialize Shopify API properly
    */
-  private async initializeShopify(): Promise<void> {
-    // 환경 설정 검증
-    const configValidation = this.validateConfiguration();
-    if (!configValidation.isValid) {
-      if (configValidation.isCritical) {
-        throw new Error(`Critical Shopify configuration missing: ${configValidation.errors.join(', ')}`);
-      }
-      logger.warn('Non-critical Shopify configuration issues, continuing with defaults', {
-        issues: configValidation.errors
-      });
-    }
-
-    // Shopify API 초기화
-    this.shopify = shopifyApi({
-      apiKey: shopifyConfig.apiKey || 'dummy-api-key',
-      apiSecretKey: shopifyConfig.apiSecret || 'dummy-secret',
-      scopes: shopifyConfig.scopes || ['read_products', 'write_products'],
-      hostName: process.env.HOST_NAME || 'localhost:3000',
-      apiVersion: shopifyConfig.apiVersion || ApiVersion.April25,
-      isEmbeddedApp: false,
-      adminApiAccessToken: shopifyConfig.accessToken,
-    });
-
-    // 세션 생성
-    this.session = this.createSession();
-    
-    // REST 클라이언트 초기화
-    await this.initializeRestClient();
-
-    // Mark as initialized before testing connection
-    this.isInitialized = true;
-
-    // 연결 테스트 (optional - don't fail if test fails)
+  private initializeShopifyApi(): void {
     try {
-      await this.testConnection();
-    } catch (error: any) {
-      logger.warn('Connection test failed, but continuing with initialization', {
-        error: error.message
+      this.shopify = shopifyApi({
+        apiKey: shopifyConfig.apiKey || 'dummy-api-key',
+        apiSecretKey: shopifyConfig.apiSecret || 'dummy-secret',
+        scopes: shopifyConfig.scopes || ['read_products', 'write_products'],
+        hostName: process.env['HOST_NAME'] || 'localhost:3000',
+        apiVersion: shopifyConfig.apiVersion || ApiVersion.April25,
+        isEmbeddedApp: false,
+        adminApiAccessToken: shopifyConfig.accessToken,
       });
+    } catch (error: any) {
+      logger.error('Failed to initialize Shopify API:', error);
+      throw error;
     }
+  }
 
-    logger.info('Shopify service initialized successfully', {
-      storeDomain: shopifyConfig.storeDomain,
-      apiVersion: shopifyConfig.apiVersion,
-      mode: this.client ? 'production' : 'mock'
-    });
+  /**
+   * Initialize REST client with multiple approaches for compatibility
+   */
+  private async initializeRestClient(): Promise<void> {
+    try {
+      if (!this.shopify || !this.session) {
+        throw new Error('Shopify API or session not initialized');
+      }
+
+      // Approach 1: Try new REST client structure (latest versions)
+      if (this.shopify.clients?.Rest) {
+        logger.debug('Using shopify.clients.Rest');
+        this.client = new this.shopify.clients.Rest({
+          session: this.session,
+          apiVersion: shopifyConfig.apiVersion,
+        });
+        return;
+      }
+
+      // Approach 2: Try clients.Rest constructor
+      if (typeof this.shopify.clients?.Rest === 'function') {
+        logger.debug('Using shopify.clients.Rest constructor');
+        try {
+          this.client = new this.shopify.clients.Rest({
+            session: this.session,
+            apiVersion: shopifyConfig.apiVersion,
+          });
+          return;
+        } catch (err: any) {
+          logger.debug('Failed to use Rest constructor:', err.message);
+        }
+      }
+
+      // Approach 3: Create wrapper for shopify.rest methods
+      if (this.shopify.rest) {
+        logger.debug('Creating REST wrapper for shopify.rest methods');
+        this.client = this.createRestWrapper();
+        return;
+      }
+
+      // Approach 4: Fallback to mock client for development
+      logger.warn('No REST client available, using mock client');
+      this.client = this.createMockRestClient();
+    } catch (error: any) {
+      logger.error('REST client initialization failed:', error);
+
+      // Don't fail completely - use mock client as fallback
+      logger.warn('Falling back to mock REST client');
+      this.client = this.createMockRestClient();
+    }
+  }
+
+  /**
+   * Create REST wrapper for compatibility
+   */
+  private createRestWrapper(): any {
+    return {
+      get: async (params: any) => {
+        try {
+          // Handle both parameter formats
+          const requestParams = {
+            session: this.session,
+            path: params.path || params.url,
+            query: params.query || params.params,
+            ...params,
+          };
+
+          // Try different method signatures
+          if (this.shopify.rest?.get) {
+            return await this.shopify.rest.get(requestParams);
+          } else if (this.shopify.rest?.request) {
+            return await this.shopify.rest.request({
+              ...requestParams,
+              method: 'GET',
+            });
+          } else {
+            throw new Error('No suitable REST GET method found');
+          }
+        } catch (error: any) {
+          logger.error('REST GET wrapper error:', error);
+          throw error;
+        }
+      },
+
+      post: async (params: any) => {
+        try {
+          const requestParams = {
+            session: this.session,
+            path: params.path || params.url,
+            data: params.data || params.body,
+            query: params.query || params.params,
+            ...params,
+          };
+
+          if (this.shopify.rest?.post) {
+            return await this.shopify.rest.post(requestParams);
+          } else if (this.shopify.rest?.request) {
+            return await this.shopify.rest.request({
+              ...requestParams,
+              method: 'POST',
+            });
+          } else {
+            throw new Error('No suitable REST POST method found');
+          }
+        } catch (error: any) {
+          logger.error('REST POST wrapper error:', error);
+          throw error;
+        }
+      },
+
+      put: async (params: any) => {
+        try {
+          const requestParams = {
+            session: this.session,
+            path: params.path || params.url,
+            data: params.data || params.body,
+            query: params.query || params.params,
+            ...params,
+          };
+
+          if (this.shopify.rest?.put) {
+            return await this.shopify.rest.put(requestParams);
+          } else if (this.shopify.rest?.request) {
+            return await this.shopify.rest.request({
+              ...requestParams,
+              method: 'PUT',
+            });
+          } else {
+            throw new Error('No suitable REST PUT method found');
+          }
+        } catch (error: any) {
+          logger.error('REST PUT wrapper error:', error);
+          throw error;
+        }
+      },
+
+      delete: async (params: any) => {
+        try {
+          const requestParams = {
+            session: this.session,
+            path: params.path || params.url,
+            query: params.query || params.params,
+            ...params,
+          };
+
+          if (this.shopify.rest?.delete) {
+            return await this.shopify.rest.delete(requestParams);
+          } else if (this.shopify.rest?.request) {
+            return await this.shopify.rest.request({
+              ...requestParams,
+              method: 'DELETE',
+            });
+          } else {
+            throw new Error('No suitable REST DELETE method found');
+          }
+        } catch (error: any) {
+          logger.error('REST DELETE wrapper error:', error);
+          throw error;
+        }
+      },
+    };
+  }
+
+  /**
+   * Test connection to Shopify API
+   */
+  private async testConnection(): Promise<void> {
+    try {
+      if (!this.client) {
+        throw new Error('REST client not initialized');
+      }
+
+      // Try to fetch shop information
+      const response = await this.client.get({
+        path: 'shop',
+      });
+
+      if (!response || !response.body) {
+        throw new Error('Invalid response from Shopify API');
+      }
+
+      logger.debug('Shopify connection test successful', {
+        shop: response.body.shop?.name,
+      });
+    } catch (error: any) {
+      // Try alternative approaches
+      if (this.shopify?.clients?.Graphql) {
+        try {
+          const query = `{
+            shop {
+              name
+              id
+            }
+          }`;
+
+          const graphqlClient = new this.shopify.clients.Graphql({
+            session: this.session,
+          });
+
+          const response = await graphqlClient.query({ data: query });
+
+          logger.debug('Shopify GraphQL connection test successful', {
+            shop: response.body?.data?.shop?.name,
+          });
+          return;
+        } catch (graphqlError: any) {
+          logger.error('GraphQL connection test also failed:', graphqlError);
+        }
+      }
+
+      throw new Error(`Failed to connect to Shopify: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create mock REST client for testing/development
+   */
+  private createMockRestClient(): any {
+    return {
+      get: async (params: any) => {
+        logger.debug('Mock REST GET', params);
+        return {
+          body: {
+            success: true,
+            mock: true,
+            data: this.getMockData(params.path),
+          },
+        };
+      },
+      post: async (params: any) => {
+        logger.debug('Mock REST POST', params);
+        return {
+          body: {
+            success: true,
+            mock: true,
+            id: `mock_${Date.now()}`,
+          },
+        };
+      },
+      put: async (params: any) => {
+        logger.debug('Mock REST PUT', params);
+        return {
+          body: {
+            success: true,
+            mock: true,
+            updated: true,
+          },
+        };
+      },
+      delete: async (params: any) => {
+        logger.debug('Mock REST DELETE', params);
+        return {
+          body: {
+            success: true,
+            mock: true,
+            deleted: true,
+          },
+        };
+      },
+    };
   }
 
   /**
@@ -173,226 +423,8 @@ export class ShopifyService {
     return {
       isValid: errors.length === 0,
       isCritical,
-      errors
+      errors,
     };
-  }
-
-  /**
-   * Initialize REST client with proper error handling
-   */
-  private async initializeRestClient(): Promise<void> {
-    try {
-      if (!this.shopify) {
-        throw new Error('Shopify API not initialized');
-      }
-
-      // 새로운 Shopify API 구조 대응
-      if (this.shopify.rest) {
-        this.client = {
-          get: async (params: any) => {
-            // Only check initialization for external calls, not during init
-            if (this.isInitialized) {
-              this.ensureInitialized();
-            }
-            return await this.shopify.rest.get({
-              session: this.session,
-              ...params
-            });
-          },
-          post: async (params: any) => {
-            if (this.isInitialized) {
-              this.ensureInitialized();
-            }
-            return await this.shopify.rest.post({
-              session: this.session,
-              ...params
-            });
-          },
-          put: async (params: any) => {
-            if (this.isInitialized) {
-              this.ensureInitialized();
-            }
-            return await this.shopify.rest.put({
-              session: this.session,
-              ...params
-            });
-          },
-          delete: async (params: any) => {
-            if (this.isInitialized) {
-              this.ensureInitialized();
-            }
-            return await this.shopify.rest.delete({
-              session: this.session,
-              ...params
-            });
-          }
-        };
-      } else if (this.shopify.clients?.Rest) {
-        // 구버전 API 구조 지원
-        this.client = new this.shopify.clients.Rest({
-          session: this.session,
-          apiVersion: shopifyConfig.apiVersion
-        });
-      } else {
-        throw new Error('REST client not available in current Shopify API version');
-      }
-    } catch (error: any) {
-      logger.warn('REST client initialization failed, using GraphQL only', {
-        error: error.message
-      });
-      this.client = null;
-    }
-  }
-
-  /**
-   * Test connection to Shopify API
-   */
-  private async testConnection(): Promise<void> {
-    try {
-      // Don't check isInitialized here to avoid circular dependency
-      // This method is called during initialization
-      
-      if (this.client) {
-        // REST API 테스트
-        const response = await this.client.get({
-          path: 'shop',
-        });
-        
-        if (!response || !response.body) {
-          throw new Error('Invalid response from Shopify API');
-        }
-        
-        logger.debug('Shopify connection test successful', {
-          shop: response.body.shop?.name
-        });
-      } else if (this.shopify?.clients?.Graphql) {
-        // GraphQL API 테스트 (REST가 없는 경우)
-        const query = `{
-          shop {
-            name
-            id
-          }
-        }`;
-        
-        const graphqlClient = new this.shopify.clients.Graphql({
-          session: this.session
-        });
-        
-        const response = await graphqlClient.query({ data: query });
-        
-        logger.debug('Shopify GraphQL connection test successful', {
-          shop: response.body?.data?.shop?.name
-        });
-      } else {
-        // Mock mode or no clients available - skip test
-        logger.debug('Skipping connection test - no clients available');
-      }
-    } catch (error: any) {
-      logger.error('Shopify connection test failed', {
-        error: error.message
-      });
-      throw new Error(`Failed to connect to Shopify: ${error.message}`);
-    }
-  }
-
-  /**
-   * Setup mock mode for development/testing
-   */
-  private setupMockMode(): void {
-    logger.info('Setting up Shopify service in mock mode');
-    
-    // Mock 클라이언트 생성
-    this.client = this.createMockRestClient();
-    this.shopify = this.createMockShopifyApi();
-    this.session = this.createMockSession();
-  }
-
-  /**
-   * Create mock REST client for testing
-   */
-  private createMockRestClient(): any {
-    return {
-      get: async (params: any) => {
-        logger.debug('Mock REST GET', params);
-        return {
-          body: { 
-            success: true, 
-            mock: true,
-            data: this.getMockData(params.path)
-          }
-        };
-      },
-      post: async (params: any) => {
-        logger.debug('Mock REST POST', params);
-        return { 
-          body: { 
-            success: true, 
-            mock: true,
-            id: `mock_${Date.now()}`
-          } 
-        };
-      },
-      put: async (params: any) => {
-        logger.debug('Mock REST PUT', params);
-        return { 
-          body: { 
-            success: true, 
-            mock: true,
-            updated: true
-          } 
-        };
-      },
-      delete: async (params: any) => {
-        logger.debug('Mock REST DELETE', params);
-        return { 
-          body: { 
-            success: true, 
-            mock: true,
-            deleted: true
-          } 
-        };
-      }
-    };
-  }
-
-  /**
-   * Create mock Shopify API object
-   */
-  private createMockShopifyApi(): any {
-    return {
-      clients: {
-        Graphql: class {
-          constructor(options: any) {}
-          async query(params: any) {
-            logger.debug('Mock GraphQL query', params);
-            return {
-              body: {
-                data: {
-                  shop: {
-                    name: 'Mock Shop',
-                    id: 'mock_shop_123'
-                  }
-                }
-              }
-            };
-          }
-        }
-      }
-    };
-  }
-
-  /**
-   * Create mock session
-   */
-  private createMockSession(): Session {
-    return {
-      id: 'mock_session',
-      shop: shopifyConfig.storeDomain || 'mock-shop.myshopify.com',
-      state: 'mock_state',
-      isOnline: false,
-      accessToken: 'mock_token',
-      scope: 'read_products,write_products',
-    } as Session;
   }
 
   /**
@@ -414,27 +446,27 @@ export class ShopifyService {
    */
   private getMockData(path: string): any {
     const mockDataMap: Record<string, any> = {
-      'shop': {
+      shop: {
         shop: {
           id: 1,
           name: 'Mock Shop',
           email: 'mock@shop.com',
-          domain: 'mock-shop.myshopify.com'
-        }
+          domain: 'mock-shop.myshopify.com',
+        },
       },
-      'products': {
+      products: {
         products: [
           {
             id: 1,
             title: 'Mock Product',
             vendor: 'Mock Vendor',
-            variants: []
-          }
-        ]
+            variants: [],
+          },
+        ],
       },
-      'orders': {
-        orders: []
-      }
+      orders: {
+        orders: [],
+      },
     };
 
     return mockDataMap[path] || { data: {} };
@@ -445,15 +477,18 @@ export class ShopifyService {
    */
   protected ensureInitialized(): void {
     if (!this.isInitialized) {
-      throw new Error('ShopifyService not initialized. Call initialize() first.');
+      throw new Error(
+        'ShopifyService not initialized. Call initialize() first.'
+      );
     }
   }
 
   /**
-   * Helper method for delay
+   * Protected method required by BaseService
    */
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  protected override async onInitialize(): Promise<void> {
+    // Implementation is in initialize() method
+    await this.initialize();
   }
 
   /**
@@ -469,14 +504,37 @@ export class ShopifyService {
       initialized: this.isInitialized,
       mode: this.client?.mock ? 'mock' : 'production',
       hasRestClient: !!this.client,
-      hasGraphQLClient: !!this.shopify?.clients?.Graphql
+      hasGraphQLClient: !!this.shopify?.clients?.Graphql,
     };
+  }
+
+  /**
+   * Get REST client for external use
+   */
+  public getRestClient(): any {
+    this.ensureInitialized();
+    return this.client;
+  }
+
+  /**
+   * Get Shopify API instance for external use
+   */
+  public getShopifyApi(): any {
+    this.ensureInitialized();
+    return this.shopify;
+  }
+
+  /**
+   * Get current session
+   */
+  public getSession(): Session | null {
+    return this.session;
   }
 
   /**
    * Cleanup resources
    */
-  public async cleanup(): Promise<void> {
+  public override async cleanup(): Promise<void> {
     logger.info('Cleaning up ShopifyService resources');
     this.isInitialized = false;
     this.initializationPromise = null;

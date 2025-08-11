@@ -14,14 +14,14 @@ export function setupHealthRoutes(): Router {
     try {
       const healthStatus = await getHealthStatus();
       const statusCode = healthStatus.status === 'healthy' ? 200 : 503;
-      
+
       res.status(statusCode).json(healthStatus);
     } catch (error) {
       logger.error('Health check error:', error);
       res.status(503).json({
         status: 'unhealthy',
         timestamp: new Date().toISOString(),
-        error: 'Health check failed'
+        error: 'Health check failed',
       });
     }
   });
@@ -31,14 +31,14 @@ export function setupHealthRoutes(): Router {
     try {
       const health = await getDetailedHealthStatus();
       const statusCode = health.overall === 'healthy' ? 200 : 503;
-      
+
       res.status(statusCode).json(health);
     } catch (error) {
       logger.error('Detailed health check error:', error);
       res.status(503).json({
         overall: 'unhealthy',
         timestamp: new Date().toISOString(),
-        error: 'Health check failed'
+        error: 'Health check failed',
       });
     }
   });
@@ -47,7 +47,7 @@ export function setupHealthRoutes(): Router {
   router.get('/ready', async (req: Request, res: Response) => {
     try {
       const isReady = await checkReadiness();
-      
+
       if (isReady) {
         res.status(200).json({ ready: true });
       } else {
@@ -73,10 +73,7 @@ export function setupHealthRoutes(): Router {
 }
 
 async function getHealthStatus() {
-  const checks = await Promise.allSettled([
-    checkMongoDB(),
-    checkRedis()
-  ]);
+  const checks = await Promise.allSettled([checkMongoDB(), checkRedis()]);
 
   const mongoHealth = checks[0].status === 'fulfilled' && checks[0].value;
   const redisHealth = checks[1].status === 'fulfilled' && checks[1].value;
@@ -88,40 +85,46 @@ async function getHealthStatus() {
     timestamp: new Date().toISOString(),
     services: {
       mongodb: mongoHealth ? 'up' : 'down',
-      redis: redisHealth ? 'up' : 'down'
-    }
+      redis: redisHealth ? 'up' : 'down',
+    },
   };
 }
 
 async function getDetailedHealthStatus() {
   const startTime = Date.now();
-  
+
   const [mongoCheck, redisCheck] = await Promise.allSettled([
     checkMongoDBDetailed(),
-    checkRedisDetailed()
+    checkRedisDetailed(),
   ]);
 
-  const mongodb = mongoCheck.status === 'fulfilled' ? mongoCheck.value : {
-    status: 'down',
-    error: 'Connection failed'
-  };
+  const mongodb =
+    mongoCheck.status === 'fulfilled'
+      ? mongoCheck.value
+      : {
+          status: 'down',
+          error: 'Connection failed',
+        };
 
-  const redis = redisCheck.status === 'fulfilled' ? redisCheck.value : {
-    status: 'down',
-    error: 'Connection failed'
-  };
+  const redis =
+    redisCheck.status === 'fulfilled'
+      ? redisCheck.value
+      : {
+          status: 'down',
+          error: 'Connection failed',
+        };
 
   const isHealthy = mongodb.status === 'up' && redis.status === 'up';
-  
+
   return {
     overall: isHealthy ? 'healthy' : 'unhealthy',
     timestamp: new Date().toISOString(),
     responseTime: Date.now() - startTime,
     services: {
       mongodb,
-      redis
+      redis,
     },
-    system: getSystemMetrics()
+    system: getSystemMetrics(),
   };
 }
 
@@ -136,7 +139,7 @@ async function checkMongoDB(): Promise<boolean> {
 async function checkMongoDBDetailed() {
   try {
     const isConnected = mongoose.connection.readyState === 1;
-    
+
     if (!isConnected) {
       return { status: 'down', error: 'Not connected' };
     }
@@ -156,12 +159,12 @@ async function checkMongoDBDetailed() {
       database: mongoose.connection.name,
       collections: stats.collections,
       dataSize: stats.dataSize,
-      indexSize: stats.indexSize
+      indexSize: stats.indexSize,
     };
   } catch (error: any) {
     return {
       status: 'down',
-      error: error.message
+      error: error.message,
     };
   }
 }
@@ -179,7 +182,7 @@ async function checkRedis(): Promise<boolean> {
 async function checkRedisDetailed() {
   try {
     const redis = getRedisClient();
-    
+
     const start = Date.now();
     const pingResult = await redis.ping();
     const responseTime = Date.now() - start;
@@ -193,7 +196,7 @@ async function checkRedisDetailed() {
     const lines = info.split('\r\n');
     const stats: any = {};
 
-    lines.forEach(line => {
+    lines.forEach((line) => {
       if (line && !line.startsWith('#')) {
         const [key, value] = line.split(':');
         if (key && value) {
@@ -209,12 +212,12 @@ async function checkRedisDetailed() {
       usedMemory: stats.used_memory_human,
       connectedClients: parseInt(stats.connected_clients) || 0,
       totalCommands: parseInt(stats.total_commands_processed) || 0,
-      uptime: parseInt(stats.uptime_in_seconds) || 0
+      uptime: parseInt(stats.uptime_in_seconds) || 0,
     };
   } catch (error: any) {
     return {
       status: 'down',
-      error: error.message
+      error: error.message,
     };
   }
 }
@@ -223,8 +226,8 @@ async function checkReadiness(): Promise<boolean> {
   try {
     const mongoReady = mongoose.connection.readyState === 1;
     const redis = getRedisClient();
-    const redisReady = await redis.ping() === 'PONG';
-    
+    const redisReady = (await redis.ping()) === 'PONG';
+
     return mongoReady && redisReady;
   } catch (error) {
     return false;
@@ -234,13 +237,13 @@ async function checkReadiness(): Promise<boolean> {
 function getSystemMetrics() {
   const cpuUsage = process.cpuUsage();
   const memUsage = process.memoryUsage();
-  
+
   return {
     cpu: {
       user: cpuUsage.user,
       system: cpuUsage.system,
       cores: os.cpus().length,
-      loadAverage: os.loadavg()
+      loadAverage: os.loadavg(),
     },
     memory: {
       rss: memUsage.rss,
@@ -250,7 +253,10 @@ function getSystemMetrics() {
       arrayBuffers: memUsage.arrayBuffers,
       systemTotal: os.totalmem(),
       systemFree: os.freemem(),
-      systemUsedPercent: ((os.totalmem() - os.freemem()) / os.totalmem() * 100).toFixed(2)
+      systemUsedPercent: (
+        ((os.totalmem() - os.freemem()) / os.totalmem()) *
+        100
+      ).toFixed(2),
     },
     process: {
       pid: process.pid,
@@ -258,16 +264,15 @@ function getSystemMetrics() {
       uptime: process.uptime(),
       nodeVersion: process.version,
       platform: process.platform,
-      arch: process.arch
+      arch: process.arch,
     },
     system: {
       platform: os.platform(),
       release: os.release(),
       hostname: os.hostname(),
-      uptime: os.uptime()
-    }
+      uptime: os.uptime(),
+    },
   };
 }
-
 
 export default setupHealthRoutes;

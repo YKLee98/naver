@@ -40,19 +40,16 @@ export async function retryWithCondition<T>(
   condition: (error: Error) => boolean,
   options: RetryOptions = {}
 ): Promise<T> {
-  return retry(
-    async (bail) => {
-      try {
-        return await operation();
-      } catch (error) {
-        if (!condition(error as Error)) {
-          bail(error as Error);
-        }
-        throw error;
+  return retry(async (bail) => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!condition(error as Error)) {
+        bail(error as Error);
       }
-    },
-    options
-  );
+      throw error;
+    }
+  }, options);
 }
 
 // Export retry 자체도 export

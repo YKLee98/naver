@@ -6,23 +6,23 @@ export * from './inventory.events';
 export * from './price.events';
 
 // Re-export individual functions for convenience
-export { 
+export {
   registerSyncEvents,
   broadcastSyncProgress,
   broadcastSyncComplete,
-  broadcastSyncError
+  broadcastSyncError,
 } from './sync.events';
 
-export { 
+export {
   registerInventoryEvents,
   broadcastInventoryUpdate,
   broadcastOutOfStock,
-  broadcastLowStock
+  broadcastLowStock,
 } from './inventory.events';
 
-export { 
+export {
   registerPriceEvents,
   emitPriceUpdate,
   emitBulkPriceUpdate,
-  broadcastPriceAlert
+  broadcastPriceAlert,
 } from './price.events';

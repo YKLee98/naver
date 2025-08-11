@@ -9,11 +9,13 @@ import { body } from 'express-validator';
 
 export default function setupExchangeRatesRoutes(): Router {
   const router = Router();
-  
+
   // 서비스 및 컨트롤러 인스턴스 생성
   const redis = getRedisClient();
   const exchangeRateService = new ExchangeRateService(redis);
-  const exchangeRateController = new ExchangeRateController(exchangeRateService);
+  const exchangeRateController = new ExchangeRateController(
+    exchangeRateService
+  );
 
   // 인증 미들웨어 적용
   router.use(authMiddleware);
@@ -29,7 +31,7 @@ export default function setupExchangeRatesRoutes(): Router {
     '/update',
     [
       body('rate').optional().isFloat({ min: 0.00001, max: 1 }),
-      body('isManual').optional().isBoolean()
+      body('isManual').optional().isBoolean(),
     ],
     validateRequest,
     exchangeRateController.updateRate
@@ -42,18 +44,14 @@ export default function setupExchangeRatesRoutes(): Router {
     [
       body('rate').isFloat({ min: 0.00001, max: 1 }),
       body('reason').notEmpty().isString(),
-      body('validHours').optional().isInt({ min: 1, max: 8760 })
+      body('validHours').optional().isInt({ min: 1, max: 8760 }),
     ],
     validateRequest,
     exchangeRateController.setManualRate
   );
 
   // 환율 갱신 (관리자 전용)
-  router.post(
-    '/refresh',
-    adminMiddleware,
-    exchangeRateController.refreshRate
-  );
+  router.post('/refresh', adminMiddleware, exchangeRateController.refreshRate);
 
   return router;
 }

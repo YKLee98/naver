@@ -28,7 +28,10 @@ interface HealthStatus {
 /**
  * 헬스 체크 미들웨어
  */
-export const healthCheck = async (req: Request, res: Response): Promise<void> => {
+export const healthCheck = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const healthStatus: HealthStatus = {
       status: 'healthy',
@@ -86,8 +89,12 @@ export const healthCheck = async (req: Request, res: Response): Promise<void> =>
       healthStatus.status = 'unhealthy';
     }
 
-    const statusCode = healthStatus.status === 'healthy' ? 200 : 
-                       healthStatus.status === 'degraded' ? 200 : 503;
+    const statusCode =
+      healthStatus.status === 'healthy'
+        ? 200
+        : healthStatus.status === 'degraded'
+          ? 200
+          : 503;
 
     res.status(statusCode).json(healthStatus);
   } catch (error) {
@@ -110,7 +117,10 @@ export const simpleHealthCheck = (req: Request, res: Response): void => {
 /**
  * Readiness 체크 (쿠버네티스용)
  */
-export const readinessCheck = async (req: Request, res: Response): Promise<void> => {
+export const readinessCheck = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     // 데이터베이스 연결 확인
     if (mongoose.connection.readyState !== 1) {

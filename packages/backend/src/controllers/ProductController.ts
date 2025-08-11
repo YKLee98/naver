@@ -45,14 +45,14 @@ export class ProductController {
     this.naverProductService = naverProductService;
     this.shopifyGraphQLService = shopifyGraphQLService;
     this.redis = getRedisClient();
-    
+
     // 동기화 서비스 초기화
     this.priceSyncService = new PriceSyncService(
       this.redis,
       naverProductService,
       shopifyGraphQLService
     );
-    
+
     this.inventorySyncService = new InventorySyncService(
       naverProductService,
       shopifyGraphQLService
@@ -78,15 +78,15 @@ export class ProductController {
       } = req.query;
 
       const query: any = { vendor };
-      
+
       if (isActive !== undefined) {
         query.isActive = isActive === 'true';
       }
-      
+
       if (syncStatus) {
         query.syncStatus = syncStatus;
       }
-      
+
       if (search) {
         query.$or = [
           { sku: { $regex: search, $options: 'i' } },
@@ -134,7 +134,7 @@ export class ProductController {
       const { sku } = req.params;
 
       const mapping = await ProductMapping.findOne({ sku }).lean();
-      
+
       if (!mapping) {
         throw new AppError('Product mapping not found', 404);
       }
@@ -232,7 +232,7 @@ export class ProductController {
       const updateData = req.body;
 
       const mapping = await ProductMapping.findOne({ sku });
-      
+
       if (!mapping) {
         throw new AppError('Product mapping not found', 404);
       }
@@ -240,7 +240,7 @@ export class ProductController {
       // 업데이트 허용 필드만 추출
       const allowedFields = ['isActive', 'priceMargin', 'syncOptions'];
       const updates: any = {};
-      
+
       for (const field of allowedFields) {
         if (updateData[field] !== undefined) {
           updates[field] = updateData[field];
@@ -269,29 +269,32 @@ export class ProductController {
   ): Promise<void> => {
     try {
       const { sku } = req.params;
-      const { 
+      const {
         syncPrice = true,
         syncInventory = true,
         syncImages = false,
         syncDescription = false,
-        forceUpdate = false
+        forceUpdate = false,
       }: SyncOptions = req.body;
 
       // 매핑 정보 조회
       const mapping = await ProductMapping.findOne({ sku });
-      
+
       if (!mapping) {
         throw new AppError('Product mapping not found', 404);
       }
 
       if (!mapping.isActive && !forceUpdate) {
-        throw new AppError('Product mapping is not active. Use forceUpdate to sync inactive products.', 400);
+        throw new AppError(
+          'Product mapping is not active. Use forceUpdate to sync inactive products.',
+          400
+        );
       }
 
       // 동기화 중복 체크 (Redis를 이용한 락)
       const lockKey = `sync:lock:${sku}`;
       const lockExists = await this.redis.get(lockKey);
-      
+
       if (lockExists) {
         throw new AppError('Sync already in progress for this SKU', 409);
       }
@@ -333,7 +336,7 @@ export class ProductController {
         if (syncPrice) {
           try {
             logger.info(`Syncing price for SKU: ${sku}`);
-            
+
             const oldPrice = parseFloat(shopifyVariant.price);
             const priceResult = await this.priceSyncService.syncSinglePrice(
               sku,
@@ -355,7 +358,8 @@ export class ProductController {
               syncResult.errors.push(`Price sync failed: ${priceResult.error}`);
             }
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown error';
             syncResult.errors.push(`Price sync error: ${errorMessage}`);
             logger.error(`Price sync failed for SKU: ${sku}`, error);
           }
@@ -365,9 +369,10 @@ export class ProductController {
         if (syncInventory) {
           try {
             logger.info(`Syncing inventory for SKU: ${sku}`);
-            
+
             const oldInventory = shopifyVariant.inventoryQuantity || 0;
-            const inventoryResult = await this.inventorySyncService.syncInventoryBySku(sku);
+            const inventoryResult =
+              await this.inventorySyncService.syncInventoryBySku(sku);
 
             if (inventoryResult.success) {
               syncResult.syncedFields.push('inventory');
@@ -377,10 +382,13 @@ export class ProductController {
               };
               logger.info(`Inventory synced for SKU: ${sku}`, inventoryResult);
             } else {
-              syncResult.errors.push(`Inventory sync failed: ${inventoryResult.error}`);
+              syncResult.errors.push(
+                `Inventory sync failed: ${inventoryResult.error}`
+              );
             }
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown error';
             syncResult.errors.push(`Inventory sync error: ${errorMessage}`);
             logger.error(`Inventory sync failed for SKU: ${sku}`, error);
           }
@@ -390,17 +398,18 @@ export class ProductController {
         if (syncImages) {
           try {
             logger.info(`Syncing images for SKU: ${sku}`);
-            
+
             // 네이버 상품 이미지 가져오기
             const naverImages = naverProduct.images || [];
-            
+
             if (naverImages.length > 0) {
               // Shopify에 이미지 업데이트
-              const imageUpdateResult = await this.shopifyGraphQLService.updateProductImages(
-                shopifyVariant.product?.id || '',
-                naverImages
-              );
-              
+              const imageUpdateResult =
+                await this.shopifyGraphQLService.updateProductImages(
+                  shopifyVariant.product?.id || '',
+                  naverImages
+                );
+
               if (imageUpdateResult.success) {
                 syncResult.syncedFields.push('images');
                 syncResult.changes.images = {
@@ -413,7 +422,8 @@ export class ProductController {
               }
             }
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown error';
             syncResult.errors.push(`Image sync error: ${errorMessage}`);
             logger.error(`Image sync failed for SKU: ${sku}`, error);
           }
@@ -423,12 +433,13 @@ export class ProductController {
         if (syncDescription) {
           try {
             logger.info(`Syncing description for SKU: ${sku}`);
-            
-            const descriptionResult = await this.shopifyGraphQLService.updateProductDescription(
-              shopifyVariant.product?.id || '',
-              naverProduct.description || ''
-            );
-            
+
+            const descriptionResult =
+              await this.shopifyGraphQLService.updateProductDescription(
+                shopifyVariant.product?.id || '',
+                naverProduct.description || ''
+              );
+
             if (descriptionResult.success) {
               syncResult.syncedFields.push('description');
               syncResult.changes.description = true;
@@ -437,7 +448,8 @@ export class ProductController {
               syncResult.errors.push('Description sync failed');
             }
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown error';
             syncResult.errors.push(`Description sync error: ${errorMessage}`);
             logger.error(`Description sync failed for SKU: ${sku}`, error);
           }
@@ -483,7 +495,6 @@ export class ProductController {
         });
 
         logger.info(`Sync completed for SKU: ${sku}`, syncResult);
-
       } finally {
         // 락 해제
         await this.redis.del(lockKey);
@@ -491,12 +502,11 @@ export class ProductController {
 
       res.json({
         success: syncResult.success,
-        message: syncResult.success 
+        message: syncResult.success
           ? `Product sync completed successfully for SKU: ${sku}`
           : `Product sync completed with errors for SKU: ${sku}`,
         data: syncResult,
       });
-
     } catch (error) {
       logger.error(`Sync failed for SKU: ${req.params.sku}`, error);
       next(error);
@@ -512,7 +522,10 @@ export class ProductController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { skus, syncOptions = {} }: { skus: string[]; syncOptions: SyncOptions } = req.body;
+      const {
+        skus,
+        syncOptions = {},
+      }: { skus: string[]; syncOptions: SyncOptions } = req.body;
 
       if (!skus || !Array.isArray(skus) || skus.length === 0) {
         throw new AppError('SKUs array is required', 400);
@@ -528,7 +541,7 @@ export class ProductController {
         try {
           // 각 SKU에 대해 개별 동기화 실행
           const mapping = await ProductMapping.findOne({ sku });
-          
+
           if (!mapping) {
             results.push({
               sku,
@@ -540,10 +553,13 @@ export class ProductController {
 
           // 가격 동기화
           if (syncOptions.syncPrice) {
-            const priceResult = await this.priceSyncService.syncSinglePrice(sku, {
-              marginRate: mapping.priceMargin || 10,
-            });
-            
+            const priceResult = await this.priceSyncService.syncSinglePrice(
+              sku,
+              {
+                marginRate: mapping.priceMargin || 10,
+              }
+            );
+
             results.push({
               sku,
               success: priceResult.success,
@@ -554,8 +570,9 @@ export class ProductController {
 
           // 재고 동기화
           if (syncOptions.syncInventory) {
-            const inventoryResult = await this.inventorySyncService.syncInventoryBySku(sku);
-            
+            const inventoryResult =
+              await this.inventorySyncService.syncInventoryBySku(sku);
+
             results.push({
               sku,
               success: inventoryResult.success,
@@ -563,7 +580,6 @@ export class ProductController {
               changes: inventoryResult,
             });
           }
-
         } catch (error) {
           results.push({
             sku,
@@ -573,8 +589,8 @@ export class ProductController {
         }
       }
 
-      const successCount = results.filter(r => r.success).length;
-      const failedCount = results.filter(r => !r.success).length;
+      const successCount = results.filter((r) => r.success).length;
+      const failedCount = results.filter((r) => !r.success).length;
 
       res.json({
         success: true,
@@ -586,7 +602,6 @@ export class ProductController {
           results,
         },
       });
-
     } catch (error) {
       next(error);
     }
@@ -621,7 +636,6 @@ export class ProductController {
         success: true,
         data: history,
       });
-
     } catch (error) {
       next(error);
     }

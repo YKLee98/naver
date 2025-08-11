@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 import {
   registerSyncEvents,
   registerInventoryEvents,
-  registerPriceEvents
+  registerPriceEvents,
 } from './events';
 
 /**
@@ -30,8 +30,8 @@ export class SocketServer {
     this.io.use(async (socket: Socket, next) => {
       try {
         // Extract token from auth header or query
-        const token = socket.handshake.auth?.token || 
-                     socket.handshake.query?.token;
+        const token =
+          socket.handshake.auth?.['token'] || socket.handshake.query?.['token'];
 
         if (token) {
           // TODO: Validate JWT token here
@@ -77,7 +77,7 @@ export class SocketServer {
       requestId,
       authenticated: socket.data.authenticated,
       origin: socket.handshake.headers.origin,
-      userAgent: socket.handshake.headers['user-agent']
+      userAgent: socket.handshake.headers['user-agent'],
     });
 
     // Store client reference
@@ -104,7 +104,7 @@ export class SocketServer {
     socket.emit('connected', {
       id: clientId,
       timestamp: new Date().toISOString(),
-      authenticated: socket.data.authenticated
+      authenticated: socket.data.authenticated,
     });
   }
 
@@ -135,7 +135,7 @@ export class SocketServer {
     if (!user) {
       logger.warn(`Socket ${socket.id} connected without authentication`);
       socket.emit('auth:required', {
-        message: 'Authentication required for full access'
+        message: 'Authentication required for full access',
       });
       return;
     }
@@ -145,8 +145,8 @@ export class SocketServer {
       user: {
         id: user.id,
         email: user.email,
-        role: user.role
-      }
+        role: user.role,
+      },
     });
   }
 
@@ -191,7 +191,7 @@ export class SocketServer {
     socket.on('time:request', () => {
       socket.emit('time:response', {
         timestamp: Date.now(),
-        iso: new Date().toISOString()
+        iso: new Date().toISOString(),
       });
     });
   }
@@ -204,13 +204,13 @@ export class SocketServer {
     socket.on('room:join', async (data: { room: string }, callback) => {
       try {
         const room = data.room;
-        
+
         if (!room) {
           throw new Error('Room name is required');
         }
 
         await socket.join(room);
-        
+
         // Track room membership
         if (!this.rooms.has(room)) {
           this.rooms.set(room, new Set());
@@ -223,7 +223,7 @@ export class SocketServer {
         socket.to(room).emit('room:member:joined', {
           socketId: socket.id,
           room,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
 
         if (typeof callback === 'function') {
@@ -241,13 +241,13 @@ export class SocketServer {
     socket.on('room:leave', async (data: { room: string }, callback) => {
       try {
         const room = data.room;
-        
+
         if (!room) {
           throw new Error('Room name is required');
         }
 
         await socket.leave(room);
-        
+
         // Update room membership tracking
         if (this.rooms.has(room)) {
           this.rooms.get(room)!.delete(socket.id);
@@ -262,7 +262,7 @@ export class SocketServer {
         socket.to(room).emit('room:member:left', {
           socketId: socket.id,
           room,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
 
         if (typeof callback === 'function') {
@@ -277,29 +277,32 @@ export class SocketServer {
     });
 
     // Broadcast to room
-    socket.on('room:broadcast', (data: { room: string; event: string; payload: any }) => {
-      if (!socket.data.authenticated) {
-        socket.emit('error', { message: 'Authentication required' });
-        return;
-      }
+    socket.on(
+      'room:broadcast',
+      (data: { room: string; event: string; payload: any }) => {
+        if (!socket.data.authenticated) {
+          socket.emit('error', { message: 'Authentication required' });
+          return;
+        }
 
-      const { room, event, payload } = data;
-      socket.to(room).emit(event, payload);
-      logger.debug(`Broadcast to room ${room}:`, { event, payload });
-    });
+        const { room, event, payload } = data;
+        socket.to(room).emit(event, payload);
+        logger.debug(`Broadcast to room ${room}:`, { event, payload });
+      }
+    );
 
     // Get room members
     socket.on('room:members', async (data: { room: string }, callback) => {
       try {
         const room = data.room;
         const members = this.rooms.get(room) || new Set();
-        
+
         if (typeof callback === 'function') {
           callback({
             success: true,
             room,
             members: Array.from(members),
-            count: members.size
+            count: members.size,
           });
         }
       } catch (error: any) {
@@ -320,7 +323,7 @@ export class SocketServer {
         timestamp: Date.now(),
         connections: this.connectedClients.size,
         rooms: this.rooms.size,
-        uptime: process.uptime()
+        uptime: process.uptime(),
       };
 
       if (typeof callback === 'function') {
@@ -413,7 +416,7 @@ export class SocketServer {
     this.io.emit('notification', {
       ...notification,
       timestamp: Date.now(),
-      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     });
   }
 }

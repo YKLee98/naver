@@ -30,13 +30,14 @@ export class AuthController {
       id: user._id.toString(),
       email: user.email,
       role: user.role,
-      name: user.name
+      name: user.name,
     };
 
-    const secret = process.env.JWT_SECRET || 'default-jwt-secret-change-in-production';
-    const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
+    const secret =
+      process.env['JWT_SECRET'] || 'default-jwt-secret-change-in-production';
+    const expiresIn = process.env['JWT_EXPIRES_IN'] || '7d';
 
-    return jwt.sign(payload, secret, { expiresIn });
+    return jwt.sign(payload, secret, { expiresIn } as jwt.SignOptions);
   }
 
   /**
@@ -45,19 +46,24 @@ export class AuthController {
   private generateRefreshToken(user: any): string {
     const payload = {
       id: user._id.toString(),
-      type: 'refresh'
+      type: 'refresh',
     };
 
-    const secret = process.env.JWT_SECRET || 'default-jwt-secret-change-in-production';
-    const expiresIn = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+    const secret =
+      process.env['JWT_SECRET'] || 'default-jwt-secret-change-in-production';
+    const expiresIn = process.env['JWT_REFRESH_EXPIRES_IN'] || '30d';
 
-    return jwt.sign(payload, secret, { expiresIn });
+    return jwt.sign(payload, secret, { expiresIn } as jwt.SignOptions);
   }
 
   /**
    * 로그인
    */
-  async login(req: LoginRequest, res: Response, next: NextFunction): Promise<void> {
+  async login(
+    req: LoginRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { email, password } = req.body;
 
@@ -67,31 +73,33 @@ export class AuthController {
       }
 
       // 디버그 로그
-      logger.info('Login attempt:', { 
-        email, 
+      logger.info('Login attempt:', {
+        email,
         hasPassword: !!password,
         passwordLength: password?.length,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
 
       // 사용자 찾기 (password 필드 포함)
-      const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
-      
+      const user = await User.findOne({ email: email.toLowerCase() }).select(
+        '+password'
+      );
+
       if (!user) {
         logger.warn('Login failed - user not found:', { email });
         throw new AppError('이메일 또는 비밀번호가 올바르지 않습니다.', 401);
       }
 
-      logger.info('User found:', { 
+      logger.info('User found:', {
         email: user.email,
         role: user.role,
         status: user.status,
-        hasPassword: !!user.password
+        hasPassword: !!user.password,
       });
 
       // 비밀번호 확인
       const isPasswordValid = await bcrypt.compare(password, user.password);
-      
+
       if (!isPasswordValid) {
         logger.warn('Login failed - invalid password:', { email });
         throw new AppError('이메일 또는 비밀번호가 올바르지 않습니다.', 401);
@@ -99,9 +107,9 @@ export class AuthController {
 
       // 계정 상태 확인
       if (user.status !== 'active') {
-        logger.warn('Login failed - inactive account:', { 
-          email, 
-          status: user.status 
+        logger.warn('Login failed - inactive account:', {
+          email,
+          status: user.status,
         });
         throw new AppError('계정이 비활성화되었습니다.', 403);
       }
@@ -121,9 +129,9 @@ export class AuthController {
       delete userResponse.refreshToken;
       delete userResponse.__v;
 
-      logger.info('Login successful:', { 
+      logger.info('Login successful:', {
         email: user.email,
-        role: user.role 
+        role: user.role,
       });
 
       // 응답
@@ -133,15 +141,15 @@ export class AuthController {
           user: userResponse,
           accessToken,
           refreshToken,
-          expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+          expiresIn: process.env['JWT_EXPIRES_IN'] || '7d',
         },
-        message: '로그인에 성공했습니다.'
+        message: '로그인에 성공했습니다.',
       });
     } catch (error) {
-      logger.error('Login error:', { 
+      logger.error('Login error:', {
         message: error.message,
         stack: error.stack,
-        email: req.body?.email 
+        email: req.body?.email,
       });
       next(error);
     }
@@ -156,10 +164,10 @@ export class AuthController {
 
       if (userId) {
         // 리프레시 토큰 제거
-        await User.findByIdAndUpdate(userId, { 
-          $unset: { refreshToken: 1 } 
+        await User.findByIdAndUpdate(userId, {
+          $unset: { refreshToken: 1 },
         });
-        
+
         logger.info('User logged out:', { userId });
       }
 
@@ -176,7 +184,11 @@ export class AuthController {
   /**
    * 회원가입
    */
-  async register(req: RegisterRequest, res: Response, next: NextFunction): Promise<void> {
+  async register(
+    req: RegisterRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { email, password, name } = req.body;
 
@@ -200,7 +212,7 @@ export class AuthController {
 
       // 이메일 중복 확인
       const existingUser = await User.findOne({ email: email.toLowerCase() });
-      
+
       if (existingUser) {
         logger.warn('Registration failed - email already exists:', { email });
         throw new AppError('이미 사용 중인 이메일입니다.', 409);
@@ -223,20 +235,20 @@ export class AuthController {
       delete userResponse.password;
       delete userResponse.__v;
 
-      logger.info('User registered successfully:', { 
+      logger.info('User registered successfully:', {
         email: user.email,
-        name: user.name 
+        name: user.name,
       });
 
       res.status(201).json({
         success: true,
         data: userResponse,
-        message: '회원가입이 완료되었습니다.'
+        message: '회원가입이 완료되었습니다.',
       });
     } catch (error) {
-      logger.error('Registration error:', { 
+      logger.error('Registration error:', {
         message: error.message,
-        email: req.body?.email 
+        email: req.body?.email,
       });
       next(error);
     }
@@ -245,7 +257,11 @@ export class AuthController {
   /**
    * 토큰 갱신
    */
-  async refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async refresh(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { refreshToken } = req.body;
 
@@ -254,7 +270,8 @@ export class AuthController {
       }
 
       // 토큰 검증
-      const secret = process.env.JWT_SECRET || 'default-jwt-secret-change-in-production';
+      const secret =
+        process.env['JWT_SECRET'] || 'default-jwt-secret-change-in-production';
       let decoded: any;
 
       try {
@@ -265,7 +282,7 @@ export class AuthController {
 
       // 사용자 확인
       const user = await User.findById(decoded.id).select('+refreshToken');
-      
+
       if (!user || user.refreshToken !== refreshToken) {
         throw new AppError('유효하지 않은 리프레시 토큰입니다.', 401);
       }
@@ -283,9 +300,9 @@ export class AuthController {
       user.refreshToken = newRefreshToken;
       await user.save();
 
-      logger.info('Token refreshed for user:', { 
+      logger.info('Token refreshed for user:', {
         userId: user._id,
-        email: user.email 
+        email: user.email,
       });
 
       res.json({
@@ -293,9 +310,9 @@ export class AuthController {
         data: {
           accessToken: newAccessToken,
           refreshToken: newRefreshToken,
-          expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+          expiresIn: process.env['JWT_EXPIRES_IN'] || '7d',
         },
-        message: '토큰이 갱신되었습니다.'
+        message: '토큰이 갱신되었습니다.',
       });
     } catch (error) {
       logger.error('Token refresh error:', error);
@@ -314,7 +331,9 @@ export class AuthController {
         throw new AppError('인증이 필요합니다.', 401);
       }
 
-      const user = await User.findById(userId).select('-password -refreshToken -__v');
+      const user = await User.findById(userId).select(
+        '-password -refreshToken -__v'
+      );
 
       if (!user) {
         throw new AppError('사용자를 찾을 수 없습니다.', 404);
@@ -333,7 +352,11 @@ export class AuthController {
   /**
    * 비밀번호 변경
    */
-  async changePassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async changePassword(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const userId = (req as any).user?.id;
       const { currentPassword, newPassword } = req.body;
@@ -353,8 +376,11 @@ export class AuthController {
       }
 
       // 현재 비밀번호 확인
-      const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
-      
+      const isPasswordValid = await bcrypt.compare(
+        currentPassword,
+        user.password
+      );
+
       if (!isPasswordValid) {
         throw new AppError('현재 비밀번호가 올바르지 않습니다.', 401);
       }
@@ -363,14 +389,14 @@ export class AuthController {
       user.password = await bcrypt.hash(newPassword, 10);
       await user.save();
 
-      logger.info('Password changed for user:', { 
+      logger.info('Password changed for user:', {
         userId: user._id,
-        email: user.email 
+        email: user.email,
       });
 
       res.json({
         success: true,
-        message: '비밀번호가 변경되었습니다.'
+        message: '비밀번호가 변경되었습니다.',
       });
     } catch (error) {
       logger.error('Change password error:', error);

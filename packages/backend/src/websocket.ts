@@ -7,7 +7,7 @@ export function setupWebSocket(io: SocketIOServer): void {
   logger.info('Setting up WebSocket server...');
 
   // Middleware for authentication (optional)
-  io.use((socket: Socket, next) => {
+  io.use((_socket: Socket, next) => {
     // TODO: Add authentication logic here if needed
     // const token = socket.handshake.auth.token;
     // if (!token) {
@@ -70,7 +70,12 @@ export const emitToAll = (io: SocketIOServer, event: string, data: any) => {
   io.emit(event, data);
 };
 
-export const emitToRoom = (io: SocketIOServer, room: string, event: string, data: any) => {
+export const emitToRoom = (
+  io: SocketIOServer,
+  room: string,
+  event: string,
+  data: any
+) => {
   io.to(room).emit(event, data);
 };
 

@@ -73,19 +73,19 @@ export class HealthCheckService extends BaseService {
     super({
       name: 'HealthCheckService',
       version: '1.0.0',
-      redis
+      redis,
     });
-    
+
     this.services = services;
     this.startTime = new Date();
   }
 
-  protected async onInitialize(): Promise<void> {
+  protected override async onInitialize(): Promise<void> {
     // Start periodic health checks
     this.startPeriodicHealthCheck();
   }
 
-  protected async onCleanup(): Promise<void> {
+  protected override async onCleanup(): Promise<void> {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
     }
@@ -100,7 +100,7 @@ export class HealthCheckService extends BaseService {
       try {
         const health = await this.performHealthCheck();
         this.lastHealthStatus = health;
-        
+
         if (health.status === 'unhealthy') {
           logger.error('System health check failed', health);
           this.emit('health:unhealthy', health);
@@ -118,12 +118,9 @@ export class HealthCheckService extends BaseService {
    * Get current health status
    */
   async getHealthStatus(): Promise<HealthStatus> {
-    return this.executeWithMetrics(
-      async () => {
-        return await this.performHealthCheck();
-      },
-      'getHealthStatus'
-    );
+    return this.executeWithMetrics(async () => {
+      return await this.performHealthCheck();
+    }, 'getHealthStatus');
   }
 
   /**
@@ -133,29 +130,33 @@ export class HealthCheckService extends BaseService {
     const [services, infrastructure, system] = await Promise.all([
       this.checkServices(),
       this.checkInfrastructure(),
-      this.checkSystem()
+      this.checkSystem(),
     ]);
 
     // Determine overall status
     let overallStatus: 'healthy' | 'unhealthy' | 'degraded' = 'healthy';
-    
+
     // Check service statuses
     const serviceStatuses = Object.values(services);
-    const downServices = serviceStatuses.filter(s => s.status === 'down');
-    const degradedServices = serviceStatuses.filter(s => s.status === 'degraded');
-    
+    const downServices = serviceStatuses.filter((s) => s.status === 'down');
+    const degradedServices = serviceStatuses.filter(
+      (s) => s.status === 'degraded'
+    );
+
     if (downServices.length > 0) {
       overallStatus = 'unhealthy';
     } else if (degradedServices.length > 0) {
       overallStatus = 'degraded';
     }
-    
+
     // Check infrastructure
-    if (infrastructure.database.status !== 'connected' || 
-        infrastructure.redis.status !== 'connected') {
+    if (
+      infrastructure.database.status !== 'connected' ||
+      infrastructure.redis.status !== 'connected'
+    ) {
       overallStatus = 'unhealthy';
     }
-    
+
     // Check system resources
     if (system.memory.percentage > 90 || system.cpu.usage > 90) {
       overallStatus = overallStatus === 'unhealthy' ? 'unhealthy' : 'degraded';
@@ -168,8 +169,8 @@ export class HealthCheckService extends BaseService {
       services,
       infrastructure,
       system,
-      version: process.env.npm_package_version || '1.0.0',
-      environment: process.env.NODE_ENV || 'development'
+      version: process.env['npm_package_version'] || '1.0.0',
+      environment: process.env['NODE_ENV'] || 'development',
     };
   }
 
@@ -178,7 +179,7 @@ export class HealthCheckService extends BaseService {
    */
   private async checkServices(): Promise<Record<string, ServiceHealth>> {
     const serviceChecks: Record<string, ServiceHealth> = {};
-    
+
     // Check Naver Auth Service
     if (this.services.hasService('naverAuthService')) {
       serviceChecks.naverAuth = await this.checkService(
@@ -190,7 +191,7 @@ export class HealthCheckService extends BaseService {
         }
       );
     }
-    
+
     // Check Shopify Service
     if (this.services.hasService('shopifyService')) {
       serviceChecks.shopify = await this.checkService(
@@ -202,19 +203,16 @@ export class HealthCheckService extends BaseService {
         }
       );
     }
-    
+
     // Check Sync Service
     if (this.services.hasService('syncService')) {
-      serviceChecks.sync = await this.checkService(
-        'syncService',
-        async () => {
-          const service = this.services.getService('syncService');
-          const health = await service.healthCheck();
-          return health.status === 'healthy';
-        }
-      );
+      serviceChecks.sync = await this.checkService('syncService', async () => {
+        const service = this.services.getService('syncService');
+        const health = await service.healthCheck();
+        return health.status === 'healthy';
+      });
     }
-    
+
     return serviceChecks;
   }
 
@@ -226,21 +224,21 @@ export class HealthCheckService extends BaseService {
     checker: () => Promise<boolean>
   ): Promise<ServiceHealth> {
     const startTime = performance.now();
-    
+
     try {
       const isHealthy = await this.executeWithTimeout(
         checker,
         5000,
         `${name} health check`
       );
-      
+
       const responseTime = performance.now() - startTime;
-      
+
       return {
         name,
         status: isHealthy ? 'up' : 'down',
         responseTime,
-        lastCheck: new Date()
+        lastCheck: new Date(),
       };
     } catch (error) {
       return {
@@ -248,7 +246,7 @@ export class HealthCheckService extends BaseService {
         status: 'down',
         responseTime: performance.now() - startTime,
         lastCheck: new Date(),
-        error: (error as Error).message
+        error: (error as Error).message,
       };
     }
   }
@@ -259,9 +257,9 @@ export class HealthCheckService extends BaseService {
   private async checkInfrastructure(): Promise<InfrastructureHealth> {
     const [database, redis] = await Promise.all([
       this.checkDatabase(),
-      this.checkRedis()
+      this.checkRedis(),
     ]);
-    
+
     return { database, redis };
   }
 
@@ -270,29 +268,29 @@ export class HealthCheckService extends BaseService {
    */
   private async checkDatabase(): Promise<InfrastructureHealth['database']> {
     const startTime = performance.now();
-    
+
     try {
       // Check MongoDB connection
       const state = mongoose.connection.readyState;
       const isConnected = state === 1; // 1 = connected
-      
+
       // Ping database
       if (isConnected) {
         await mongoose.connection.db.admin().ping();
       }
-      
+
       const responseTime = performance.now() - startTime;
-      
+
       return {
         status: isConnected ? 'connected' : 'disconnected',
         responseTime,
-        connections: mongoose.connections.length
+        connections: mongoose.connections.length,
       };
     } catch (error) {
       return {
         status: 'error',
         responseTime: performance.now() - startTime,
-        connections: 0
+        connections: 0,
       };
     }
   }
@@ -302,21 +300,21 @@ export class HealthCheckService extends BaseService {
    */
   private async checkRedis(): Promise<InfrastructureHealth['redis']> {
     const startTime = performance.now();
-    
+
     try {
       if (!this.redis) {
         return {
           status: 'disconnected',
-          responseTime: 0
+          responseTime: 0,
         };
       }
-      
+
       // Ping Redis
       const result = await this.redis.ping();
       const isConnected = result === 'PONG';
-      
+
       const responseTime = performance.now() - startTime;
-      
+
       // Get memory info if possible
       let memory: number | undefined;
       try {
@@ -328,16 +326,16 @@ export class HealthCheckService extends BaseService {
       } catch {
         // Ignore error - not critical
       }
-      
+
       return {
         status: isConnected ? 'connected' : 'disconnected',
         responseTime,
-        memory
+        memory,
       };
     } catch (error) {
       return {
         status: 'error',
-        responseTime: performance.now() - startTime
+        responseTime: performance.now() - startTime,
       };
     }
   }
@@ -350,23 +348,23 @@ export class HealthCheckService extends BaseService {
     const totalMemory = os.totalmem();
     const freeMemory = os.freemem();
     const usedMemory = totalMemory - freeMemory;
-    
+
     // Calculate CPU usage
     const cpuUsage = this.calculateCPUUsage(cpus);
-    
+
     // Get process memory usage
     const processMemory = process.memoryUsage();
-    
+
     return {
       cpu: {
         usage: cpuUsage,
-        cores: cpus.length
+        cores: cpus.length,
       },
       memory: {
         total: totalMemory,
         used: usedMemory,
         free: freeMemory,
-        percentage: (usedMemory / totalMemory) * 100
+        percentage: (usedMemory / totalMemory) * 100,
       },
       disk: {
         // Disk info would require additional dependencies
@@ -375,8 +373,8 @@ export class HealthCheckService extends BaseService {
       process: {
         pid: process.pid,
         memoryUsage: processMemory,
-        uptime: process.uptime()
-      }
+        uptime: process.uptime(),
+      },
     };
   }
 
@@ -386,18 +384,18 @@ export class HealthCheckService extends BaseService {
   private calculateCPUUsage(cpus: os.CpuInfo[]): number {
     let totalIdle = 0;
     let totalTick = 0;
-    
-    cpus.forEach(cpu => {
+
+    cpus.forEach((cpu) => {
       for (const type in cpu.times) {
         totalTick += cpu.times[type as keyof os.CpuTimes];
       }
       totalIdle += cpu.times.idle;
     });
-    
+
     const idle = totalIdle / cpus.length;
     const total = totalTick / cpus.length;
-    const usage = 100 - ~~(100 * idle / total);
-    
+    const usage = 100 - ~~((100 * idle) / total);
+
     return usage;
   }
 

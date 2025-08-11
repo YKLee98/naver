@@ -19,4 +19,3 @@ export const createProductMapping = (overrides = {}) => {
     ...overrides,
   });
 };
-

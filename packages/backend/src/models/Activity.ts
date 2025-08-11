@@ -4,7 +4,13 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IActivity extends Document {
-  type: 'sync' | 'inventory_update' | 'price_update' | 'mapping' | 'order' | 'system';
+  type:
+    | 'sync'
+    | 'inventory_update'
+    | 'price_update'
+    | 'mapping'
+    | 'order'
+    | 'system';
   action: string;
   details?: string;
   metadata?: Record<string, any>;
@@ -22,34 +28,41 @@ const ActivitySchema = new Schema<IActivity>(
   {
     type: {
       type: String,
-      enum: ['sync', 'inventory_update', 'price_update', 'mapping', 'order', 'system'],
+      enum: [
+        'sync',
+        'inventory_update',
+        'price_update',
+        'mapping',
+        'order',
+        'system',
+      ],
       required: true,
-      index: true
+      index: true,
     },
     action: {
       type: String,
-      required: true
+      required: true,
     },
     details: String,
     metadata: {
       type: Map,
-      of: Schema.Types.Mixed
+      of: Schema.Types.Mixed,
     },
     userId: {
       type: String,
-      index: true
+      index: true,
     },
     ipAddress: String,
     userAgent: String,
     success: {
       type: Boolean,
-      default: true
+      default: true,
     },
     errorMessage: String,
-    duration: Number
+    duration: Number,
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 

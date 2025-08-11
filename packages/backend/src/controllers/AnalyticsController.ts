@@ -1,11 +1,11 @@
 // ===== 1. packages/backend/src/controllers/AnalyticsController.ts =====
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger.js';
-import { 
-  ProductMapping, 
-  SyncHistory, 
+import {
+  ProductMapping,
+  SyncHistory,
   InventoryTransaction,
-  PriceHistory 
+  PriceHistory,
 } from '../models/index.js';
 
 export class AnalyticsController {
@@ -16,7 +16,11 @@ export class AnalyticsController {
     try {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const startOfLastMonth = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        1
+      );
 
       // Get various metrics
       const [
@@ -25,25 +29,26 @@ export class AnalyticsController {
         totalSyncs,
         successfulSyncs,
         totalTransactions,
-        recentErrors
+        recentErrors,
       ] = await Promise.all([
         ProductMapping.countDocuments(),
         ProductMapping.countDocuments({ status: 'ACTIVE' }),
         SyncHistory.countDocuments({ createdAt: { $gte: startOfMonth } }),
-        SyncHistory.countDocuments({ 
+        SyncHistory.countDocuments({
           createdAt: { $gte: startOfMonth },
-          status: 'completed'
+          status: 'completed',
         }),
-        InventoryTransaction.countDocuments({ createdAt: { $gte: startOfMonth } }),
-        SyncHistory.countDocuments({ 
+        InventoryTransaction.countDocuments({
           createdAt: { $gte: startOfMonth },
-          status: 'failed'
-        })
+        }),
+        SyncHistory.countDocuments({
+          createdAt: { $gte: startOfMonth },
+          status: 'failed',
+        }),
       ]);
 
-      const successRate = totalSyncs > 0 
-        ? ((successfulSyncs / totalSyncs) * 100).toFixed(2)
-        : 0;
+      const successRate =
+        totalSyncs > 0 ? ((successfulSyncs / totalSyncs) * 100).toFixed(2) : 0;
 
       res.json({
         success: true,
@@ -57,12 +62,12 @@ export class AnalyticsController {
               successfulSyncs,
               failedSyncs: totalSyncs - successfulSyncs,
               successRate: `${successRate}%`,
-              totalTransactions
+              totalTransactions,
             },
             recentErrors,
-            lastUpdated: new Date()
-          }
-        }
+            lastUpdated: new Date(),
+          },
+        },
       });
     } catch (error) {
       logger.error('Analytics overview error:', error);
@@ -76,7 +81,7 @@ export class AnalyticsController {
   async getPerformanceMetrics(req: Request, res: Response, next: NextFunction) {
     try {
       const { period = '7d' } = req.query;
-      
+
       let startDate = new Date();
       switch (period) {
         case '24h':
@@ -99,8 +104,8 @@ export class AnalyticsController {
       const syncMetrics = await SyncHistory.aggregate([
         {
           $match: {
-            createdAt: { $gte: startDate }
-          }
+            createdAt: { $gte: startDate },
+          },
         },
         {
           $group: {
@@ -108,25 +113,25 @@ export class AnalyticsController {
             count: { $sum: 1 },
             avgDuration: { $avg: '$duration' },
             minDuration: { $min: '$duration' },
-            maxDuration: { $max: '$duration' }
-          }
-        }
+            maxDuration: { $max: '$duration' },
+          },
+        },
       ]);
 
       // Get inventory sync metrics
       const inventoryMetrics = await InventoryTransaction.aggregate([
         {
           $match: {
-            createdAt: { $gte: startDate }
-          }
+            createdAt: { $gte: startDate },
+          },
         },
         {
           $group: {
             _id: '$type',
             count: { $sum: 1 },
-            totalQuantity: { $sum: '$quantity' }
-          }
-        }
+            totalQuantity: { $sum: '$quantity' },
+          },
+        },
       ]);
 
       res.json({
@@ -136,8 +141,8 @@ export class AnalyticsController {
           syncMetrics,
           inventoryMetrics,
           startDate,
-          endDate: new Date()
-        }
+          endDate: new Date(),
+        },
       });
     } catch (error) {
       logger.error('Performance metrics error:', error);
@@ -151,10 +156,10 @@ export class AnalyticsController {
   async getTrends(req: Request, res: Response, next: NextFunction) {
     try {
       const { metric = 'syncs', period = '7d' } = req.query;
-      
+
       let startDate = new Date();
       let groupBy = '$hour';
-      
+
       switch (period) {
         case '24h':
           startDate.setDate(startDate.getDate() - 1);
@@ -191,19 +196,19 @@ export class AnalyticsController {
       const trends = await collection.aggregate([
         {
           $match: {
-            createdAt: { $gte: startDate }
-          }
+            createdAt: { $gte: startDate },
+          },
         },
         {
           $group: {
             _id: groupBy,
             count: { $sum: 1 },
-            date: { $first: '$createdAt' }
-          }
+            date: { $first: '$createdAt' },
+          },
         },
         {
-          $sort: { date: 1 }
-        }
+          $sort: { date: 1 },
+        },
       ]);
 
       res.json({
@@ -213,8 +218,8 @@ export class AnalyticsController {
           period,
           trends,
           startDate,
-          endDate: new Date()
-        }
+          endDate: new Date(),
+        },
       });
     } catch (error) {
       logger.error('Trends error:', error);
@@ -249,7 +254,7 @@ export class AnalyticsController {
 
       res.json({
         success: true,
-        data: report
+        data: report,
       });
     } catch (error) {
       logger.error('Reports error:', error);
@@ -285,13 +290,16 @@ export class AnalyticsController {
         // Convert to CSV format
         const csv = this.convertToCSV(data);
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=analytics-${type}-${Date.now()}.csv`);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename=analytics-${type}-${Date.now()}.csv`
+        );
         res.send(csv);
       } else {
         res.json({
           success: true,
           data,
-          exportedAt: new Date()
+          exportedAt: new Date(),
         });
       }
     } catch (error) {
@@ -304,11 +312,13 @@ export class AnalyticsController {
   private async generateSummaryReport() {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    
+
     const [mappings, syncs, transactions] = await Promise.all([
       ProductMapping.countDocuments(),
       SyncHistory.countDocuments({ createdAt: { $gte: startOfMonth } }),
-      InventoryTransaction.countDocuments({ createdAt: { $gte: startOfMonth } })
+      InventoryTransaction.countDocuments({
+        createdAt: { $gte: startOfMonth },
+      }),
     ]);
 
     return {
@@ -316,13 +326,13 @@ export class AnalyticsController {
       generatedAt: now,
       period: {
         start: startOfMonth,
-        end: now
+        end: now,
       },
       metrics: {
         totalMappings: mappings,
         monthlySyncs: syncs,
-        monthlyTransactions: transactions
-      }
+        monthlyTransactions: transactions,
+      },
     };
   }
 
@@ -331,7 +341,7 @@ export class AnalyticsController {
     return {
       type: 'detailed',
       generatedAt: new Date(),
-      data: 'Detailed report data'
+      data: 'Detailed report data',
     };
   }
 
@@ -340,7 +350,7 @@ export class AnalyticsController {
     return {
       type: 'inventory',
       generatedAt: new Date(),
-      data: 'Inventory report data'
+      data: 'Inventory report data',
     };
   }
 
@@ -349,7 +359,7 @@ export class AnalyticsController {
     return {
       type: 'sync',
       generatedAt: new Date(),
-      data: 'Sync report data'
+      data: 'Sync report data',
     };
   }
 
@@ -372,9 +382,7 @@ export class AnalyticsController {
     // Simple CSV conversion
     if (Array.isArray(data)) {
       const headers = Object.keys(data[0] || {}).join(',');
-      const rows = data.map(item => 
-        Object.values(item).join(',')
-      ).join('\n');
+      const rows = data.map((item) => Object.values(item).join(',')).join('\n');
       return `${headers}\n${rows}`;
     }
     return '';

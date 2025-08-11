@@ -1,5 +1,5 @@
 // packages/backend/src/cron/index.ts
-import cron from 'node-cron';
+import * as cron from 'node-cron';
 import { logger } from '../utils/logger.js';
 import { ServiceContainer } from '../services/ServiceContainer.js';
 
@@ -7,63 +7,100 @@ interface CronJob {
   name: string;
   schedule: string;
   handler: () => Promise<void>;
-  enabled: boolean;
+  enabled?: boolean;
 }
 
-class CronManager {
+/**
+ * Cron Manager for scheduled tasks
+ */
+export class CronManager {
   private jobs: Map<string, cron.ScheduledTask> = new Map();
-  private services?: ServiceContainer;
+  private services: ServiceContainer;
+  private isRunning: boolean = false;
 
-  /**
-   * Setup all cron jobs
-   */
-  async setup(services: ServiceContainer): Promise<void> {
+  constructor(services: ServiceContainer) {
     this.services = services;
-    
-    const jobs: CronJob[] = [
-      {
-        name: 'Inventory Sync',
-        schedule: '0 */30 * * * *', // Every 30 minutes
-        handler: () => this.syncInventory(),
-        enabled: true
-      },
-      {
-        name: 'Price Sync',
-        schedule: '0 0 */6 * * *', // Every 6 hours
-        handler: () => this.syncPrices(),
-        enabled: true
-      },
-      {
-        name: 'Exchange Rate Update',
-        schedule: '0 0 */1 * * *', // Every hour
-        handler: () => this.updateExchangeRate(),
-        enabled: true
-      },
-      {
-        name: 'Cleanup Old Logs',
-        schedule: '0 0 3 * * *', // Daily at 3 AM
-        handler: () => this.cleanupOldLogs(),
-        enabled: true
-      },
-      {
-        name: 'Health Check Report',
-        schedule: '0 0 */1 * * *', // Every hour
-        handler: () => this.sendHealthReport(),
-        enabled: false // Disabled by default
-      }
-    ];
-
-    for (const job of jobs) {
-      if (job.enabled) {
-        this.scheduleJob(job);
-      }
-    }
-
-    logger.info(`✅ Scheduled ${this.jobs.size} cron jobs`);
   }
 
   /**
-   * Schedule a single job
+   * Start all cron jobs
+   */
+  async start(): Promise<void> {
+    if (this.isRunning) {
+      logger.warn('Cron manager already running');
+      return;
+    }
+
+    logger.info('Starting cron manager...');
+
+    const jobs: CronJob[] = [
+      {
+        name: 'Inventory Sync',
+        schedule: process.env.CRON_INVENTORY_SYNC || '0 */30 * * * *', // Every 30 minutes
+        handler: () => this.syncInventory(),
+        enabled: process.env.ENABLE_INVENTORY_SYNC === 'true',
+      },
+      {
+        name: 'Price Sync',
+        schedule: process.env.CRON_PRICE_SYNC || '0 0 */6 * * *', // Every 6 hours
+        handler: () => this.syncPrices(),
+        enabled: process.env.ENABLE_PRICE_SYNC === 'true',
+      },
+      {
+        name: 'Exchange Rate Update',
+        schedule: process.env.CRON_EXCHANGE_RATE || '0 0 2 * * *', // Daily at 2 AM
+        handler: () => this.updateExchangeRate(),
+        enabled: process.env.ENABLE_EXCHANGE_RATE_UPDATE === 'true',
+      },
+      {
+        name: 'Cleanup Old Logs',
+        schedule: process.env.CRON_CLEANUP_LOGS || '0 0 3 * * *', // Daily at 3 AM
+        handler: () => this.cleanupOldLogs(),
+        enabled: process.env.ENABLE_LOG_CLEANUP === 'true',
+      },
+      {
+        name: 'Health Report',
+        schedule: process.env.CRON_HEALTH_REPORT || '0 0 9 * * *', // Daily at 9 AM
+        handler: () => this.sendHealthReport(),
+        enabled: process.env.ENABLE_HEALTH_REPORT === 'true',
+      },
+    ];
+
+    for (const job of jobs) {
+      if (job.enabled !== false) {
+        this.scheduleJob(job);
+      } else {
+        logger.info(`Cron job ${job.name} is disabled`);
+      }
+    }
+
+    this.isRunning = true;
+    logger.info(`✅ Cron manager started with ${this.jobs.size} jobs`);
+  }
+
+  /**
+   * Stop all cron jobs
+   */
+  async stop(): Promise<void> {
+    if (!this.isRunning) {
+      return;
+    }
+
+    logger.info('Stopping cron manager...');
+
+    for (const [name, task] of this.jobs) {
+      task.stop();
+      logger.info(`Stopped cron job: ${name}`);
+    }
+
+    this.jobs.clear();
+    this.isRunning = false;
+
+    logger.info('✅ Cron manager stopped');
+  }
+
+  /**
+   * Schedule a cron job
    */
   private scheduleJob(job: CronJob): void {
     if (this.jobs.has(job.name)) {
@@ -71,25 +108,29 @@ class CronManager {
       return;
     }
 
-    const task = cron.schedule(job.schedule, async () => {
-      logger.info(`🕐 Starting cron job: ${job.name}`);
-      const startTime = Date.now();
-      
-      try {
-        await job.handler();
-        
-        const duration = Date.now() - startTime;
-        logger.info(`✅ Cron job ${job.name} completed in ${duration}ms`);
-      } catch (error) {
-        logger.error(`❌ Cron job ${job.name} failed:`, error);
+    const task = cron.schedule(
+      job.schedule,
+      async () => {
+        logger.info(`🕐 Starting cron job: ${job.name}`);
+        const startTime = Date.now();
+
+        try {
+          await job.handler();
+
+          const duration = Date.now() - startTime;
+          logger.info(`✅ Cron job ${job.name} completed in ${duration}ms`);
+        } catch (error) {
+          logger.error(`❌ Cron job ${job.name} failed:`, error);
+        }
+      },
+      {
+        scheduled: false,
       }
-    }, {
-      scheduled: false
-    });
+    );
 
     task.start();
     this.jobs.set(job.name, task);
-    
+
     logger.info(`Scheduled cron job: ${job.name} (${job.schedule})`);
   }
 
@@ -109,8 +150,8 @@ class CronManager {
         priority: 'normal',
         metadata: {
           source: 'cron',
-          scheduled: true
-        }
+          scheduled: true,
+        },
       });
     } catch (error) {
       logger.error('Inventory sync cron failed:', error);
@@ -134,8 +175,8 @@ class CronManager {
         priority: 'normal',
         metadata: {
           source: 'cron',
-          scheduled: true
-        }
+          scheduled: true,
+        },
       });
     } catch (error) {
       logger.error('Price sync cron failed:', error);
@@ -153,7 +194,9 @@ class CronManager {
     }
 
     try {
-      const exchangeRateService = this.services.getService('exchangeRateService');
+      const exchangeRateService = this.services.getService(
+        'exchangeRateService'
+      );
       await exchangeRateService.updateRates();
       logger.info('Exchange rates updated successfully');
     } catch (error) {
@@ -166,99 +209,101 @@ class CronManager {
    * Cleanup old logs
    */
   private async cleanupOldLogs(): Promise<void> {
-    // Implementation would go here
-    logger.info('Cleaning up old logs...');
-    
-    // This would typically:
-    // 1. Delete old log files
-    // 2. Clean up old database records
-    // 3. Clear old cache entries
+    try {
+      logger.info('Cleaning up old logs...');
+
+      // Import models dynamically
+      const { SystemLog, ActivityLog, SyncLog } = await import(
+        '../models/index.js'
+      );
+
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - 30); // 30 days retention
+
+      // Clean system logs
+      const systemResult = await SystemLog.deleteMany({
+        timestamp: { $lt: cutoffDate },
+      });
+      logger.info(`Deleted ${systemResult.deletedCount} old system logs`);
+
+      // Clean activity logs
+      const activityResult = await ActivityLog.deleteMany({
+        timestamp: { $lt: cutoffDate },
+      });
+      logger.info(`Deleted ${activityResult.deletedCount} old activity logs`);
+
+      // Clean sync logs
+      const syncResult = await SyncLog.deleteMany({
+        startTime: { $lt: cutoffDate },
+      });
+      logger.info(`Deleted ${syncResult.deletedCount} old sync logs`);
+
+      logger.info('✅ Log cleanup completed');
+    } catch (error) {
+      logger.error('Log cleanup cron failed:', error);
+      throw error;
+    }
   }
 
   /**
    * Send health report
    */
   private async sendHealthReport(): Promise<void> {
-    // Implementation would go here
-    logger.info('Sending health report...');
-    
-    // This would typically:
-    // 1. Collect health metrics
-    // 2. Send email or notification
-    // 3. Log to monitoring system
-  }
+    try {
+      logger.info('Generating health report...');
 
-  /**
-   * Stop all cron jobs
-   */
-  stopAll(): void {
-    for (const [name, task] of this.jobs) {
-      task.stop();
-      logger.info(`Stopped cron job: ${name}`);
-    }
-    
-    this.jobs.clear();
-    logger.info('All cron jobs stopped');
-  }
+      // Collect metrics
+      const metrics = {
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString(),
+        services: {},
+      };
 
-  /**
-   * Start specific job
-   */
-  startJob(name: string): void {
-    const task = this.jobs.get(name);
-    if (task) {
-      task.start();
-      logger.info(`Started cron job: ${name}`);
-    } else {
-      logger.warn(`Cron job not found: ${name}`);
-    }
-  }
+      // Check service health
+      if (this.services) {
+        const status = this.services.getInitializationStatus();
+        metrics.services = {
+          total: status.summary.total,
+          healthy: status.summary.success,
+          failed: status.summary.failed,
+        };
+      }
 
-  /**
-   * Stop specific job
-   */
-  stopJob(name: string): void {
-    const task = this.jobs.get(name);
-    if (task) {
-      task.stop();
-      logger.info(`Stopped cron job: ${name}`);
-    } else {
-      logger.warn(`Cron job not found: ${name}`);
+      // Send notification if notification service is available
+      if (this.services?.hasService('notificationService')) {
+        const notificationService = this.services.getService(
+          'notificationService'
+        );
+        await notificationService.send({
+          type: 'health_report',
+          title: 'Daily Health Report',
+          message: 'System health check completed',
+          data: metrics,
+          priority: 'low',
+        });
+      }
+
+      logger.info('✅ Health report sent', metrics);
+    } catch (error) {
+      logger.error('Health report cron failed:', error);
+      throw error;
     }
   }
 
   /**
    * Get job status
    */
-  getJobStatus(): Array<{ name: string; running: boolean }> {
-    const status: Array<{ name: string; running: boolean }> = [];
-    
+  getStatus(): { name: string; running: boolean }[] {
+    const status: { name: string; running: boolean }[] = [];
+
     for (const [name, task] of this.jobs) {
       status.push({
         name,
-        running: true // node-cron doesn't provide running status directly
+        running: task.getStatus() === 'scheduled',
       });
     }
-    
+
     return status;
   }
 }
-
-// Create singleton instance
-const cronManager = new CronManager();
-
-/**
- * Setup cron jobs
- */
-export async function setupCronJobs(services: ServiceContainer): Promise<void> {
-  await cronManager.setup(services);
-}
-
-/**
- * Stop all cron jobs
- */
-export function stopCronJobs(): void {
-  cronManager.stopAll();
-}
-
-export { cronManager };

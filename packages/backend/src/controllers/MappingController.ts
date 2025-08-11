@@ -42,7 +42,7 @@ export class MappingController {
   constructor(mappingService?: MappingService) {
     this.mappingService = mappingService || null;
     this.shopifySearchService = null;
-    
+
     try {
       this.shopifySearchService = new ShopifyProductSearchService();
     } catch (error) {
@@ -75,10 +75,14 @@ export class MappingController {
    * 매핑 생성
    * POST /api/v1/mappings
    */
-  async createMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async createMapping(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     let session: any = null;
-    const useTransaction = shouldUseTransaction() && await isReplicaSet();
-    
+    const useTransaction = shouldUseTransaction() && (await isReplicaSet());
+
     try {
       const {
         sku,
@@ -89,7 +93,7 @@ export class MappingController {
         vendor = 'album',
         priceMargin = 0.15,
         isActive = true,
-        autoSearch = false
+        autoSearch = false,
       } = req.body;
 
       if (!sku) {
@@ -108,20 +112,24 @@ export class MappingController {
       }
 
       // 중복 확인
-      const existingMapping = await ProductMapping.findOne({ 
-        sku: sku.toUpperCase() 
+      const existingMapping = await ProductMapping.findOne({
+        sku: sku.toUpperCase(),
       }).session(useTransaction ? session : null);
-      
+
       if (existingMapping) {
         throw new AppError('SKU already exists', 409);
       }
 
       // 매핑 상태 결정
-      const mappingStatus = (
-        !naverProductId || naverProductId === 'PENDING' || 
-        !shopifyProductId || shopifyProductId === 'PENDING' || 
-        !shopifyVariantId || shopifyVariantId === 'PENDING'
-      ) ? 'PENDING' : 'ACTIVE';
+      const mappingStatus =
+        !naverProductId ||
+        naverProductId === 'PENDING' ||
+        !shopifyProductId ||
+        shopifyProductId === 'PENDING' ||
+        !shopifyVariantId ||
+        shopifyVariantId === 'PENDING'
+          ? 'PENDING'
+          : 'ACTIVE';
 
       // 매핑 생성
       const mappingData = {
@@ -139,11 +147,11 @@ export class MappingController {
         metadata: {
           createdBy: (req as any).user?.id,
           autoSearchUsed: autoSearch,
-          createdAt: new Date()
-        }
+          createdAt: new Date(),
+        },
       };
 
-      const mapping = useTransaction 
+      const mapping = useTransaction
         ? await ProductMapping.create([mappingData], { session })
         : await ProductMapping.create(mappingData);
 
@@ -158,9 +166,9 @@ export class MappingController {
           action: `매핑 생성: ${sku}`,
           details: {
             autoSearch,
-            status: mappingStatus
+            status: mappingStatus,
           },
-          userId: (req as any).user?.id
+          userId: (req as any).user?.id,
         });
       } catch (activityError) {
         logger.error('Failed to create activity log:', activityError);
@@ -173,9 +181,10 @@ export class MappingController {
       res.status(201).json({
         success: true,
         data: responseMapping,
-        message: mappingStatus === 'PENDING' 
-          ? '매핑이 생성되었으나 일부 정보가 누락되었습니다. 수동으로 업데이트해주세요.'
-          : '매핑이 성공적으로 생성되었습니다.'
+        message:
+          mappingStatus === 'PENDING'
+            ? '매핑이 생성되었으나 일부 정보가 누락되었습니다. 수동으로 업데이트해주세요.'
+            : '매핑이 성공적으로 생성되었습니다.',
       });
     } catch (error) {
       if (useTransaction && session) {
@@ -194,7 +203,11 @@ export class MappingController {
    * 매핑 업데이트
    * PUT /api/v1/mappings/:id
    */
-  async updateMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async updateMapping(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { id } = req.params;
       const updates = req.body;
@@ -220,20 +233,22 @@ export class MappingController {
         'vendor',
         'priceMargin',
         'isActive',
-        'status'
+        'status',
       ];
 
-      allowedUpdates.forEach(field => {
+      allowedUpdates.forEach((field) => {
         if (updates[field] !== undefined) {
           (mapping as any)[field] = updates[field];
         }
       });
 
       // PENDING 상태에서 모든 ID가 채워지면 ACTIVE로 변경
-      if (mapping.status === 'PENDING' &&
-          mapping.naverProductId !== 'PENDING' &&
-          mapping.shopifyProductId !== 'PENDING' &&
-          mapping.shopifyVariantId !== 'PENDING') {
+      if (
+        mapping.status === 'PENDING' &&
+        mapping.naverProductId !== 'PENDING' &&
+        mapping.shopifyProductId !== 'PENDING' &&
+        mapping.shopifyVariantId !== 'PENDING'
+      ) {
         mapping.status = 'ACTIVE';
         mapping.isActive = true;
       }
@@ -245,13 +260,13 @@ export class MappingController {
         type: 'mapping_updated',
         action: `매핑 업데이트: ${mapping.sku}`,
         details: updates,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
         success: true,
         data: mapping,
-        message: '매핑이 업데이트되었습니다.'
+        message: '매핑이 업데이트되었습니다.',
       });
     } catch (error) {
       next(error);
@@ -262,7 +277,11 @@ export class MappingController {
    * 매핑 삭제
    * DELETE /api/v1/mappings/:id
    */
-  async deleteMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async deleteMapping(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { id } = req.params;
 
@@ -277,12 +296,12 @@ export class MappingController {
       await Activity.create({
         type: 'mapping_deleted',
         action: `매핑 삭제: ${mapping.sku}`,
-        userId: (req as any).user?.id
+        userId: (req as any).user?.id,
       });
 
       res.json({
         success: true,
-        message: '매핑이 삭제되었습니다.'
+        message: '매핑이 삭제되었습니다.',
       });
     } catch (error) {
       next(error);
@@ -293,19 +312,23 @@ export class MappingController {
    * 모든 매핑 조회
    * GET /api/v1/mappings
    */
-  async getAllMappings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getAllMappings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
-      const { 
-        page = 1, 
-        limit = 20, 
-        status, 
+      const {
+        page = 1,
+        limit = 20,
+        status,
         search,
         isActive,
         syncStatus,
         vendor,
         sortBy = 'createdAt',
         sortOrder = 'desc',
-        order = 'desc'
+        order = 'desc',
       } = req.query;
 
       const query: any = {};
@@ -333,7 +356,7 @@ export class MappingController {
           { productName: searchRegex },
           { vendor: searchRegex },
           { naverProductId: searchRegex },
-          { shopifyProductId: searchRegex }
+          { shopifyProductId: searchRegex },
         ];
       }
 
@@ -343,8 +366,7 @@ export class MappingController {
 
       logger.info('Fetching mappings with query:', query);
 
-      const mappings = await ProductMapping
-        .find(query)
+      const mappings = await ProductMapping.find(query)
         .sort(sort)
         .limit(Number(limit))
         .skip((Number(page) - 1) * Number(limit))
@@ -359,17 +381,17 @@ export class MappingController {
         inactiveCount,
         errorCount,
         pendingCount,
-        syncNeededCount
+        syncNeededCount,
       ] = await Promise.all([
         ProductMapping.countDocuments({}),
         ProductMapping.countDocuments({ isActive: true, status: 'ACTIVE' }),
         ProductMapping.countDocuments({ isActive: false }),
         ProductMapping.countDocuments({ status: 'ERROR' }),
         ProductMapping.countDocuments({ status: 'PENDING' }),
-        ProductMapping.countDocuments({ 
+        ProductMapping.countDocuments({
           syncStatus: { $in: ['pending', 'failed'] },
-          status: 'ACTIVE'
-        })
+          status: 'ACTIVE',
+        }),
       ]);
 
       logger.info(`Found ${mappings.length} mappings, total: ${total}`);
@@ -382,7 +404,7 @@ export class MappingController {
             total,
             page: Number(page),
             limit: Number(limit),
-            totalPages: Math.ceil(total / Number(limit))
+            totalPages: Math.ceil(total / Number(limit)),
           },
           stats: {
             total: totalCount,
@@ -390,9 +412,9 @@ export class MappingController {
             inactive: inactiveCount,
             error: errorCount,
             pending: pendingCount,
-            syncNeeded: syncNeededCount
-          }
-        }
+            syncNeeded: syncNeededCount,
+          },
+        },
       });
     } catch (error) {
       logger.error('Failed to get mappings:', error);
@@ -404,7 +426,11 @@ export class MappingController {
    * ID로 매핑 조회
    * GET /api/v1/mappings/:id
    */
-  async getMappingById(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getMappingById(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { id } = req.params;
 
@@ -415,7 +441,7 @@ export class MappingController {
 
       res.json({
         success: true,
-        data: mapping
+        data: mapping,
       });
     } catch (error) {
       next(error);
@@ -426,12 +452,16 @@ export class MappingController {
    * SKU로 매핑 조회
    * GET /api/v1/mappings/sku/:sku
    */
-  async getMappingBySku(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getMappingBySku(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { sku } = req.params;
 
-      const mapping = await ProductMapping.findOne({ 
-        sku: sku.toUpperCase() 
+      const mapping = await ProductMapping.findOne({
+        sku: sku.toUpperCase(),
       });
 
       if (!mapping) {
@@ -440,7 +470,7 @@ export class MappingController {
 
       res.json({
         success: true,
-        data: mapping
+        data: mapping,
       });
     } catch (error) {
       next(error);
@@ -451,49 +481,57 @@ export class MappingController {
    * 자동 매핑 탐색
    * POST /api/v1/mappings/auto-discover
    */
-  async autoDiscoverMappings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async autoDiscoverMappings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { matchBy = 'sku', limit = 100 } = req.body;
 
       const discoveries = [];
 
       if (this.mappingService) {
-        const naverProductService = (this.mappingService as any).naverProductService;
-        
+        const naverProductService = (this.mappingService as any)
+          .naverProductService;
+
         if (naverProductService) {
           try {
-            const naverProducts = await naverProductService.listProducts({ 
+            const naverProducts = await naverProductService.listProducts({
               limit,
-              saleStatus: 'ALL'
+              saleStatus: 'ALL',
             });
-            
+
             if (naverProducts && naverProducts.items) {
               for (const naverProduct of naverProducts.items) {
-                const sku = naverProduct.sellerManagementCode || naverProduct.sku;
-                
+                const sku =
+                  naverProduct.sellerManagementCode || naverProduct.sku;
+
                 if (sku) {
-                  const existingMapping = await ProductMapping.findOne({ 
-                    sku: sku.toUpperCase() 
+                  const existingMapping = await ProductMapping.findOne({
+                    sku: sku.toUpperCase(),
                   });
-                  
+
                   if (!existingMapping) {
-                    const shopifyProduct = await this.searchShopifyProducts(sku);
-                    
+                    const shopifyProduct =
+                      await this.searchShopifyProducts(sku);
+
                     if (shopifyProduct) {
                       discoveries.push({
                         sku: sku.toUpperCase(),
                         naver: {
-                          productId: naverProduct.productNo || naverProduct.productId,
+                          productId:
+                            naverProduct.productNo || naverProduct.productId,
                           name: naverProduct.name,
-                          price: naverProduct.salePrice
+                          price: naverProduct.salePrice,
                         },
                         shopify: {
                           productId: shopifyProduct.product_id,
                           variantId: shopifyProduct.id,
                           title: shopifyProduct.product_title,
-                          price: shopifyProduct.price
+                          price: shopifyProduct.price,
                         },
-                        confidence: 100
+                        confidence: 100,
                       });
                     }
                   }
@@ -509,7 +547,7 @@ export class MappingController {
       res.json({
         success: true,
         data: discoveries,
-        message: `${discoveries.length}개의 매핑을 발견했습니다.`
+        message: `${discoveries.length}개의 매핑을 발견했습니다.`,
       });
     } catch (error) {
       next(error);
@@ -520,7 +558,11 @@ export class MappingController {
    * 매핑 검증
    * POST /api/v1/mappings/:id/validate
    */
-  async validateMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async validateMapping(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { id } = req.params;
 
@@ -537,7 +579,7 @@ export class MappingController {
 
       res.json({
         success: true,
-        data: validation
+        data: validation,
       });
     } catch (error) {
       next(error);
@@ -548,9 +590,13 @@ export class MappingController {
    * 대량 매핑 업로드
    * POST /api/v1/mappings/bulk
    */
-  async bulkUploadMappings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async bulkUploadMappings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     let session: any = null;
-    const useTransaction = shouldUseTransaction() && await isReplicaSet();
+    const useTransaction = shouldUseTransaction() && (await isReplicaSet());
 
     try {
       const { mappings } = req.body;
@@ -568,7 +614,7 @@ export class MappingController {
       const results = {
         success: 0,
         failed: 0,
-        errors: [] as any[]
+        errors: [] as any[],
       };
 
       for (const mappingData of mappings) {
@@ -577,20 +623,20 @@ export class MappingController {
             results.failed++;
             results.errors.push({
               sku: mappingData.sku,
-              error: 'Invalid SKU format'
+              error: 'Invalid SKU format',
             });
             continue;
           }
 
-          const existing = await ProductMapping.findOne({ 
-            sku: mappingData.sku.toUpperCase() 
+          const existing = await ProductMapping.findOne({
+            sku: mappingData.sku.toUpperCase(),
           }).session(useTransaction ? session : null);
 
           if (existing) {
             results.failed++;
             results.errors.push({
               sku: mappingData.sku,
-              error: 'SKU already exists'
+              error: 'SKU already exists',
             });
             continue;
           }
@@ -599,7 +645,7 @@ export class MappingController {
             ...mappingData,
             sku: mappingData.sku.toUpperCase(),
             status: 'ACTIVE',
-            syncStatus: 'pending'
+            syncStatus: 'pending',
           };
 
           if (useTransaction) {
@@ -613,7 +659,7 @@ export class MappingController {
           results.failed++;
           results.errors.push({
             sku: mappingData.sku,
-            error: error.message
+            error: error.message,
           });
         }
       }
@@ -625,7 +671,7 @@ export class MappingController {
       res.json({
         success: true,
         data: results,
-        message: `${results.success}개 성공, ${results.failed}개 실패`
+        message: `${results.success}개 성공, ${results.failed}개 실패`,
       });
     } catch (error) {
       if (useTransaction && session) {
@@ -644,7 +690,11 @@ export class MappingController {
    * SKU로 상품 검색
    * GET /api/v1/mappings/search-by-sku
    */
-  async searchProductsBySku(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async searchProductsBySku(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const sku = req.params.sku || req.query.sku;
 
@@ -663,95 +713,116 @@ export class MappingController {
           found: false,
           products: [] as any[],
           message: '',
-          error: ''
+          error: '',
         },
         shopify: {
           found: false,
           products: [] as any[],
           message: '',
-          error: ''
+          error: '',
         },
         recommendations: {
           autoMappingPossible: false,
-          confidence: 0
-        }
+          confidence: 0,
+        },
       };
 
       const searchPromises = [];
 
       // 네이버 상품 검색
       if (this.mappingService) {
-        const naverProductService = (this.mappingService as any).naverProductService;
-        
+        const naverProductService = (this.mappingService as any)
+          .naverProductService;
+
         if (naverProductService) {
           const naverPromise = (async () => {
             try {
               logger.info('Searching Naver products...');
-              
+
               let naverProducts: any[] = [];
-              
+
               try {
-                const skuSearchResult = await naverProductService.searchProducts({
-                  searchKeyword: skuUpper,
-                  searchType: 'SELLER_MANAGEMENT_CODE',
-                  page: 1,
-                  size: 10
-                });
-                
+                const skuSearchResult =
+                  await naverProductService.searchProducts({
+                    searchKeyword: skuUpper,
+                    searchType: 'SELLER_MANAGEMENT_CODE',
+                    page: 1,
+                    size: 10,
+                  });
+
                 if (skuSearchResult && skuSearchResult.contents) {
                   const flatProducts = [];
                   for (const item of skuSearchResult.contents) {
-                    if (item.channelProducts && Array.isArray(item.channelProducts)) {
+                    if (
+                      item.channelProducts &&
+                      Array.isArray(item.channelProducts)
+                    ) {
                       for (const channelProduct of item.channelProducts) {
                         flatProducts.push({
                           ...channelProduct,
-                          originProductNo: item.originProductNo
+                          originProductNo: item.originProductNo,
                         });
                       }
                     } else {
                       flatProducts.push(item);
                     }
                   }
-                  
+
                   if (flatProducts.length > 0) {
-                    naverProducts = flatProducts.map(product => ({
-                      id: product.channelProductNo || product.productNo || product.id,
+                    naverProducts = flatProducts.map((product) => ({
+                      id:
+                        product.channelProductNo ||
+                        product.productNo ||
+                        product.id,
                       name: product.name || product.productName || '',
                       sku: product.sellerManagementCode || skuUpper,
                       price: product.salePrice || 0,
-                      imageUrl: product.representativeImage?.url || product.images?.[0]?.url || '',
+                      imageUrl:
+                        product.representativeImage?.url ||
+                        product.images?.[0]?.url ||
+                        '',
                       stockQuantity: product.stockQuantity || 0,
-                      status: product.statusType || product.saleStatus || 'UNKNOWN',
-                      similarity: 100
+                      status:
+                        product.statusType || product.saleStatus || 'UNKNOWN',
+                      similarity: 100,
                     }));
                   }
                 }
               } catch (skuError: any) {
-                logger.warn('SKU search failed, trying keyword search:', skuError.message);
+                logger.warn(
+                  'SKU search failed, trying keyword search:',
+                  skuError.message
+                );
               }
-              
+
               if (naverProducts.length === 0) {
                 const keywordResult = await naverProductService.searchProducts({
                   searchKeyword: skuUpper,
                   searchType: 'PRODUCT_NAME',
                   page: 1,
-                  size: 5
+                  size: 5,
                 });
-                
+
                 if (keywordResult && keywordResult.contents) {
-                  naverProducts = keywordResult.contents.map((product: any) => ({
-                    id: product.productNo || product.id,
-                    name: product.name || '',
-                    sku: product.sellerManagementCode || '',
-                    price: product.salePrice || 0,
-                    imageUrl: product.representativeImage?.url || '',
-                    stockQuantity: product.stockQuantity || 0,
-                    status: product.statusType || 'UNKNOWN',
-                    similarity: product.sellerManagementCode?.includes(skuUpper) ? 80 : 50
-                  }));
+                  naverProducts = keywordResult.contents.map(
+                    (product: any) => ({
+                      id: product.productNo || product.id,
+                      name: product.name || '',
+                      sku: product.sellerManagementCode || '',
+                      price: product.salePrice || 0,
+                      imageUrl: product.representativeImage?.url || '',
+                      stockQuantity: product.stockQuantity || 0,
+                      status: product.statusType || 'UNKNOWN',
+                      similarity: product.sellerManagementCode?.includes(
+                        skuUpper
+                      )
+                        ? 80
+                        : 50,
+                    })
+                  );
                 }
               }
-              
+
               if (naverProducts.length > 0) {
                 searchResults.naver.found = true;
                 searchResults.naver.products = naverProducts;
@@ -761,10 +832,11 @@ export class MappingController {
               }
             } catch (error: any) {
               logger.error('Naver search error:', error);
-              searchResults.naver.error = error.message || 'Naver 검색 중 오류가 발생했습니다.';
+              searchResults.naver.error =
+                error.message || 'Naver 검색 중 오류가 발생했습니다.';
             }
           })();
-          
+
           searchPromises.push(naverPromise);
         }
       }
@@ -774,33 +846,41 @@ export class MappingController {
         const shopifyPromise = (async () => {
           try {
             logger.info('Searching Shopify products...');
-            
-            const shopifyResult = await this.shopifySearchService.searchBySKU(skuUpper);
-            
-            if (shopifyResult && shopifyResult.found && shopifyResult.products.length > 0) {
+
+            const shopifyResult =
+              await this.shopifySearchService.searchBySKU(skuUpper);
+
+            if (
+              shopifyResult &&
+              shopifyResult.found &&
+              shopifyResult.products.length > 0
+            ) {
               searchResults.shopify.found = true;
-              searchResults.shopify.products = shopifyResult.products.map((product: any) => ({
-                id: product.product_id,
-                variantId: product.id,
-                title: product.product_title,
-                variantTitle: product.title,
-                sku: product.sku,
-                price: product.price,
-                imageUrl: product.image?.src || '',
-                inventoryQuantity: product.inventory_quantity || 0,
-                vendor: product.vendor || '',
-                similarity: product.similarity || 100
-              }));
+              searchResults.shopify.products = shopifyResult.products.map(
+                (product: any) => ({
+                  id: product.product_id,
+                  variantId: product.id,
+                  title: product.product_title,
+                  variantTitle: product.title,
+                  sku: product.sku,
+                  price: product.price,
+                  imageUrl: product.image?.src || '',
+                  inventoryQuantity: product.inventory_quantity || 0,
+                  vendor: product.vendor || '',
+                  similarity: product.similarity || 100,
+                })
+              );
               searchResults.shopify.message = `${shopifyResult.products.length}개의 상품을 찾았습니다.`;
             } else {
               searchResults.shopify.message = '검색 결과가 없습니다.';
             }
           } catch (error: any) {
             logger.error('Shopify search error:', error);
-            searchResults.shopify.error = error.message || 'Shopify 검색 중 오류가 발생했습니다.';
+            searchResults.shopify.error =
+              error.message || 'Shopify 검색 중 오류가 발생했습니다.';
           }
         })();
-        
+
         searchPromises.push(shopifyPromise);
       }
 
@@ -809,13 +889,20 @@ export class MappingController {
 
       // 자동 매핑 가능 여부 판단
       if (searchResults.naver.found && searchResults.shopify.found) {
-        const naverExactMatch = searchResults.naver.products.find(p => p.sku === skuUpper);
-        const shopifyExactMatch = searchResults.shopify.products.find(p => p.sku === skuUpper);
-        
+        const naverExactMatch = searchResults.naver.products.find(
+          (p) => p.sku === skuUpper
+        );
+        const shopifyExactMatch = searchResults.shopify.products.find(
+          (p) => p.sku === skuUpper
+        );
+
         if (naverExactMatch && shopifyExactMatch) {
           searchResults.recommendations.autoMappingPossible = true;
           searchResults.recommendations.confidence = 100;
-        } else if (searchResults.naver.products.length === 1 && searchResults.shopify.products.length === 1) {
+        } else if (
+          searchResults.naver.products.length === 1 &&
+          searchResults.shopify.products.length === 1
+        ) {
           searchResults.recommendations.autoMappingPossible = true;
           searchResults.recommendations.confidence = 80;
         }
@@ -823,7 +910,7 @@ export class MappingController {
 
       res.json({
         success: true,
-        data: searchResults
+        data: searchResults,
       });
     } catch (error) {
       logger.error('Product search error:', error);
@@ -835,7 +922,11 @@ export class MappingController {
    * PENDING 매핑 재시도
    * POST /api/v1/mappings/:id/retry
    */
-  async retryPendingMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async retryPendingMapping(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { id } = req.params;
 
@@ -853,10 +944,14 @@ export class MappingController {
       mapping.lastRetryAt = new Date();
 
       // 자동 검색 시도
-      const searchResults = await this.searchProductsBySku({
-        params: { sku: mapping.sku },
-        query: {}
-      } as any, res, next);
+      const searchResults = await this.searchProductsBySku(
+        {
+          params: { sku: mapping.sku },
+          query: {},
+        } as any,
+        res,
+        next
+      );
 
       // 검색 결과가 있으면 업데이트
       if (searchResults) {
@@ -877,9 +972,11 @@ export class MappingController {
         }
 
         // 모든 필드가 채워졌으면 ACTIVE로 변경
-        if (mapping.naverProductId !== 'PENDING' &&
-            mapping.shopifyProductId !== 'PENDING' &&
-            mapping.shopifyVariantId !== 'PENDING') {
+        if (
+          mapping.naverProductId !== 'PENDING' &&
+          mapping.shopifyProductId !== 'PENDING' &&
+          mapping.shopifyVariantId !== 'PENDING'
+        ) {
           mapping.status = 'ACTIVE';
           mapping.isActive = true;
         }
@@ -890,9 +987,10 @@ export class MappingController {
       res.json({
         success: true,
         data: mapping,
-        message: mapping.status === 'ACTIVE' 
-          ? '매핑이 업데이트되었습니다.'
-          : '일부 정보를 찾을 수 없습니다. 수동으로 입력해주세요.'
+        message:
+          mapping.status === 'ACTIVE'
+            ? '매핑이 업데이트되었습니다.'
+            : '일부 정보를 찾을 수 없습니다. 수동으로 입력해주세요.',
       });
     } catch (error) {
       next(error);
@@ -903,7 +1001,11 @@ export class MappingController {
    * 매핑 내보내기
    * GET /api/v1/mappings/export
    */
-  async exportMappings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async exportMappings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { format = 'json' } = req.query;
 
@@ -912,21 +1014,35 @@ export class MappingController {
       if (format === 'csv') {
         const csv = this.convertToCSV(mappings);
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', 'attachment; filename=mappings.csv');
+        res.setHeader(
+          'Content-Disposition',
+          'attachment; filename=mappings.csv'
+        );
         res.send(csv);
       } else if (format === 'xlsx') {
-        const worksheet = XLSX.utils.json_to_sheet(mappings.map(m => m.toObject()));
+        const worksheet = XLSX.utils.json_to_sheet(
+          mappings.map((m) => m.toObject())
+        );
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Mappings');
-        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-        
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', 'attachment; filename=mappings.xlsx');
+        const buffer = XLSX.write(workbook, {
+          type: 'buffer',
+          bookType: 'xlsx',
+        });
+
+        res.setHeader(
+          'Content-Type',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader(
+          'Content-Disposition',
+          'attachment; filename=mappings.xlsx'
+        );
         res.send(buffer);
       } else {
         res.json({
           success: true,
-          data: mappings
+          data: mappings,
         });
       }
     } catch (error) {
@@ -938,7 +1054,11 @@ export class MappingController {
    * 매핑 가져오기
    * POST /api/v1/mappings/import
    */
-  async importMappings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async importMappings(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { data, format = 'json' } = req.body;
 
@@ -961,7 +1081,11 @@ export class MappingController {
    * 매핑 동기화
    * POST /api/v1/mappings/:id/sync
    */
-  async syncMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async syncMapping(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { id } = req.params;
 
@@ -979,7 +1103,7 @@ export class MappingController {
       res.json({
         success: true,
         data: syncResult,
-        message: '동기화가 시작되었습니다.'
+        message: '동기화가 시작되었습니다.',
       });
     } catch (error) {
       next(error);
@@ -990,12 +1114,19 @@ export class MappingController {
    * 매핑 데이터 검증
    * POST /api/v1/mappings/validate
    */
-  async validateMappingData(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async validateMappingData(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
       const { sku, naverProductId, shopifyProductId } = req.body;
 
       if (!sku || !naverProductId || !shopifyProductId) {
-        throw new AppError('SKU, naverProductId, and shopifyProductId are required', 400);
+        throw new AppError(
+          'SKU, naverProductId, and shopifyProductId are required',
+          400
+        );
       }
 
       if (!this.mappingService) {
@@ -1005,12 +1136,12 @@ export class MappingController {
       const validation = await this.mappingService.validateMappingData({
         sku,
         naverProductId,
-        shopifyProductId
+        shopifyProductId,
       });
 
       res.json({
         success: true,
-        data: validation
+        data: validation,
       });
     } catch (error) {
       next(error);
@@ -1021,26 +1152,24 @@ export class MappingController {
    * 매핑 통계 조회
    * GET /api/v1/mappings/stats
    */
-  async getMappingStats(req: Request, res: Response, next: NextFunction): Promise<void> {
+  async getMappingStats(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
     try {
-      const [
-        total,
-        active,
-        inactive,
-        error,
-        pending,
-        syncNeeded
-      ] = await Promise.all([
-        ProductMapping.countDocuments({}),
-        ProductMapping.countDocuments({ isActive: true, status: 'ACTIVE' }),
-        ProductMapping.countDocuments({ isActive: false }),
-        ProductMapping.countDocuments({ status: 'ERROR' }),
-        ProductMapping.countDocuments({ status: 'PENDING' }),
-        ProductMapping.countDocuments({ 
-          syncStatus: { $in: ['pending', 'failed'] },
-          status: 'ACTIVE'
-        })
-      ]);
+      const [total, active, inactive, error, pending, syncNeeded] =
+        await Promise.all([
+          ProductMapping.countDocuments({}),
+          ProductMapping.countDocuments({ isActive: true, status: 'ACTIVE' }),
+          ProductMapping.countDocuments({ isActive: false }),
+          ProductMapping.countDocuments({ status: 'ERROR' }),
+          ProductMapping.countDocuments({ status: 'PENDING' }),
+          ProductMapping.countDocuments({
+            syncStatus: { $in: ['pending', 'failed'] },
+            status: 'ACTIVE',
+          }),
+        ]);
 
       res.json({
         success: true,
@@ -1050,8 +1179,8 @@ export class MappingController {
           inactive,
           error,
           pending,
-          syncNeeded
-        }
+          syncNeeded,
+        },
       });
     } catch (error) {
       next(error);
@@ -1074,10 +1203,10 @@ export class MappingController {
       'Status',
       'Sync Status',
       'Created At',
-      'Updated At'
+      'Updated At',
     ];
 
-    const rows = mappings.map(m => [
+    const rows = mappings.map((m) => [
       m.sku,
       m.naverProductId,
       m.shopifyProductId,
@@ -1089,12 +1218,10 @@ export class MappingController {
       m.status,
       m.syncStatus,
       m.createdAt,
-      m.updatedAt
+      m.updatedAt,
     ]);
 
-    return [headers, ...rows]
-      .map(row => row.join(','))
-      .join('\n');
+    return [headers, ...rows].map((row) => row.join(',')).join('\n');
   }
 
   /**
@@ -1103,16 +1230,16 @@ export class MappingController {
   private parseCSV(data: string): any[] {
     const lines = data.split('\n');
     const headers = lines[0].split(',');
-    
-    return lines.slice(1).map(line => {
+
+    return lines.slice(1).map((line) => {
       const values = line.split(',');
       const mapping: any = {};
-      
+
       headers.forEach((header, index) => {
         const key = header.toLowerCase().replace(/ /g, '');
         mapping[key] = values[index];
       });
-      
+
       return mapping;
     });
   }

@@ -18,26 +18,26 @@ const SystemLogSchema = new Schema<ISystemLog>(
       type: String,
       enum: ['error', 'warn', 'info', 'debug'],
       required: true,
-      index: true
+      index: true,
     },
     message: {
       type: String,
-      required: true
+      required: true,
     },
     metadata: {
       type: Map,
-      of: Schema.Types.Mixed
+      of: Schema.Types.Mixed,
     },
     source: String,
     stack: String,
     timestamp: {
       type: Date,
       default: Date.now,
-      index: true
-    }
+      index: true,
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 
@@ -47,4 +47,7 @@ SystemLogSchema.index(
   { expireAfterSeconds: 30 * 24 * 60 * 60 }
 );
 
-export const SystemLog = mongoose.model<ISystemLog>('SystemLog', SystemLogSchema);
+export const SystemLog = mongoose.model<ISystemLog>(
+  'SystemLog',
+  SystemLogSchema
+);

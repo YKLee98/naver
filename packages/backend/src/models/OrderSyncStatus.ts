@@ -112,4 +112,3 @@ export const OrderSyncStatus = model<IOrderSyncStatus>(
   'OrderSyncStatus',
   OrderSyncStatusSchema
 );
-

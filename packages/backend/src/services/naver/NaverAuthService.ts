@@ -34,7 +34,7 @@ export class NaverAuthService extends BaseService {
       name: 'NaverAuthService',
       version: '2.0.0',
       redis,
-      config: customConfig
+      config: customConfig,
     });
 
     // Initialize configuration
@@ -45,7 +45,7 @@ export class NaverAuthService extends BaseService {
       storeId: customConfig?.storeId || config.naver.storeId,
       tokenCacheTTL: customConfig?.tokenCacheTTL || 3000, // 50 minutes (token expires in 60)
       maxRetries: customConfig?.maxRetries || 3,
-      timeout: customConfig?.timeout || 30000
+      timeout: customConfig?.timeout || 30000,
     };
 
     // Create axios instance
@@ -53,8 +53,8 @@ export class NaverAuthService extends BaseService {
       baseURL: this.authConfig.apiBaseUrl,
       timeout: this.authConfig.timeout,
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
     });
 
     this.setupAxiosInterceptors();
@@ -63,22 +63,25 @@ export class NaverAuthService extends BaseService {
   /**
    * Initialize service
    */
-  protected async onInitialize(): Promise<void> {
+  protected override async onInitialize(): Promise<void> {
     this.validateConfiguration();
-    
+
     // Test authentication on initialization
     try {
       await this.getToken();
       logger.info('Naver authentication test successful');
     } catch (error) {
-      logger.warn('Naver authentication test failed, will retry on first request:', error);
+      logger.warn(
+        'Naver authentication test failed, will retry on first request:',
+        error
+      );
     }
   }
 
   /**
    * Cleanup service
    */
-  protected async onCleanup(): Promise<void> {
+  protected override async onCleanup(): Promise<void> {
     // Clear token cache
     if (this.redis) {
       await this.redis.del(this.tokenCacheKey);
@@ -90,10 +93,14 @@ export class NaverAuthService extends BaseService {
    */
   private validateConfiguration(): void {
     const required = ['clientId', 'clientSecret', 'apiBaseUrl', 'storeId'];
-    const missing = required.filter(key => !this.authConfig[key as keyof NaverAuthConfig]);
+    const missing = required.filter(
+      (key) => !this.authConfig[key as keyof NaverAuthConfig]
+    );
 
     if (missing.length > 0) {
-      throw new Error(`Missing required Naver configuration: ${missing.join(', ')}`);
+      throw new Error(
+        `Missing required Naver configuration: ${missing.join(', ')}`
+      );
     }
 
     // Validate client secret format
@@ -106,7 +113,7 @@ export class NaverAuthService extends BaseService {
       apiBaseUrl: this.authConfig.apiBaseUrl,
       storeId: this.authConfig.storeId,
       secretType: this.detectSecretType(),
-      secretLength: this.authConfig.clientSecret.length
+      secretLength: this.authConfig.clientSecret.length,
     });
   }
 
@@ -120,7 +127,7 @@ export class NaverAuthService extends BaseService {
         logger.debug('Naver API request:', {
           method: config.method,
           url: config.url,
-          params: config.params
+          params: config.params,
         });
         return config;
       },
@@ -135,18 +142,20 @@ export class NaverAuthService extends BaseService {
       (response) => {
         logger.debug('Naver API response:', {
           status: response.status,
-          url: response.config.url
+          url: response.config.url,
         });
         return response;
       },
       async (error: AxiosError) => {
-        const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+        const originalRequest = error.config as AxiosRequestConfig & {
+          _retry?: boolean;
+        };
 
         // Log error details
         logger.error('Naver API error response:', {
           status: error.response?.status,
           data: error.response?.data,
-          url: originalRequest?.url
+          url: originalRequest?.url,
         });
 
         // Handle 401 errors (token expired)
@@ -156,15 +165,16 @@ export class NaverAuthService extends BaseService {
           try {
             // Clear cached token
             await this.clearCachedToken();
-            
+
             // Get new token
             const token = await this.getToken();
-            
+
             // Retry original request with new token
             if (originalRequest.headers) {
-              originalRequest.headers['Authorization'] = `Bearer ${token.access_token}`;
+              originalRequest.headers['Authorization'] =
+                `Bearer ${token.access_token}`;
             }
-            
+
             return this.axiosInstance(originalRequest);
           } catch (refreshError) {
             logger.error('Token refresh failed:', refreshError);
@@ -185,7 +195,7 @@ export class NaverAuthService extends BaseService {
     if (secret.startsWith('$2a$') || secret.startsWith('$2b$')) {
       return secret.length >= 29;
     }
-    
+
     // Check if it's a regular secret
     return secret.length >= 16;
   }
@@ -195,15 +205,15 @@ export class NaverAuthService extends BaseService {
    */
   private detectSecretType(): 'bcrypt' | 'plain' | 'unknown' {
     const secret = this.authConfig.clientSecret;
-    
+
     if (secret.startsWith('$2a$') || secret.startsWith('$2b$')) {
       return 'bcrypt';
     }
-    
+
     if (secret.length >= 16 && /^[a-zA-Z0-9]+$/.test(secret)) {
       return 'plain';
     }
-    
+
     return 'unknown';
   }
 
@@ -213,12 +223,12 @@ export class NaverAuthService extends BaseService {
   private async generateSignature(timestamp: string): Promise<string> {
     const secretType = this.detectSecretType();
     const password = `${this.authConfig.clientId}_${timestamp}`;
-    
+
     logger.debug('Generating Naver signature', {
       clientId: this.authConfig.clientId,
       timestamp,
       secretType,
-      passwordFormat: password
+      passwordFormat: password,
     });
 
     try {
@@ -226,12 +236,12 @@ export class NaverAuthService extends BaseService {
         // Use bcrypt salt method
         const hashed = bcrypt.hashSync(password, this.authConfig.clientSecret);
         const signature = Buffer.from(hashed).toString('base64');
-        
+
         logger.debug('Generated bcrypt signature', {
           signatureLength: signature.length,
-          signaturePreview: signature.substring(0, 20) + '...'
+          signaturePreview: signature.substring(0, 20) + '...',
         });
-        
+
         return signature;
       } else {
         // Use HMAC SHA256 method as fallback
@@ -239,17 +249,19 @@ export class NaverAuthService extends BaseService {
         hmac.update(password);
         hmac.update(this.authConfig.clientSecret);
         const signature = hmac.digest('base64');
-        
+
         logger.debug('Generated HMAC signature', {
           signatureLength: signature.length,
-          signaturePreview: signature.substring(0, 20) + '...'
+          signaturePreview: signature.substring(0, 20) + '...',
         });
-        
+
         return signature;
       }
     } catch (error) {
       logger.error('Signature generation failed:', error);
-      throw new Error(`Failed to generate signature: ${(error as Error).message}`);
+      throw new Error(
+        `Failed to generate signature: ${(error as Error).message}`
+      );
     }
   }
 
@@ -257,37 +269,34 @@ export class NaverAuthService extends BaseService {
    * Get access token
    */
   async getToken(forceRefresh: boolean = false): Promise<NaverToken> {
-    return this.executeWithMetrics(
-      async () => {
-        // Check cache first
-        if (!forceRefresh) {
-          const cached = await this.getCachedToken();
-          if (cached) {
-            logger.debug('Using cached Naver token');
-            return cached;
-          }
+    return this.executeWithMetrics(async () => {
+      // Check cache first
+      if (!forceRefresh) {
+        const cached = await this.getCachedToken();
+        if (cached) {
+          logger.debug('Using cached Naver token');
+          return cached;
         }
+      }
 
-        // Prevent multiple simultaneous token requests
-        if (this.tokenRefreshPromise) {
-          logger.debug('Token refresh already in progress, waiting...');
-          return await this.tokenRefreshPromise;
-        }
+      // Prevent multiple simultaneous token requests
+      if (this.tokenRefreshPromise) {
+        logger.debug('Token refresh already in progress, waiting...');
+        return await this.tokenRefreshPromise;
+      }
 
-        try {
-          this.tokenRefreshPromise = this.fetchNewToken();
-          const token = await this.tokenRefreshPromise;
-          
-          // Cache the token
-          await this.cacheToken(token);
-          
-          return token;
-        } finally {
-          this.tokenRefreshPromise = null;
-        }
-      },
-      'getToken'
-    );
+      try {
+        this.tokenRefreshPromise = this.fetchNewToken();
+        const token = await this.tokenRefreshPromise;
+
+        // Cache the token
+        await this.cacheToken(token);
+
+        return token;
+      } finally {
+        this.tokenRefreshPromise = null;
+      }
+    }, 'getToken');
   }
 
   /**
@@ -302,7 +311,7 @@ export class NaverAuthService extends BaseService {
       timestamp: timestamp,
       client_secret_sign: signature,
       grant_type: 'client_credentials',
-      type: 'SELF'
+      type: 'SELF',
     });
 
     logger.info('Requesting new Naver access token');
@@ -313,19 +322,19 @@ export class NaverAuthService extends BaseService {
         params.toString(),
         {
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
         }
       );
 
       const token: NaverToken = {
         ...response.data,
-        issued_at: Date.now()
+        issued_at: Date.now(),
       };
 
       logger.info('Successfully obtained Naver access token', {
         expiresIn: token.expires_in,
-        tokenType: token.token_type
+        tokenType: token.token_type,
       });
 
       this.emit('token:obtained', { expiresIn: token.expires_in });
@@ -333,11 +342,11 @@ export class NaverAuthService extends BaseService {
       return token;
     } catch (error) {
       const axiosError = error as AxiosError;
-      
+
       logger.error('Failed to obtain Naver access token', {
         status: axiosError.response?.status,
         data: axiosError.response?.data,
-        message: axiosError.message
+        message: axiosError.message,
       });
 
       this.emit('token:failed', { error: axiosError.message });
@@ -359,7 +368,7 @@ export class NaverAuthService extends BaseService {
       if (!cached) return null;
 
       const token: NaverToken = JSON.parse(cached);
-      
+
       // Check if token is still valid
       if (this.isTokenValid(token)) {
         return token;
@@ -386,11 +395,7 @@ export class NaverAuthService extends BaseService {
         this.authConfig.tokenCacheTTL!
       );
 
-      await this.redis.setex(
-        this.tokenCacheKey,
-        ttl,
-        JSON.stringify(token)
-      );
+      await this.redis.setex(this.tokenCacheKey, ttl, JSON.stringify(token));
 
       logger.debug(`Cached Naver token with TTL ${ttl}s`);
     } catch (error) {
@@ -420,11 +425,11 @@ export class NaverAuthService extends BaseService {
 
     // Check if token has expired
     if (token.issued_at && token.expires_in) {
-      const expiresAt = token.issued_at + (token.expires_in * 1000);
+      const expiresAt = token.issued_at + token.expires_in * 1000;
       const now = Date.now();
       const bufferTime = 60000; // 1 minute buffer
 
-      return now < (expiresAt - bufferTime);
+      return now < expiresAt - bufferTime;
     }
 
     // If no issued_at, assume token is valid (will be refreshed on 401)
@@ -441,28 +446,31 @@ export class NaverAuthService extends BaseService {
       baseURL: this.authConfig.apiBaseUrl,
       timeout: this.authConfig.timeout,
       headers: {
-        'Authorization': `Bearer ${token.access_token}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${token.access_token}`,
+        'Content-Type': 'application/json',
+      },
     });
 
     // Add response interceptor for auto-retry on 401
     client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
-        const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+        const originalRequest = error.config as AxiosRequestConfig & {
+          _retry?: boolean;
+        };
 
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
 
           // Get new token
           const newToken = await this.getToken(true);
-          
+
           // Retry with new token
           if (originalRequest.headers) {
-            originalRequest.headers['Authorization'] = `Bearer ${newToken.access_token}`;
+            originalRequest.headers['Authorization'] =
+              `Bearer ${newToken.access_token}`;
           }
-          
+
           return client(originalRequest);
         }
 
@@ -476,15 +484,15 @@ export class NaverAuthService extends BaseService {
   /**
    * Get health details
    */
-  protected async getHealthDetails(): Promise<any> {
+  protected override async getHealthDetails(): Promise<any> {
     const cachedToken = await this.getCachedToken();
-    
+
     return {
       hasValidToken: cachedToken !== null && this.isTokenValid(cachedToken),
       clientId: this.authConfig.clientId,
       apiBaseUrl: this.authConfig.apiBaseUrl,
       storeId: this.authConfig.storeId,
-      secretType: this.detectSecretType()
+      secretType: this.detectSecretType(),
     };
   }
 }

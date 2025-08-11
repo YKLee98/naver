@@ -40,9 +40,9 @@ export class ShopifyGraphQLService {
   private endpoint: string;
 
   constructor() {
-    this.shopDomain = process.env.SHOPIFY_SHOP_DOMAIN || '';
-    this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN || '';
-    this.apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01';
+    this.shopDomain = process.env['SHOPIFY_SHOP_DOMAIN'] || '';
+    this.accessToken = process.env['SHOPIFY_ACCESS_TOKEN'] || '';
+    this.apiVersion = process.env['SHOPIFY_API_VERSION'] || '2024-01';
     this.endpoint = `https://${this.shopDomain}/admin/api/${this.apiVersion}/graphql.json`;
 
     if (!this.shopDomain || !this.accessToken) {
@@ -54,36 +54,41 @@ export class ShopifyGraphQLService {
   /**
    * GraphQL 요청 헬퍼 메서드
    */
-  private async makeGraphQLRequest(query: string, variables?: any): Promise<any> {
+  private async makeGraphQLRequest(
+    query: string,
+    variables?: any
+  ): Promise<any> {
     try {
       const response = await axios.post(
         this.endpoint,
         {
           query,
-          variables
+          variables,
         },
         {
           headers: {
             'X-Shopify-Access-Token': this.accessToken,
             'Content-Type': 'application/json',
           },
-          timeout: 10000
+          timeout: 10000,
         }
       );
 
       if (response.data.errors) {
         logger.error('GraphQL errors:', response.data.errors);
-        throw new Error(`GraphQL errors: ${JSON.stringify(response.data.errors)}`);
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(response.data.errors)}`
+        );
       }
 
       return response.data.data;
     } catch (error: any) {
       logger.error('GraphQL request failed:', error);
-      
+
       if (error.response?.status === 401) {
         throw new AppError('Shopify authentication failed', 401);
       }
-      
+
       throw error;
     }
   }
@@ -123,18 +128,20 @@ export class ShopifyGraphQLService {
         }
       `;
 
-      const response = await this.makeGraphQLRequest(query, { sku: `sku:${sku}` });
-      
+      const response = await this.makeGraphQLRequest(query, {
+        sku: `sku:${sku}`,
+      });
+
       if (response.productVariants?.edges?.length > 0) {
         // 정확한 SKU 매치 찾기
         const exactMatch = response.productVariants.edges.find(
           (edge: any) => edge.node.sku === sku
         );
-        
+
         if (exactMatch) {
           return exactMatch.node;
         }
-        
+
         // 정확한 매치가 없으면 첫 번째 결과 반환
         return response.productVariants.edges[0].node;
       }
@@ -185,7 +192,9 @@ export class ShopifyGraphQLService {
         }
       `;
 
-      const response = await this.makeGraphQLRequest(query, { query: searchQuery });
+      const response = await this.makeGraphQLRequest(query, {
+        query: searchQuery,
+      });
       return response.products;
     } catch (error) {
       logger.error('Error searching products:', error);
@@ -196,18 +205,20 @@ export class ShopifyGraphQLService {
   /**
    * 상품 목록 조회
    */
-  async listProducts(options: {
-    limit?: number;
-    status?: string;
-    vendor?: string;
-  } = {}): Promise<any> {
+  async listProducts(
+    options: {
+      limit?: number;
+      status?: string;
+      vendor?: string;
+    } = {}
+  ): Promise<any> {
     try {
       let queryString = '';
-      
+
       if (options.status) {
         queryString += `status:${options.status} `;
       }
-      
+
       if (options.vendor) {
         queryString += `vendor:"${options.vendor}" `;
       }
@@ -239,7 +250,7 @@ export class ShopifyGraphQLService {
       `;
 
       const variables: any = {
-        first: options.limit || 100
+        first: options.limit || 100,
       };
 
       if (queryString) {
@@ -247,9 +258,9 @@ export class ShopifyGraphQLService {
       }
 
       const response = await this.makeGraphQLRequest(query, variables);
-      
+
       return {
-        products: response.products?.edges?.map((edge: any) => edge.node) || []
+        products: response.products?.edges?.map((edge: any) => edge.node) || [],
       };
     } catch (error) {
       logger.error('Error listing products:', error);
@@ -292,7 +303,9 @@ export class ShopifyGraphQLService {
         }
       `;
 
-      const response = await this.makeGraphQLRequest(query, { vendor: `vendor:"${vendor}"` });
+      const response = await this.makeGraphQLRequest(query, {
+        vendor: `vendor:"${vendor}"`,
+      });
       return response.products?.edges?.map((edge: any) => edge.node) || [];
     } catch (error) {
       logger.error(`Error getting products by vendor ${vendor}:`, error);
@@ -330,15 +343,17 @@ export class ShopifyGraphQLService {
           inventoryItemId,
           locationId,
           delta,
-          reason: reason || 'Manual adjustment'
-        }
+          reason: reason || 'Manual adjustment',
+        },
       };
 
       const response = await this.makeGraphQLRequest(mutation, variables);
-      
+
       if (response.inventoryAdjustQuantity?.userErrors?.length > 0) {
         const errors = response.inventoryAdjustQuantity.userErrors;
-        throw new Error(`Inventory adjustment failed: ${JSON.stringify(errors)}`);
+        throw new Error(
+          `Inventory adjustment failed: ${JSON.stringify(errors)}`
+        );
       }
 
       return true;
@@ -371,12 +386,12 @@ export class ShopifyGraphQLService {
       const variables = {
         input: {
           id: variantId,
-          price
-        }
+          price,
+        },
       };
 
       const response = await this.makeGraphQLRequest(mutation, variables);
-      
+
       if (response.productVariantUpdate?.userErrors?.length > 0) {
         const errors = response.productVariantUpdate.userErrors;
         throw new Error(`Price update failed: ${JSON.stringify(errors)}`);
@@ -471,7 +486,10 @@ export class ShopifyGraphQLService {
   /**
    * 재고 레벨 조회
    */
-  async getInventoryLevel(inventoryItemId: string, locationId: string): Promise<number> {
+  async getInventoryLevel(
+    inventoryItemId: string,
+    locationId: string
+  ): Promise<number> {
     try {
       const query = `
         query getInventoryLevel($inventoryItemId: ID!, $locationId: ID!) {
@@ -485,7 +503,7 @@ export class ShopifyGraphQLService {
 
       const response = await this.makeGraphQLRequest(query, {
         inventoryItemId,
-        locationId
+        locationId,
       });
 
       return response.inventoryItem?.inventoryLevel?.available || 0;
@@ -518,7 +536,7 @@ export class ShopifyGraphQLService {
       `;
 
       const response = await this.makeGraphQLRequest(bulkMutation);
-      
+
       if (response.bulkOperationRunMutation?.userErrors?.length > 0) {
         const errors = response.bulkOperationRunMutation.userErrors;
         throw new Error(`Bulk operation failed: ${JSON.stringify(errors)}`);
@@ -550,7 +568,9 @@ export class ShopifyGraphQLService {
         }
       `;
 
-      const response = await this.makeGraphQLRequest(query, { id: operationId });
+      const response = await this.makeGraphQLRequest(query, {
+        id: operationId,
+      });
       return response.node;
     } catch (error) {
       logger.error('Error getting bulk operation status:', error);

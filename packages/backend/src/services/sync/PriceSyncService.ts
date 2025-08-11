@@ -1,12 +1,12 @@
 // packages/backend/src/services/sync/PriceSyncService.ts
 import { Redis } from 'ioredis';
 import { logger } from '@/utils/logger';
-import { 
-  ProductMapping, 
-  PriceHistory, 
+import {
+  ProductMapping,
+  PriceHistory,
   ExchangeRate,
   PriceSyncRule,
-  SystemLog 
+  SystemLog,
 } from '@/models';
 import { NaverProductService } from '../naver';
 import { ShopifyGraphQLService } from '../shopify';
@@ -53,13 +53,13 @@ export class PriceSyncService extends EventEmitter {
     {
       name: 'ExchangeRate-API',
       url: 'https://api.exchangerate-api.com/v4/latest/KRW',
-      parser: (data: any) => 1 / data.rates.USD
+      parser: (data: any) => 1 / data.rates.USD,
     },
     {
       name: 'Fixer.io',
-      url: `https://api.fixer.io/latest?base=KRW&symbols=USD&access_key=${process.env.FIXER_API_KEY}`,
-      parser: (data: any) => data.rates.USD
-    }
+      url: `https://api.fixer.io/latest?base=KRW&symbols=USD&access_key=${process.env['FIXER_API_KEY']}`,
+      parser: (data: any) => data.rates.USD,
+    },
   ];
 
   constructor(
@@ -87,7 +87,7 @@ export class PriceSyncService extends EventEmitter {
       // 병렬로 양쪽 플랫폼 가격 조회
       const [naverProduct, shopifyProduct] = await Promise.all([
         this.naverProductService.getProduct(mapping.naver_product_id),
-        this.shopifyService.getProductVariant(mapping.shopify_variant_id)
+        this.shopifyService.getProductVariant(mapping.shopify_variant_id),
       ]);
 
       // 현재 환율 조회
@@ -115,7 +115,7 @@ export class PriceSyncService extends EventEmitter {
         suggestedShopifyPrice,
         currentMargin,
         suggestedMargin,
-        exchangeRate
+        exchangeRate,
       };
     } catch (error) {
       logger.error(`Failed to get initial price data for SKU ${sku}:`, error);
@@ -128,14 +128,14 @@ export class PriceSyncService extends EventEmitter {
    */
   async getBulkInitialPriceData(skus: string[]): Promise<InitialPriceData[]> {
     const results: InitialPriceData[] = [];
-    const errors: Array<{sku: string, error: string}> = [];
+    const errors: Array<{ sku: string; error: string }> = [];
 
     // 청크로 나누어 처리 (동시 처리 제한)
     const chunks = this.chunkArray(skus, 10);
-    
+
     for (const chunk of chunks) {
       const chunkResults = await Promise.allSettled(
-        chunk.map(sku => this.getInitialPriceData(sku))
+        chunk.map((sku) => this.getInitialPriceData(sku))
       );
 
       chunkResults.forEach((result, index) => {
@@ -144,14 +144,17 @@ export class PriceSyncService extends EventEmitter {
         } else {
           errors.push({
             sku: chunk[index],
-            error: result.reason.message
+            error: result.reason.message,
           });
         }
       });
     }
 
     if (errors.length > 0) {
-      logger.warn(`Failed to get initial price data for ${errors.length} SKUs`, errors);
+      logger.warn(
+        `Failed to get initial price data for ${errors.length} SKUs`,
+        errors
+      );
     }
 
     return results;
@@ -187,8 +190,8 @@ export class PriceSyncService extends EventEmitter {
     );
 
     // 환율 조회
-    const exchangeRate = options.customExchangeRate || 
-      await this.getCurrentExchangeRate();
+    const exchangeRate =
+      options.customExchangeRate || (await this.getCurrentExchangeRate());
 
     // 기본 마진율 설정
     let marginRate = options.margin || 1.15;
@@ -224,7 +227,9 @@ export class PriceSyncService extends EventEmitter {
         (shopifyPrice - mapping.last_shopify_price) / mapping.last_shopify_price
       );
       if (changeRate > 0.5) {
-        warnings.push(`Price change is more than 50% (${(changeRate * 100).toFixed(2)}%)`);
+        warnings.push(
+          `Price change is more than 50% (${(changeRate * 100).toFixed(2)}%)`
+        );
       }
     }
 
@@ -235,7 +240,7 @@ export class PriceSyncService extends EventEmitter {
       marginRate,
       calculatedMargin: marginRate,
       appliedRules,
-      warnings
+      warnings,
     };
   }
 
@@ -254,13 +259,13 @@ export class PriceSyncService extends EventEmitter {
       const manualRate = await ExchangeRate.findOne({
         isManual: true,
         validFrom: { $lte: new Date() },
-        validUntil: { $gte: new Date() }
+        validUntil: { $gte: new Date() },
       }).sort({ createdAt: -1 });
 
       if (manualRate) {
         await this.redis.setex(
-          this.exchangeRateCacheKey, 
-          this.cacheTTL, 
+          this.exchangeRateCacheKey,
+          this.cacheTTL,
           manualRate.rate.toString()
         );
         return manualRate.rate;
@@ -268,7 +273,7 @@ export class PriceSyncService extends EventEmitter {
 
       // API에서 환율 조회
       const rate = await this.fetchExchangeRateFromAPI();
-      
+
       // DB 저장
       await ExchangeRate.create({
         baseCurrency: 'KRW',
@@ -277,26 +282,30 @@ export class PriceSyncService extends EventEmitter {
         source: 'api',
         isManual: false,
         validFrom: new Date(),
-        validUntil: new Date(Date.now() + 24 * 60 * 60 * 1000)
+        validUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
       });
 
       // 캐시 저장
-      await this.redis.setex(this.exchangeRateCacheKey, this.cacheTTL, rate.toString());
-      
+      await this.redis.setex(
+        this.exchangeRateCacheKey,
+        this.cacheTTL,
+        rate.toString()
+      );
+
       return rate;
     } catch (error) {
       logger.error('Failed to get exchange rate:', error);
-      
+
       // 폴백: 마지막 알려진 환율 사용
       const lastRate = await ExchangeRate.findOne({})
         .sort({ createdAt: -1 })
         .lean();
-      
+
       if (lastRate) {
         logger.warn(`Using last known exchange rate: ${lastRate.rate}`);
         return lastRate.rate;
       }
-      
+
       // 최종 폴백: 기본값
       logger.error('Using default exchange rate: 0.00075');
       return 0.00075;
@@ -315,7 +324,7 @@ export class PriceSyncService extends EventEmitter {
         );
 
         const rate = api.parser(response.data);
-        
+
         if (rate && rate > 0) {
           logger.info(`Exchange rate fetched from ${api.name}: ${rate}`);
           return rate;
@@ -338,7 +347,7 @@ export class PriceSyncService extends EventEmitter {
     try {
       // 현재 환율 조회
       const exchangeRate = await this.getCurrentExchangeRate();
-      
+
       // 가격 계산
       const shopifyPrice = this.calculatePrice(
         naverPrice,
@@ -346,7 +355,7 @@ export class PriceSyncService extends EventEmitter {
         margin,
         'nearest' // default rounding strategy
       );
-      
+
       return shopifyPrice;
     } catch (error) {
       logger.error('Failed to calculate Shopify price', error);
@@ -365,7 +374,7 @@ export class PriceSyncService extends EventEmitter {
   ): number {
     const baseUsdPrice = naverPrice * exchangeRate;
     const priceWithMargin = baseUsdPrice * marginRate;
-    
+
     // 라운딩 전략 적용
     switch (roundingStrategy) {
       case 'up':
@@ -383,23 +392,26 @@ export class PriceSyncService extends EventEmitter {
    */
   private matchRule(mapping: any, rule: PriceSyncRule): boolean {
     // 카테고리 매칭
-    if (rule.condition.category && mapping.category !== rule.condition.category) {
+    if (
+      rule.condition.category &&
+      mapping.category !== rule.condition.category
+    ) {
       return false;
     }
-    
+
     // 가격 범위 매칭
     if (rule.condition.priceRange) {
       const { min, max } = rule.condition.priceRange;
       if (min && mapping.naverPrice < min) return false;
       if (max && mapping.naverPrice > max) return false;
     }
-    
+
     // SKU 패턴 매칭
     if (rule.condition.skuPattern) {
       const pattern = new RegExp(rule.condition.skuPattern);
       if (!pattern.test(mapping.sku)) return false;
     }
-    
+
     return true;
   }
 
@@ -448,8 +460,8 @@ export class PriceSyncService extends EventEmitter {
             naverPrice: priceData.naverPrice,
             exchangeRate: priceData.exchangeRate,
             marginRate: priceData.marginRate,
-            appliedRules: priceData.appliedRules
-          }
+            appliedRules: priceData.appliedRules,
+          },
         });
 
         // 매핑 업데이트
@@ -458,29 +470,28 @@ export class PriceSyncService extends EventEmitter {
           {
             last_shopify_price: priceData.shopifyPrice,
             last_sync_timestamp: new Date(),
-            last_price_sync: new Date()
+            last_price_sync: new Date(),
           }
         );
 
         results.push({
           sku,
           success: true,
-          data: priceData
+          data: priceData,
         });
         success++;
 
         this.emit('sync:progress', {
           current: results.length,
           total: skus.length,
-          sku
+          sku,
         });
-
       } catch (error) {
         logger.error(`Failed to sync price for SKU ${sku}:`, error);
         results.push({
           sku,
           success: false,
-          error: error.message
+          error: error.message,
         });
         failed++;
       }
@@ -497,8 +508,8 @@ export class PriceSyncService extends EventEmitter {
         options,
         totalSkus: skus.length,
         success,
-        failed
-      }
+        failed,
+      },
     });
 
     return { success, failed, results };
@@ -524,7 +535,9 @@ export class PriceSyncService extends EventEmitter {
     validDays: number = 7
   ): Promise<void> {
     const now = new Date();
-    const validUntil = new Date(now.getTime() + validDays * 24 * 60 * 60 * 1000);
+    const validUntil = new Date(
+      now.getTime() + validDays * 24 * 60 * 60 * 1000
+    );
 
     await ExchangeRate.create({
       baseCurrency: 'KRW',
@@ -536,15 +549,19 @@ export class PriceSyncService extends EventEmitter {
       validUntil,
       metadata: {
         manualReason: reason,
-        setBy: 'admin' // 나중에 사용자 정보로 대체
-      }
+        setBy: 'admin', // 나중에 사용자 정보로 대체
+      },
     });
 
     // 캐시 업데이트
-    await this.redis.setex(this.exchangeRateCacheKey, this.cacheTTL, rate.toString());
-    
+    await this.redis.setex(
+      this.exchangeRateCacheKey,
+      this.cacheTTL,
+      rate.toString()
+    );
+
     this.emit('exchangeRate:updated', { rate, reason, validUntil });
-    
+
     logger.info(`Manual exchange rate set: ${rate} (${reason})`);
   }
 
@@ -560,7 +577,7 @@ export class PriceSyncService extends EventEmitter {
     } = {}
   ): Promise<any[]> {
     const query: any = { sku };
-    
+
     if (options.startDate || options.endDate) {
       query.createdAt = {};
       if (options.startDate) query.createdAt.$gte = options.startDate;
@@ -576,9 +593,7 @@ export class PriceSyncService extends EventEmitter {
   /**
    * 가격 분석 리포트 생성
    */
-  async generatePriceAnalytics(
-    dateRange: { start: Date; end: Date }
-  ): Promise<{
+  async generatePriceAnalytics(dateRange: { start: Date; end: Date }): Promise<{
     avgMargin: number;
     priceChanges: number;
     totalRevenue: number;
@@ -590,27 +605,29 @@ export class PriceSyncService extends EventEmitter {
   }> {
     // 가격 이력 조회
     const history = await PriceHistory.find({
-      createdAt: { $gte: dateRange.start, $lte: dateRange.end }
+      createdAt: { $gte: dateRange.start, $lte: dateRange.end },
     }).lean();
 
     // 평균 마진 계산
     const margins = history
-      .filter(h => h.metadata?.marginRate)
-      .map(h => h.metadata.marginRate);
-    
-    const avgMargin = margins.length > 0
-      ? margins.reduce((sum, m) => sum + m, 0) / margins.length
-      : 0;
+      .filter((h) => h.metadata?.marginRate)
+      .map((h) => h.metadata.marginRate);
+
+    const avgMargin =
+      margins.length > 0
+        ? margins.reduce((sum, m) => sum + m, 0) / margins.length
+        : 0;
 
     // SKU별 변경 횟수 집계
-    const skuChanges: { [sku: string]: { count: number; changes: number[] } } = {};
-    
-    history.forEach(h => {
+    const skuChanges: { [sku: string]: { count: number; changes: number[] } } =
+      {};
+
+    history.forEach((h) => {
       if (!skuChanges[h.sku]) {
         skuChanges[h.sku] = { count: 0, changes: [] };
       }
       skuChanges[h.sku].count++;
-      
+
       if (h.oldPrice && h.newPrice) {
         const changePercent = ((h.newPrice - h.oldPrice) / h.oldPrice) * 100;
         skuChanges[h.sku].changes.push(changePercent);
@@ -622,9 +639,10 @@ export class PriceSyncService extends EventEmitter {
       .map(([sku, data]) => ({
         sku,
         changeCount: data.count,
-        avgChange: data.changes.length > 0
-          ? data.changes.reduce((sum, c) => sum + c, 0) / data.changes.length
-          : 0
+        avgChange:
+          data.changes.length > 0
+            ? data.changes.reduce((sum, c) => sum + c, 0) / data.changes.length
+            : 0,
       }))
       .sort((a, b) => b.changeCount - a.changeCount)
       .slice(0, 10);
@@ -633,7 +651,7 @@ export class PriceSyncService extends EventEmitter {
       avgMargin,
       priceChanges: history.length,
       totalRevenue: 0, // 실제 판매 데이터와 연계 필요
-      topChangedProducts
+      topChangedProducts,
     };
   }
 
@@ -659,55 +677,70 @@ export class PriceSyncService extends EventEmitter {
       .select('sku')
       .lean();
 
-    const skus = mappings.map(m => m.sku);
+    const skus = mappings.map((m) => m.sku);
     const batches = this.chunkArray(skus, batchSize);
 
-    logger.info(`Starting bulk price sync for ${skus.length} SKUs in ${batches.length} batches`);
+    logger.info(
+      `Starting bulk price sync for ${skus.length} SKUs in ${batches.length} batches`
+    );
 
     for (const [index, batch] of batches.entries()) {
       logger.info(`Processing batch ${index + 1} of ${batches.length}`);
-      
+
       try {
         const result = await this.syncPrices(batch, options);
         totalProcessed += batch.length;
         success += result.success;
         failed += result.failed;
-        
+
         // 에러 수집
         result.results
-          .filter(r => !r.success)
-          .forEach(r => errors.push({ sku: r.sku, error: r.error || 'Unknown error' }));
-        
+          .filter((r) => !r.success)
+          .forEach((r) =>
+            errors.push({ sku: r.sku, error: r.error || 'Unknown error' })
+          );
+
         // Rate limiting between batches
         if (index < batches.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       } catch (error) {
         logger.error(`Batch ${index + 1} failed:`, error);
-        batch.forEach(sku => errors.push({ 
-          sku, 
-          error: error instanceof Error ? error.message : 'Batch processing failed' 
-        }));
+        batch.forEach((sku) =>
+          errors.push({
+            sku,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Batch processing failed',
+          })
+        );
         failed += batch.length;
       }
     }
 
-    logger.info(`Bulk price sync completed: ${success} success, ${failed} failed`);
+    logger.info(
+      `Bulk price sync completed: ${success} success, ${failed} failed`
+    );
 
     return {
       totalProcessed,
       success,
       failed,
-      errors
+      errors,
     };
   }
 
   /**
    * 가격 변동 알림 설정 확인
    */
-  async checkPriceAlerts(sku: string, oldPrice: number, newPrice: number): Promise<void> {
+  async checkPriceAlerts(
+    sku: string,
+    oldPrice: number,
+    newPrice: number
+  ): Promise<void> {
     const changePercent = Math.abs((newPrice - oldPrice) / oldPrice) * 100;
-    
+
     // 20% 이상 변동 시 알림
     if (changePercent >= 20) {
       this.emit('price:alert', {
@@ -715,7 +748,7 @@ export class PriceSyncService extends EventEmitter {
         oldPrice,
         newPrice,
         changePercent,
-        message: `Price changed by ${changePercent.toFixed(2)}% for SKU ${sku}`
+        message: `Price changed by ${changePercent.toFixed(2)}% for SKU ${sku}`,
       });
     }
   }
@@ -736,13 +769,15 @@ export class PriceSyncService extends EventEmitter {
     // 특정 날짜의 가격으로 롤백
     const historyRecord = await PriceHistory.findOne({
       sku,
-      createdAt: { $lte: targetDate }
+      createdAt: { $lte: targetDate },
     })
-    .sort({ createdAt: -1 })
-    .lean();
+      .sort({ createdAt: -1 })
+      .lean();
 
     if (!historyRecord) {
-      throw new Error(`No price history found for SKU ${sku} before ${targetDate}`);
+      throw new Error(
+        `No price history found for SKU ${sku} before ${targetDate}`
+      );
     }
 
     const mapping = await ProductMapping.findOne({ sku }).lean();
@@ -765,10 +800,12 @@ export class PriceSyncService extends EventEmitter {
       reason: `Rollback to ${targetDate.toISOString()}`,
       metadata: {
         rollbackTargetDate: targetDate,
-        rollbackFromId: historyRecord._id
-      }
+        rollbackFromId: historyRecord._id,
+      },
     });
 
-    logger.info(`Price rolled back for SKU ${sku} to ${historyRecord.oldPrice}`);
+    logger.info(
+      `Price rolled back for SKU ${sku} to ${historyRecord.oldPrice}`
+    );
   }
 }

@@ -23,33 +23,33 @@ const WebhookLogSchema = new Schema<IWebhookLog>(
       type: String,
       enum: ['naver', 'shopify', 'other'],
       required: true,
-      index: true
+      index: true,
     },
     event: {
       type: String,
       required: true,
-      index: true
+      index: true,
     },
     payload: Schema.Types.Mixed,
     headers: {
       type: Map,
-      of: String
+      of: String,
     },
     processed: {
       type: Boolean,
       default: false,
-      index: true
+      index: true,
     },
     success: {
       type: Boolean,
-      default: false
+      default: false,
     },
     error: String,
     response: Schema.Types.Mixed,
-    processingTime: Number
+    processingTime: Number,
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 
@@ -63,4 +63,7 @@ WebhookLogSchema.index(
   { expireAfterSeconds: 60 * 24 * 60 * 60 }
 );
 
-export const WebhookLog = mongoose.model<IWebhookLog>('WebhookLog', WebhookLogSchema);
+export const WebhookLog = mongoose.model<IWebhookLog>(
+  'WebhookLog',
+  WebhookLogSchema
+);

@@ -100,4 +100,3 @@ export const InventoryTransaction = model<IInventoryTransaction>(
   'InventoryTransaction',
   InventoryTransactionSchema
 );
-

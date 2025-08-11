@@ -44,7 +44,7 @@ export class ShopifyInventoryService extends ShopifyService {
   async getInventoryLevel(variantId: string): Promise<number> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: returning dummy inventory level');
@@ -77,7 +77,9 @@ export class ShopifyInventoryService extends ShopifyService {
       return 0;
     } catch (error: any) {
       logger.error('Failed to get inventory level:', error);
-      throw new Error(`Failed to get Shopify inventory level: ${error.message}`);
+      throw new Error(
+        `Failed to get Shopify inventory level: ${error.message}`
+      );
     }
   }
 
@@ -90,7 +92,7 @@ export class ShopifyInventoryService extends ShopifyService {
   ): Promise<InventoryLevel | null> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: returning dummy inventory level');
@@ -136,7 +138,7 @@ export class ShopifyInventoryService extends ShopifyService {
   async adjustInventory(variantId: string, newQuantity: number): Promise<void> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: skipping inventory adjustment');
@@ -174,7 +176,8 @@ export class ShopifyInventoryService extends ShopifyService {
         },
       });
 
-      const currentQuantity = currentLevels?.body?.inventory_levels?.[0]?.available || 0;
+      const currentQuantity =
+        currentLevels?.body?.inventory_levels?.[0]?.available || 0;
       const delta = newQuantity - currentQuantity;
 
       // Adjust inventory
@@ -196,7 +199,7 @@ export class ShopifyInventoryService extends ShopifyService {
   ): Promise<void> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: skipping inventory level adjustment');
@@ -244,7 +247,7 @@ export class ShopifyInventoryService extends ShopifyService {
   ): Promise<void> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: skipping inventory level set');
@@ -278,10 +281,12 @@ export class ShopifyInventoryService extends ShopifyService {
   /**
    * Get all locations
    */
-  async getLocations(): Promise<Array<{ id: string; name: string; active: boolean }>> {
+  async getLocations(): Promise<
+    Array<{ id: string; name: string; active: boolean }>
+  > {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: returning dummy locations');
@@ -316,10 +321,12 @@ export class ShopifyInventoryService extends ShopifyService {
   /**
    * Get inventory item details
    */
-  async getInventoryItem(inventoryItemId: string): Promise<InventoryItem | null> {
+  async getInventoryItem(
+    inventoryItemId: string
+  ): Promise<InventoryItem | null> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: returning dummy inventory item');
@@ -362,7 +369,7 @@ export class ShopifyInventoryService extends ShopifyService {
   async bulkAdjustInventory(adjustments: InventoryAdjustment[]): Promise<void> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: skipping bulk inventory adjustment');
@@ -372,7 +379,7 @@ export class ShopifyInventoryService extends ShopifyService {
       // Shopify doesn't have a bulk adjust endpoint in REST API
       // So we need to adjust one by one
       const results = await Promise.allSettled(
-        adjustments.map(adj =>
+        adjustments.map((adj) =>
           this.adjustInventoryLevel(
             adj.inventoryItemId,
             adj.locationId,
@@ -382,14 +389,20 @@ export class ShopifyInventoryService extends ShopifyService {
         )
       );
 
-      const failures = results.filter(r => r.status === 'rejected');
-      
+      const failures = results.filter((r) => r.status === 'rejected');
+
       if (failures.length > 0) {
-        logger.error(`${failures.length} inventory adjustments failed out of ${adjustments.length}`);
-        throw new Error(`Some inventory adjustments failed: ${failures.length}/${adjustments.length}`);
+        logger.error(
+          `${failures.length} inventory adjustments failed out of ${adjustments.length}`
+        );
+        throw new Error(
+          `Some inventory adjustments failed: ${failures.length}/${adjustments.length}`
+        );
       }
 
-      logger.info(`Successfully adjusted ${adjustments.length} inventory levels`);
+      logger.info(
+        `Successfully adjusted ${adjustments.length} inventory levels`
+      );
     } catch (error: any) {
       logger.error('Failed to bulk adjust inventory:', error);
       throw new Error(`Failed to bulk adjust inventory: ${error.message}`);
@@ -405,11 +418,11 @@ export class ShopifyInventoryService extends ShopifyService {
   ): Promise<InventoryLevel[]> {
     try {
       this.ensureInitialized();
-      
+
       if (!this.client) {
         // Mock mode
         logger.debug('Mock mode: returning dummy inventory levels');
-        return inventoryItemIds.map(id => ({
+        return inventoryItemIds.map((id) => ({
           id: `mock_level_${id}`,
           inventoryItemId: id,
           locationId: locationIds?.[0] || 'mock_location',

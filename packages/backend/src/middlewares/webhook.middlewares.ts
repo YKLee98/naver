@@ -13,7 +13,7 @@ export const validateShopifyWebhook = async (
 ): Promise<void> => {
   try {
     const shopifyWebhookSecret = process.env['SHOPIFY_WEBHOOK_SECRET'];
-    
+
     if (!shopifyWebhookSecret) {
       logger.error('Shopify webhook secret not configured');
       res.status(500).json({ error: 'Server configuration error' });
@@ -32,7 +32,7 @@ export const validateShopifyWebhook = async (
 
     // Raw body가 필요하므로 bodyParser 이전에 처리되어야 함
     const rawBody = JSON.stringify(req.body);
-    
+
     // HMAC 검증
     const hash = crypto
       .createHmac('sha256', shopifyWebhookSecret)
@@ -40,10 +40,10 @@ export const validateShopifyWebhook = async (
       .digest('base64');
 
     if (hash !== hmacHeader) {
-      logger.warn('Invalid webhook signature', { 
-        topic, 
+      logger.warn('Invalid webhook signature', {
+        topic,
         shopDomain,
-        receivedHmac: hmacHeader.substring(0, 10) + '...' 
+        receivedHmac: hmacHeader.substring(0, 10) + '...',
       });
       res.status(401).json({ error: 'Unauthorized' });
       return;
@@ -55,7 +55,7 @@ export const validateShopifyWebhook = async (
     (req as any).webhookId = req.get('X-Shopify-Webhook-Id');
 
     logger.info('Webhook verified successfully', { topic, shopDomain });
-    
+
     next();
   } catch (error) {
     logger.error('Webhook validation error:', error);

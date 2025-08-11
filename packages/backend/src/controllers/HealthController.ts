@@ -9,7 +9,11 @@ export class HealthController {
   /**
    * 기본 헬스 체크
    */
-  check = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  check = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const healthStatus = {
         status: 'healthy',
@@ -34,7 +38,11 @@ export class HealthController {
   /**
    * 상세 헬스 체크
    */
-  detailed = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  detailed = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const checks = {
         status: 'healthy',
@@ -87,7 +95,7 @@ export class HealthController {
         const redis = getRedisClient();
         const naverHealth = await redis.get('health:naver');
         const shopifyHealth = await redis.get('health:shopify');
-        
+
         checks.services.naver = naverHealth || 'unknown';
         checks.services.shopify = shopifyHealth || 'unknown';
       } catch (error) {
@@ -96,7 +104,10 @@ export class HealthController {
 
       // 전체 상태 결정
       const servicesArray = Object.values(checks.services);
-      if (servicesArray.includes('error') || servicesArray.includes('disconnected')) {
+      if (
+        servicesArray.includes('error') ||
+        servicesArray.includes('disconnected')
+      ) {
         checks.status = 'degraded';
       }
 
@@ -119,11 +130,15 @@ export class HealthController {
   /**
    * 준비 상태 체크 (Kubernetes readiness probe용)
    */
-  ready = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  ready = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       // 필수 서비스 확인
       const isMongoReady = mongoose.connection.readyState === 1;
-      
+
       let isRedisReady = false;
       try {
         const redis = getRedisClient();
@@ -163,7 +178,11 @@ export class HealthController {
   /**
    * 라이브니스 체크 (Kubernetes liveness probe용)
    */
-  live = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  live = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       // 기본적인 앱 동작 확인
       const memoryUsage = process.memoryUsage();
@@ -196,7 +215,11 @@ export class HealthController {
   /**
    * 메트릭스 조회
    */
-  metrics = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  metrics = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const metrics = {
         timestamp: new Date().toISOString(),
@@ -209,7 +232,10 @@ export class HealthController {
           loadAverage: os.loadavg(),
           freeMemory: os.freemem(),
           totalMemory: os.totalmem(),
-          memoryUsage: ((os.totalmem() - os.freemem()) / os.totalmem() * 100).toFixed(2) + '%',
+          memoryUsage:
+            (((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(
+              2
+            ) + '%',
         },
         nodejs: {
           version: process.version,

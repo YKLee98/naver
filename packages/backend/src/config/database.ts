@@ -2,8 +2,9 @@
 import mongoose from 'mongoose';
 import { logger } from '../utils/logger';
 
-const MONGODB_URI = process.env.MONGODB_URI ;
-const isDevelopment = process.env.NODE_ENV === 'development';
+const MONGODB_URI =
+  process.env['MONGODB_URI'] || 'mongodb://localhost:27017/hallyu-fomaholic';
+const isDevelopment = process.env['NODE_ENV'] === 'development';
 
 // MongoDB connection options
 const mongoOptions: mongoose.ConnectOptions = {
@@ -19,7 +20,7 @@ export async function connectDatabase(): Promise<void> {
   try {
     // Set mongoose options
     mongoose.set('strictQuery', false);
-    
+
     if (isDevelopment) {
       mongoose.set('debug', false); // Set to true if you want to see queries
     }
@@ -42,12 +43,12 @@ export async function connectDatabase(): Promise<void> {
     });
 
     // Connect to MongoDB
-    await mongoose.connect(MONGODB_URI, mongoOptions);
-    
+    await mongoose.connect(MONGODB_URI!, mongoOptions);
+
     logger.info(`MongoDB connected to ${MONGODB_URI}`);
   } catch (error) {
     logger.error('MongoDB connection failed:', error);
-    
+
     // In development, continue without database
     if (isDevelopment) {
       logger.warn('Running without database connection in development mode');

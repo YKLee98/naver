@@ -36,4 +36,3 @@ process.env.NAVER_CLIENT_ID = 'test-client-id';
 process.env.NAVER_CLIENT_SECRET = 'test-client-secret';
 process.env.SHOPIFY_SHOP_DOMAIN = 'test-shop.myshopify.com';
 process.env.SHOPIFY_ACCESS_TOKEN = 'test-access-token';
-

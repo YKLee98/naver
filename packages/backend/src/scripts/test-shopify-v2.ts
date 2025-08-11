@@ -26,21 +26,24 @@ function log(message: string, color: string = colors.reset) {
 
 async function testShopifyAPI() {
   log('\n=== Shopify API 테스트 시작 ===', colors.cyan);
-  
+
   const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
   const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
   const apiVersion = process.env.SHOPIFY_API_VERSION || '2025-04';
-  
+
   if (!shopDomain || !accessToken) {
     log('❌ 환경 변수가 설정되지 않았습니다.', colors.red);
     log('SHOPIFY_SHOP_DOMAIN=' + (shopDomain || 'NOT_SET'), colors.yellow);
-    log('SHOPIFY_ACCESS_TOKEN=' + (accessToken ? 'SET' : 'NOT_SET'), colors.yellow);
+    log(
+      'SHOPIFY_ACCESS_TOKEN=' + (accessToken ? 'SET' : 'NOT_SET'),
+      colors.yellow
+    );
     return;
   }
-  
+
   log(`🏪 Shop: ${shopDomain}`, colors.blue);
   log(`📦 API Version: ${apiVersion}`, colors.blue);
-  
+
   // REST API 테스트
   log('\n📌 REST API 테스트', colors.cyan);
   try {
@@ -50,11 +53,11 @@ async function testShopifyAPI() {
         'X-Shopify-Access-Token': accessToken,
         'Content-Type': 'application/json',
       },
-      params: { limit: 5 }
+      params: { limit: 5 },
     });
-    
+
     log(`✅ 상품 수: ${restResponse.data.products.length}`, colors.green);
-    
+
     if (restResponse.data.products.length > 0) {
       const product = restResponse.data.products[0];
       const variant = product.variants[0];
@@ -66,11 +69,11 @@ async function testShopifyAPI() {
   } catch (error: any) {
     log(`❌ REST API 실패: ${error.message}`, colors.red);
   }
-  
+
   // GraphQL 테스트
   log('\n📌 GraphQL SKU 검색', colors.cyan);
   const graphqlUrl = `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`;
-  
+
   try {
     const query = `
       query {
@@ -93,7 +96,7 @@ async function testShopifyAPI() {
         }
       }
     `;
-    
+
     const response = await axios.post(
       graphqlUrl,
       { query },
@@ -101,13 +104,13 @@ async function testShopifyAPI() {
         headers: {
           'X-Shopify-Access-Token': accessToken,
           'Content-Type': 'application/json',
-        }
+        },
       }
     );
-    
+
     const products = response.data.data?.products?.edges || [];
     log(`\n전체 상품: ${products.length}개`, colors.blue);
-    
+
     let skuCount = 0;
     products.forEach((p: any) => {
       const product = p.node;
@@ -118,15 +121,14 @@ async function testShopifyAPI() {
         }
       });
     });
-    
+
     if (skuCount === 0) {
       log(`\n⚠️ SKU가 설정된 상품이 없습니다!`, colors.red);
     }
-    
   } catch (error: any) {
     log(`❌ GraphQL 실패: ${error.message}`, colors.red);
   }
-  
+
   log('\n=== 테스트 완료 ===', colors.cyan);
 }
 

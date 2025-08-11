@@ -23,7 +23,7 @@ export class NaverRateLimiter {
     } catch (error) {
       logger.warn('Naver API rate limit exceeded, waiting...');
       // 500ms 대기 후 재시도
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       await this.rateLimiter.consume(key);
     }
   }
@@ -33,6 +33,8 @@ export class NaverRateLimiter {
    */
   async getRemaining(key = 'naver-api'): Promise<number> {
     const res = await this.rateLimiter.get(key);
-    return res ? this.rateLimiter.points - res.consumedPoints : this.rateLimiter.points;
+    return res
+      ? this.rateLimiter.points - res.consumedPoints
+      : this.rateLimiter.points;
   }
 }

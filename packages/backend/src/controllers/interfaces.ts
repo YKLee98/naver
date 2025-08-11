@@ -14,10 +14,30 @@ export interface IAuthController {
 }
 
 export interface IProductController {
-  getMappedProducts(req: Request, res: Response, next: NextFunction): Promise<void>;
-  getProductBySku(req: Request, res: Response, next: NextFunction): Promise<void>;
-  searchNaverProducts(req: Request, res: Response, next: NextFunction): Promise<void>;
-  searchShopifyProducts(req: Request, res: Response, next: NextFunction): Promise<void>;
+  getMappedProducts(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void>;
+  getProductBySku(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void>;
+  searchNaverProducts(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void>;
+  searchShopifyProducts(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void>;
   syncProduct(req: Request, res: Response, next: NextFunction): Promise<void>;
-  bulkSyncProducts(req: Request, res: Response, next: NextFunction): Promise<void>;
+  bulkSyncProducts(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void>;
 }

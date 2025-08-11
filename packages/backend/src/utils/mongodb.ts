@@ -10,7 +10,7 @@ export async function isReplicaSet(): Promise<boolean> {
     if (mongoose.connection.readyState !== 1) {
       return false;
     }
-    
+
     const admin = mongoose.connection.db.admin();
     const status = await admin.replSetGetStatus();
     return !!status && status.ok === 1;
@@ -29,27 +29,27 @@ export async function isReplicaSet(): Promise<boolean> {
  */
 export function shouldUseTransaction(): boolean {
   // 환경 변수로 명시적으로 트랜잭션 사용 여부 제어
-  if (process.env.DISABLE_TRANSACTIONS === 'true') {
+  if (process.env['DISABLE_TRANSACTIONS'] === 'true') {
     return false;
   }
-  
+
   // 개발 환경에서는 트랜잭션 사용하지 않음
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env['NODE_ENV'] === 'development') {
     return false;
   }
-  
+
   // 테스트 환경에서도 트랜잭션 사용하지 않음
-  if (process.env.NODE_ENV === 'test') {
+  if (process.env['NODE_ENV'] === 'test') {
     return false;
   }
-  
+
   // CI 환경에서는 트랜잭션 사용하지 않음
-  if (process.env.CI === 'true') {
+  if (process.env['CI'] === 'true') {
     return false;
   }
-  
+
   // 프로덕션 환경에서만 트랜잭션 사용
-  return process.env.NODE_ENV === 'production';
+  return process.env['NODE_ENV'] === 'production';
 }
 
 /**
@@ -59,17 +59,17 @@ export function shouldUseTransaction(): boolean {
 export async function withTransaction<T>(
   operation: (session?: mongoose.ClientSession) => Promise<T>
 ): Promise<T> {
-  const useTransaction = shouldUseTransaction() && await isReplicaSet();
-  
+  const useTransaction = shouldUseTransaction() && (await isReplicaSet());
+
   if (!useTransaction) {
     // 트랜잭션 없이 실행
     return await operation();
   }
-  
+
   // 트랜잭션과 함께 실행
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
     const result = await operation(session);
     await session.commitTransaction();
@@ -89,9 +89,9 @@ export async function logMongoDBInfo(): Promise<void> {
   try {
     const isReplSet = await isReplicaSet();
     const canUseTransaction = shouldUseTransaction();
-    
+
     logger.info('MongoDB Connection Info:', {
-      environment: process.env.NODE_ENV,
+      environment: process.env['NODE_ENV'],
       isReplicaSet: isReplSet,
       transactionsEnabled: canUseTransaction && isReplSet,
       readyState: mongoose.connection.readyState,

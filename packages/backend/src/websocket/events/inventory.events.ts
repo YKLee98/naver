@@ -15,7 +15,7 @@ export function registerInventoryEvents(io: Server, socket: Socket): void {
         naverQuantity: 100,
         shopifyQuantity: 100,
         lastUpdated: new Date().toISOString(),
-        inSync: true
+        inSync: true,
       };
 
       if (typeof callback === 'function') {
@@ -30,88 +30,107 @@ export function registerInventoryEvents(io: Server, socket: Socket): void {
   });
 
   // Adjust inventory
-  socket.on('inventory:adjust', async (data: {
-    sku: string;
-    platform: 'naver' | 'shopify' | 'both';
-    quantity: number;
-    reason: string;
-  }, callback) => {
-    try {
-      logger.info(`Inventory adjustment requested by ${socket.id}`, data);
-      
-      // Broadcast adjustment to all clients
-      io.emit('inventory:adjusted', {
-        ...data,
-        adjustedBy: socket.id,
-        timestamp: Date.now()
-      });
+  socket.on(
+    'inventory:adjust',
+    async (
+      data: {
+        sku: string;
+        platform: 'naver' | 'shopify' | 'both';
+        quantity: number;
+        reason: string;
+      },
+      callback
+    ) => {
+      try {
+        logger.info(`Inventory adjustment requested by ${socket.id}`, data);
 
-      if (typeof callback === 'function') {
-        callback({ success: true });
-      }
-    } catch (error: any) {
-      logger.error('Error adjusting inventory', error);
-      if (typeof callback === 'function') {
-        callback({ success: false, error: error.message });
+        // Broadcast adjustment to all clients
+        io.emit('inventory:adjusted', {
+          ...data,
+          adjustedBy: socket.id,
+          timestamp: Date.now(),
+        });
+
+        if (typeof callback === 'function') {
+          callback({ success: true });
+        }
+      } catch (error: any) {
+        logger.error('Error adjusting inventory', error);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: error.message });
+        }
       }
     }
-  });
+  );
 
   // Subscribe to inventory updates for specific SKU
-  socket.on('inventory:subscribe:sku', async (data: { sku: string }, callback) => {
-    try {
-      const room = `inventory:sku:${data.sku}`;
-      await socket.join(room);
-      logger.info(`Socket ${socket.id} subscribed to inventory updates for SKU ${data.sku}`);
+  socket.on(
+    'inventory:subscribe:sku',
+    async (data: { sku: string }, callback) => {
+      try {
+        const room = `inventory:sku:${data.sku}`;
+        await socket.join(room);
+        logger.info(
+          `Socket ${socket.id} subscribed to inventory updates for SKU ${data.sku}`
+        );
 
-      if (typeof callback === 'function') {
-        callback({ success: true, room });
-      }
-    } catch (error: any) {
-      logger.error('Error subscribing to SKU inventory', error);
-      if (typeof callback === 'function') {
-        callback({ success: false, error: error.message });
+        if (typeof callback === 'function') {
+          callback({ success: true, room });
+        }
+      } catch (error: any) {
+        logger.error('Error subscribing to SKU inventory', error);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: error.message });
+        }
       }
     }
-  });
+  );
 
   // Unsubscribe from inventory updates
-  socket.on('inventory:unsubscribe:sku', async (data: { sku: string }, callback) => {
-    try {
-      const room = `inventory:sku:${data.sku}`;
-      await socket.leave(room);
-      logger.info(`Socket ${socket.id} unsubscribed from inventory updates for SKU ${data.sku}`);
+  socket.on(
+    'inventory:unsubscribe:sku',
+    async (data: { sku: string }, callback) => {
+      try {
+        const room = `inventory:sku:${data.sku}`;
+        await socket.leave(room);
+        logger.info(
+          `Socket ${socket.id} unsubscribed from inventory updates for SKU ${data.sku}`
+        );
 
-      if (typeof callback === 'function') {
-        callback({ success: true });
-      }
-    } catch (error: any) {
-      logger.error('Error unsubscribing from SKU inventory', error);
-      if (typeof callback === 'function') {
-        callback({ success: false, error: error.message });
+        if (typeof callback === 'function') {
+          callback({ success: true });
+        }
+      } catch (error: any) {
+        logger.error('Error unsubscribing from SKU inventory', error);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: error.message });
+        }
       }
     }
-  });
+  );
 
   // Get low stock items
-  socket.on('inventory:low-stock', async (data: { threshold?: number }, callback) => {
-    try {
-      // TODO: Get actual low stock items from inventory service
-      const lowStockItems = [
-        { sku: 'SKU001', quantity: 5, threshold: 10 },
-        { sku: 'SKU002', quantity: 3, threshold: 10 }
-      ];
+  socket.on(
+    'inventory:low-stock',
+    async (_data: { threshold?: number }, callback) => {
+      try {
+        // TODO: Get actual low stock items from inventory service
+        const lowStockItems = [
+          { sku: 'SKU001', quantity: 5, threshold: 10 },
+          { sku: 'SKU002', quantity: 3, threshold: 10 },
+        ];
 
-      if (typeof callback === 'function') {
-        callback({ success: true, items: lowStockItems });
-      }
-    } catch (error: any) {
-      logger.error('Error getting low stock items', error);
-      if (typeof callback === 'function') {
-        callback({ success: false, error: error.message });
+        if (typeof callback === 'function') {
+          callback({ success: true, items: lowStockItems });
+        }
+      } catch (error: any) {
+        logger.error('Error getting low stock items', error);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: error.message });
+        }
       }
     }
-  });
+  );
 }
 
 /**
@@ -131,7 +150,7 @@ export function broadcastInventoryUpdate(
   const event = {
     ...data,
     timestamp: Date.now(),
-    difference: data.newQuantity - data.previousQuantity
+    difference: data.newQuantity - data.previousQuantity,
   };
 
   // Emit to all clients
@@ -158,7 +177,7 @@ export function broadcastOutOfStock(
   const event = {
     ...data,
     timestamp: Date.now(),
-    alert: 'OUT_OF_STOCK'
+    alert: 'OUT_OF_STOCK',
   };
 
   // Emit critical alert to all clients
@@ -171,7 +190,7 @@ export function broadcastOutOfStock(
   io.emit('alert:critical', {
     type: 'inventory',
     severity: 'critical',
-    ...event
+    ...event,
   });
 
   logger.warn('Broadcast out of stock alert', event);
@@ -193,7 +212,7 @@ export function broadcastLowStock(
   const event = {
     ...data,
     timestamp: Date.now(),
-    alert: 'LOW_STOCK'
+    alert: 'LOW_STOCK',
   };
 
   // Emit warning to all clients
@@ -206,7 +225,7 @@ export function broadcastLowStock(
   io.emit('alert:warning', {
     type: 'inventory',
     severity: 'warning',
-    ...event
+    ...event,
   });
 
   logger.warn('Broadcast low stock warning', event);
@@ -226,7 +245,7 @@ export function broadcastInventorySyncStatus(
 ): void {
   const event = {
     ...data,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 
   if (data.sku) {
@@ -258,7 +277,8 @@ export function broadcastInventoryDiscrepancy(
     ...data,
     timestamp: Date.now(),
     alert: 'INVENTORY_DISCREPANCY',
-    severity: Math.abs(data.difference) > data.threshold * 2 ? 'critical' : 'warning'
+    severity:
+      Math.abs(data.difference) > data.threshold * 2 ? 'critical' : 'warning',
   };
 
   // Emit to all clients
@@ -270,7 +290,7 @@ export function broadcastInventoryDiscrepancy(
   // Also emit as general alert
   io.emit(`alert:${event.severity}`, {
     type: 'inventory_discrepancy',
-    ...event
+    ...event,
   });
 
   logger.warn('Broadcast inventory discrepancy', event);
@@ -295,23 +315,23 @@ export function broadcastBulkInventoryUpdate(
 ): void {
   const event = {
     ...data,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 
   // Emit to all clients
   io.emit('inventory:bulk:updated', event);
 
   // Emit to individual SKU rooms
-  data.items.forEach(item => {
+  data.items.forEach((item) => {
     io.to(`inventory:sku:${item.sku}`).emit('inventory:sku:updated', {
       ...item,
       timestamp: Date.now(),
-      reason: data.reason
+      reason: data.reason,
     });
   });
 
   logger.info('Broadcast bulk inventory update', {
     totalUpdated: data.totalUpdated,
-    totalFailed: data.totalFailed
+    totalFailed: data.totalFailed,
   });
 }

@@ -53,16 +53,16 @@ const swaggerDefinition = {
     contact: {
       name: 'API Support Team',
       email: 'api-support@hallyufomaholic.com',
-      url: 'https://support.hallyufomaholic.com'
+      url: 'https://support.hallyufomaholic.com',
     },
     license: {
       name: 'Proprietary',
-      url: 'https://hallyufomaholic.com/license'
+      url: 'https://hallyufomaholic.com/license',
     },
     'x-logo': {
       url: 'https://hallyufomaholic.com/logo.png',
-      altText: 'Hallyu Fomaholic Logo'
-    }
+      altText: 'Hallyu Fomaholic Logo',
+    },
   },
   servers: [
     {
@@ -71,74 +71,74 @@ const swaggerDefinition = {
       variables: {
         port: {
           default: '3000',
-          description: 'Server port'
-        }
-      }
+          description: 'Server port',
+        },
+      },
     },
     {
       url: `https://staging-api.hallyufomaholic.com${config.api.prefix}`,
-      description: 'Staging Server'
+      description: 'Staging Server',
     },
     {
       url: `https://api.hallyufomaholic.com${config.api.prefix}`,
-      description: 'Production Server'
-    }
+      description: 'Production Server',
+    },
   ],
   externalDocs: {
     description: 'Full API Documentation',
-    url: 'https://docs.hallyufomaholic.com/api'
+    url: 'https://docs.hallyufomaholic.com/api',
   },
   tags: [
     {
       name: 'Authentication',
       description: 'User authentication and authorization endpoints',
-      'x-displayName': '🔐 Authentication'
+      'x-displayName': '🔐 Authentication',
     },
     {
       name: 'Products',
       description: 'Product catalog management',
-      'x-displayName': '📦 Products'
+      'x-displayName': '📦 Products',
     },
     {
       name: 'Inventory',
       description: 'Inventory tracking and synchronization',
-      'x-displayName': '📊 Inventory'
+      'x-displayName': '📊 Inventory',
     },
     {
       name: 'Pricing',
       description: 'Price management and calculations',
-      'x-displayName': '💰 Pricing'
+      'x-displayName': '💰 Pricing',
     },
     {
       name: 'Orders',
       description: 'Order processing and management',
-      'x-displayName': '🛒 Orders'
+      'x-displayName': '🛒 Orders',
     },
     {
       name: 'Sync',
       description: 'Synchronization operations',
-      'x-displayName': '🔄 Sync'
+      'x-displayName': '🔄 Sync',
     },
     {
       name: 'Analytics',
       description: 'Analytics and reporting',
-      'x-displayName': '📈 Analytics'
+      'x-displayName': '📈 Analytics',
     },
     {
       name: 'Settings',
       description: 'System configuration',
-      'x-displayName': '⚙️ Settings'
+      'x-displayName': '⚙️ Settings',
     },
     {
       name: 'Webhooks',
       description: 'Webhook management',
-      'x-displayName': '🔔 Webhooks'
+      'x-displayName': '🔔 Webhooks',
     },
     {
       name: 'Health',
       description: 'System health and monitoring',
-      'x-displayName': '❤️ Health'
-    }
+      'x-displayName': '❤️ Health',
+    },
   ],
   components: {
     securitySchemes: {
@@ -146,14 +146,14 @@ const swaggerDefinition = {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        description: 'JWT token obtained from /auth/login endpoint'
+        description: 'JWT token obtained from /auth/login endpoint',
       },
       apiKey: {
         type: 'apiKey',
         in: 'header',
         name: 'X-API-Key',
-        description: 'API key for service-to-service communication'
-      }
+        description: 'API key for service-to-service communication',
+      },
     },
     parameters: {
       pageParam: {
@@ -164,8 +164,8 @@ const swaggerDefinition = {
         schema: {
           type: 'integer',
           minimum: 1,
-          default: 1
-        }
+          default: 1,
+        },
       },
       limitParam: {
         name: 'limit',
@@ -176,17 +176,18 @@ const swaggerDefinition = {
           type: 'integer',
           minimum: 1,
           maximum: 100,
-          default: 10
-        }
+          default: 10,
+        },
       },
       sortParam: {
         name: 'sort',
         in: 'query',
-        description: 'Sort field and direction (e.g., "-createdAt" for descending)',
+        description:
+          'Sort field and direction (e.g., "-createdAt" for descending)',
         required: false,
         schema: {
-          type: 'string'
-        }
+          type: 'string',
+        },
       },
       searchParam: {
         name: 'search',
@@ -194,8 +195,8 @@ const swaggerDefinition = {
         description: 'Search query',
         required: false,
         schema: {
-          type: 'string'
-        }
+          type: 'string',
+        },
       },
       filterParam: {
         name: 'filter',
@@ -203,10 +204,10 @@ const swaggerDefinition = {
         description: 'JSON filter object',
         required: false,
         schema: {
-          type: 'string'
+          type: 'string',
         },
-        example: '{"status":"active","category":"electronics"}'
-      }
+        example: '{"status":"active","category":"electronics"}',
+      },
     },
     schemas: {
       // Base schemas
@@ -216,7 +217,7 @@ const swaggerDefinition = {
         properties: {
           success: {
             type: 'boolean',
-            example: false
+            example: false,
           },
           error: {
             type: 'object',
@@ -225,43 +226,43 @@ const swaggerDefinition = {
               code: {
                 type: 'string',
                 example: 'VALIDATION_ERROR',
-                description: 'Error code for programmatic handling'
+                description: 'Error code for programmatic handling',
               },
               message: {
                 type: 'string',
                 example: 'Validation failed',
-                description: 'Human-readable error message'
+                description: 'Human-readable error message',
               },
               details: {
                 type: 'object',
                 additionalProperties: true,
-                description: 'Additional error details'
+                description: 'Additional error details',
               },
               stack: {
                 type: 'string',
-                description: 'Stack trace (development only)'
-              }
-            }
+                description: 'Stack trace (development only)',
+              },
+            },
           },
           meta: {
             type: 'object',
             properties: {
               timestamp: {
                 type: 'string',
-                format: 'date-time'
+                format: 'date-time',
               },
               requestId: {
-                type: 'string'
+                type: 'string',
               },
               path: {
-                type: 'string'
+                type: 'string',
               },
               method: {
-                type: 'string'
-              }
-            }
-          }
-        }
+                type: 'string',
+              },
+            },
+          },
+        },
       },
       Success: {
         type: 'object',
@@ -269,21 +270,21 @@ const swaggerDefinition = {
         properties: {
           success: {
             type: 'boolean',
-            example: true
+            example: true,
           },
           data: {
             type: 'object',
-            description: 'Response data'
+            description: 'Response data',
           },
           meta: {
             type: 'object',
-            description: 'Response metadata'
+            description: 'Response metadata',
           },
           message: {
             type: 'string',
-            description: 'Success message'
-          }
-        }
+            description: 'Success message',
+          },
+        },
       },
       PaginatedResponse: {
         type: 'object',
@@ -291,18 +292,18 @@ const swaggerDefinition = {
         properties: {
           success: {
             type: 'boolean',
-            example: true
+            example: true,
           },
           data: {
             type: 'array',
             items: {
-              type: 'object'
-            }
+              type: 'object',
+            },
           },
           pagination: {
-            $ref: '#/components/schemas/Pagination'
-          }
-        }
+            $ref: '#/components/schemas/Pagination',
+          },
+        },
       },
       Pagination: {
         type: 'object',
@@ -311,36 +312,36 @@ const swaggerDefinition = {
           page: {
             type: 'integer',
             example: 1,
-            description: 'Current page number'
+            description: 'Current page number',
           },
           limit: {
             type: 'integer',
             example: 10,
-            description: 'Items per page'
+            description: 'Items per page',
           },
           total: {
             type: 'integer',
             example: 100,
-            description: 'Total number of items'
+            description: 'Total number of items',
           },
           pages: {
             type: 'integer',
             example: 10,
-            description: 'Total number of pages'
+            description: 'Total number of pages',
           },
           hasNext: {
             type: 'boolean',
             example: true,
-            description: 'Has next page'
+            description: 'Has next page',
           },
           hasPrev: {
             type: 'boolean',
             example: false,
-            description: 'Has previous page'
-          }
-        }
+            description: 'Has previous page',
+          },
+        },
       },
-      
+
       // Auth schemas
       LoginRequest: {
         type: 'object',
@@ -349,56 +350,56 @@ const swaggerDefinition = {
           email: {
             type: 'string',
             format: 'email',
-            example: 'admin@hallyufomaholic.com'
+            example: 'admin@hallyufomaholic.com',
           },
           password: {
             type: 'string',
             format: 'password',
             minLength: 8,
-            example: 'SecurePass123!'
+            example: 'SecurePass123!',
           },
           rememberMe: {
             type: 'boolean',
-            default: false
-          }
-        }
+            default: false,
+          },
+        },
       },
       LoginResponse: {
         type: 'object',
         properties: {
           success: {
             type: 'boolean',
-            example: true
+            example: true,
           },
           data: {
             type: 'object',
             properties: {
               user: {
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/User',
               },
               tokens: {
                 type: 'object',
                 properties: {
                   accessToken: {
                     type: 'string',
-                    description: 'JWT access token'
+                    description: 'JWT access token',
                   },
                   refreshToken: {
                     type: 'string',
-                    description: 'JWT refresh token'
+                    description: 'JWT refresh token',
                   },
                   expiresIn: {
                     type: 'integer',
                     example: 3600,
-                    description: 'Token expiry in seconds'
-                  }
-                }
-              }
-            }
-          }
-        }
+                    description: 'Token expiry in seconds',
+                  },
+                },
+              },
+            },
+          },
+        },
       },
-      
+
       // User schemas
       User: {
         type: 'object',
@@ -406,104 +407,110 @@ const swaggerDefinition = {
         properties: {
           id: {
             type: 'string',
-            example: '507f1f77bcf86cd799439011'
+            example: '507f1f77bcf86cd799439011',
           },
           email: {
             type: 'string',
-            format: 'email'
+            format: 'email',
           },
           name: {
-            type: 'string'
+            type: 'string',
           },
           role: {
             type: 'string',
-            enum: ['super_admin', 'admin', 'manager', 'user', 'viewer']
+            enum: ['super_admin', 'admin', 'manager', 'user', 'viewer'],
           },
           status: {
             type: 'string',
-            enum: ['active', 'inactive', 'suspended', 'pending']
+            enum: ['active', 'inactive', 'suspended', 'pending'],
           },
           emailVerified: {
-            type: 'boolean'
+            type: 'boolean',
           },
           twoFactorEnabled: {
-            type: 'boolean'
+            type: 'boolean',
           },
           lastLogin: {
             type: 'string',
-            format: 'date-time'
+            format: 'date-time',
           },
           createdAt: {
             type: 'string',
-            format: 'date-time'
+            format: 'date-time',
           },
           updatedAt: {
             type: 'string',
-            format: 'date-time'
-          }
-        }
+            format: 'date-time',
+          },
+        },
       },
-      
+
       // Product schemas
       Product: {
         type: 'object',
         required: ['sku', 'naverProductId', 'shopifyProductId'],
         properties: {
           id: {
-            type: 'string'
+            type: 'string',
           },
           sku: {
             type: 'string',
-            example: 'ALBUM-BTS-001'
+            example: 'ALBUM-BTS-001',
           },
           naverProductId: {
-            type: 'string'
+            type: 'string',
           },
           shopifyProductId: {
-            type: 'string'
+            type: 'string',
           },
           shopifyVariantId: {
-            type: 'string'
+            type: 'string',
           },
           productName: {
-            type: 'string'
+            type: 'string',
           },
           productNameKo: {
-            type: 'string'
+            type: 'string',
           },
           productNameEn: {
-            type: 'string'
+            type: 'string',
           },
           category: {
-            type: 'string'
+            type: 'string',
           },
           vendor: {
-            type: 'string'
+            type: 'string',
           },
           status: {
             type: 'string',
-            enum: ['active', 'inactive', 'discontinued', 'out_of_stock', 'pending']
+            enum: [
+              'active',
+              'inactive',
+              'discontinued',
+              'out_of_stock',
+              'pending',
+            ],
           },
           syncStatus: {
             type: 'object',
             properties: {
               inventory: {
                 type: 'string',
-                enum: ['synced', 'pending', 'error', 'skipped']
+                enum: ['synced', 'pending', 'error', 'skipped'],
               },
               price: {
                 type: 'string',
-                enum: ['synced', 'pending', 'error', 'skipped']
+                enum: ['synced', 'pending', 'error', 'skipped'],
               },
               product: {
                 type: 'string',
-                enum: ['synced', 'pending', 'error', 'skipped']
+                enum: ['synced', 'pending', 'error', 'skipped'],
               },
               lastSyncAt: {
                 type: 'string',
-                format: 'date-time'
-              }
-            }
+                format: 'date-time',
+              },
+            },
           },
           inventory: {
             type: 'object',
@@ -512,31 +519,31 @@ const swaggerDefinition = {
                 type: 'object',
                 properties: {
                   available: {
-                    type: 'integer'
+                    type: 'integer',
                   },
                   reserved: {
-                    type: 'integer'
+                    type: 'integer',
                   },
                   safety: {
-                    type: 'integer'
-                  }
-                }
+                    type: 'integer',
+                  },
+                },
               },
               shopify: {
                 type: 'object',
                 properties: {
                   available: {
-                    type: 'integer'
+                    type: 'integer',
                   },
                   incoming: {
-                    type: 'integer'
+                    type: 'integer',
                   },
                   committed: {
-                    type: 'integer'
-                  }
-                }
-              }
-            }
+                    type: 'integer',
+                  },
+                },
+              },
+            },
           },
           pricing: {
             type: 'object',
@@ -545,75 +552,82 @@ const swaggerDefinition = {
                 type: 'object',
                 properties: {
                   regular: {
-                    type: 'number'
+                    type: 'number',
                   },
                   sale: {
-                    type: 'number'
+                    type: 'number',
                   },
                   currency: {
                     type: 'string',
-                    default: 'KRW'
-                  }
-                }
+                    default: 'KRW',
+                  },
+                },
               },
               shopify: {
                 type: 'object',
                 properties: {
                   regular: {
-                    type: 'number'
+                    type: 'number',
                   },
                   sale: {
-                    type: 'number'
+                    type: 'number',
                   },
                   currency: {
                     type: 'string',
-                    default: 'USD'
-                  }
-                }
-              }
-            }
-          }
-        }
+                    default: 'USD',
+                  },
+                },
+              },
+            },
+          },
+        },
       },
-      
+
       // Sync schemas
       SyncJob: {
         type: 'object',
         properties: {
           syncJobId: {
-            type: 'string'
+            type: 'string',
           },
           type: {
             type: 'string',
-            enum: ['full', 'inventory', 'price', 'product', 'order']
+            enum: ['full', 'inventory', 'price', 'product', 'order'],
           },
           status: {
             type: 'string',
-            enum: ['pending', 'queued', 'processing', 'completed', 'failed', 'cancelled']
+            enum: [
+              'pending',
+              'queued',
+              'processing',
+              'completed',
+              'failed',
+              'cancelled',
+            ],
           },
           priority: {
             type: 'string',
-            enum: ['low', 'normal', 'high', 'urgent']
+            enum: ['low', 'normal', 'high', 'urgent'],
           },
           progress: {
             type: 'integer',
             minimum: 0,
-            maximum: 100
+            maximum: 100,
           },
           totalItems: {
-            type: 'integer'
+            type: 'integer',
           },
           processedItems: {
-            type: 'integer'
+            type: 'integer',
           },
           successItems: {
-            type: 'integer'
+            type: 'integer',
           },
           failedItems: {
-            type: 'integer'
+            type: 'integer',
           },
           skippedItems: {
-            type: 'integer'
+            type: 'integer',
           },
           errors: {
             type: 'array',
@@ -621,57 +635,57 @@ const swaggerDefinition = {
               type: 'object',
               properties: {
                 sku: {
-                  type: 'string'
+                  type: 'string',
                 },
                 code: {
-                  type: 'string'
+                  type: 'string',
                 },
                 message: {
-                  type: 'string'
+                  type: 'string',
                 },
                 timestamp: {
                   type: 'string',
-                  format: 'date-time'
-                }
-              }
-            }
+                  format: 'date-time',
+                },
+              },
+            },
           },
           startedAt: {
             type: 'string',
-            format: 'date-time'
+            format: 'date-time',
           },
           completedAt: {
             type: 'string',
-            format: 'date-time'
+            format: 'date-time',
           },
           duration: {
             type: 'integer',
-            description: 'Duration in milliseconds'
-          }
-        }
+            description: 'Duration in milliseconds',
+          },
+        },
       },
-      
+
       // Health schemas
       HealthStatus: {
         type: 'object',
         properties: {
           status: {
             type: 'string',
-            enum: ['healthy', 'unhealthy', 'degraded']
+            enum: ['healthy', 'unhealthy', 'degraded'],
           },
           timestamp: {
             type: 'string',
-            format: 'date-time'
+            format: 'date-time',
           },
           uptime: {
             type: 'integer',
-            description: 'Uptime in seconds'
+            description: 'Uptime in seconds',
           },
           version: {
-            type: 'string'
+            type: 'string',
           },
           environment: {
-            type: 'string'
+            type: 'string',
           },
           services: {
             type: 'object',
@@ -680,13 +694,13 @@ const swaggerDefinition = {
               properties: {
                 status: {
                   type: 'string',
-                  enum: ['up', 'down', 'degraded']
+                  enum: ['up', 'down', 'degraded'],
                 },
                 responseTime: {
-                  type: 'number'
-                }
-              }
-            }
+                  type: 'number',
+                },
+              },
+            },
           },
           infrastructure: {
             type: 'object',
@@ -696,26 +710,26 @@ const swaggerDefinition = {
                 properties: {
                   status: {
                     type: 'string',
-                    enum: ['connected', 'disconnected', 'error']
+                    enum: ['connected', 'disconnected', 'error'],
                   },
                   responseTime: {
-                    type: 'number'
-                  }
-                }
+                    type: 'number',
+                  },
+                },
               },
               redis: {
                 type: 'object',
                 properties: {
                   status: {
                     type: 'string',
-                    enum: ['connected', 'disconnected', 'error']
+                    enum: ['connected', 'disconnected', 'error'],
                   },
                   responseTime: {
-                    type: 'number'
-                  }
-                }
-              }
-            }
+                    type: 'number',
+                  },
+                },
+              },
+            },
           },
           system: {
             type: 'object',
@@ -724,31 +738,31 @@ const swaggerDefinition = {
                 type: 'object',
                 properties: {
                   usage: {
-                    type: 'number'
+                    type: 'number',
                   },
                   cores: {
-                    type: 'integer'
-                  }
-                }
+                    type: 'integer',
+                  },
+                },
               },
               memory: {
                 type: 'object',
                 properties: {
                   total: {
-                    type: 'integer'
+                    type: 'integer',
                   },
                   used: {
-                    type: 'integer'
+                    type: 'integer',
                   },
                   percentage: {
-                    type: 'number'
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+                    type: 'number',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
     responses: {
       BadRequest: {
@@ -756,127 +770,127 @@ const swaggerDefinition = {
         content: {
           'application/json': {
             schema: {
-              $ref: '#/components/schemas/Error'
+              $ref: '#/components/schemas/Error',
             },
             example: {
               success: false,
               error: {
                 code: 'BAD_REQUEST',
-                message: 'Invalid request parameters'
-              }
-            }
-          }
-        }
+                message: 'Invalid request parameters',
+              },
+            },
+          },
+        },
       },
       Unauthorized: {
         description: 'Unauthorized',
         content: {
           'application/json': {
             schema: {
-              $ref: '#/components/schemas/Error'
+              $ref: '#/components/schemas/Error',
             },
             example: {
               success: false,
               error: {
                 code: 'UNAUTHORIZED',
-                message: 'Authentication required'
-              }
-            }
-          }
-        }
+                message: 'Authentication required',
+              },
+            },
+          },
+        },
       },
       Forbidden: {
         description: 'Forbidden',
         content: {
           'application/json': {
             schema: {
-              $ref: '#/components/schemas/Error'
+              $ref: '#/components/schemas/Error',
             },
             example: {
               success: false,
               error: {
                 code: 'FORBIDDEN',
-                message: 'Insufficient permissions'
-              }
-            }
-          }
-        }
+                message: 'Insufficient permissions',
+              },
+            },
+          },
+        },
       },
       NotFound: {
         description: 'Not Found',
         content: {
           'application/json': {
             schema: {
-              $ref: '#/components/schemas/Error'
+              $ref: '#/components/schemas/Error',
             },
             example: {
               success: false,
               error: {
                 code: 'NOT_FOUND',
-                message: 'Resource not found'
-              }
-            }
-          }
-        }
+                message: 'Resource not found',
+              },
+            },
+          },
+        },
       },
       Conflict: {
         description: 'Conflict',
         content: {
           'application/json': {
             schema: {
-              $ref: '#/components/schemas/Error'
+              $ref: '#/components/schemas/Error',
             },
             example: {
               success: false,
               error: {
                 code: 'CONFLICT',
-                message: 'Resource already exists'
-              }
-            }
-          }
-        }
+                message: 'Resource already exists',
+              },
+            },
+          },
+        },
       },
       TooManyRequests: {
         description: 'Too Many Requests',
         content: {
           'application/json': {
             schema: {
-              $ref: '#/components/schemas/Error'
+              $ref: '#/components/schemas/Error',
             },
             example: {
               success: false,
               error: {
                 code: 'RATE_LIMIT',
-                message: 'Rate limit exceeded'
-              }
-            }
-          }
-        }
+                message: 'Rate limit exceeded',
+              },
+            },
+          },
+        },
       },
       InternalServerError: {
         description: 'Internal Server Error',
         content: {
           'application/json': {
             schema: {
-              $ref: '#/components/schemas/Error'
+              $ref: '#/components/schemas/Error',
             },
             example: {
               success: false,
               error: {
                 code: 'INTERNAL_ERROR',
-                message: 'An unexpected error occurred'
-              }
-            }
-          }
-        }
-      }
-    }
+                message: 'An unexpected error occurred',
+              },
+            },
+          },
+        },
+      },
+    },
   },
   security: [
     {
-      bearerAuth: []
-    }
-  ]
+      bearerAuth: [],
+    },
+  ],
 };
 
 const options: swaggerJsdoc.Options = {
@@ -887,8 +901,8 @@ const options: swaggerJsdoc.Options = {
     path.join(__dirname, '../controllers/*.ts'),
     path.join(__dirname, '../controllers/*.js'),
     path.join(__dirname, '../models/*.ts'),
-    path.join(__dirname, '../models/*.js')
-  ]
+    path.join(__dirname, '../models/*.js'),
+  ],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
@@ -939,8 +953,8 @@ export const swaggerUiOptions = {
     tryItOutEnabled: true,
     displayOperationId: false,
     tagsSorter: 'alpha',
-    operationsSorter: 'alpha'
-  }
+    operationsSorter: 'alpha',
+  },
 };
 
 export default swaggerSpec;

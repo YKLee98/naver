@@ -23,43 +23,43 @@ const NotificationSchema = new Schema<INotification>(
       type: String,
       enum: ['info', 'warning', 'error', 'success'],
       required: true,
-      index: true
+      index: true,
     },
     title: {
       type: String,
-      required: true
+      required: true,
     },
     message: {
       type: String,
-      required: true
+      required: true,
     },
     userId: {
       type: String,
-      index: true
+      index: true,
     },
     channel: {
       type: String,
-      index: true
+      index: true,
     },
     priority: {
       type: String,
       enum: ['low', 'normal', 'high', 'urgent'],
       default: 'normal',
-      index: true
+      index: true,
     },
     read: {
       type: Boolean,
       default: false,
-      index: true
+      index: true,
     },
     readAt: Date,
     metadata: {
       type: Map,
-      of: Schema.Types.Mixed
-    }
+      of: Schema.Types.Mixed,
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 
@@ -73,4 +73,7 @@ NotificationSchema.index(
   { expireAfterSeconds: 30 * 24 * 60 * 60 }
 );
 
-export const Notification = mongoose.model<INotification>('Notification', NotificationSchema);
+export const Notification = mongoose.model<INotification>(
+  'Notification',
+  NotificationSchema
+);

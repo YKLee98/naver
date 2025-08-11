@@ -17,9 +17,13 @@ const MASTER_KEY = process.env['ENCRYPTION_MASTER_KEY'] || generateDefaultKey();
 // 기본 키 생성 (개발 환경용)
 function generateDefaultKey(): string {
   if (process.env['NODE_ENV'] === 'production') {
-    throw new Error('ENCRYPTION_MASTER_KEY must be set in production environment');
+    throw new Error(
+      'ENCRYPTION_MASTER_KEY must be set in production environment'
+    );
   }
-  logger.warn('Using default encryption key. This should only happen in development.');
+  logger.warn(
+    'Using default encryption key. This should only happen in development.'
+  );
   return crypto.randomBytes(32).toString('base64');
 }
 
@@ -39,17 +43,17 @@ export function encrypt(text: string): string {
     const key = deriveKey(MASTER_KEY, salt);
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-    
+
     const encrypted = Buffer.concat([
       cipher.update(text, 'utf8'),
-      cipher.final()
+      cipher.final(),
     ]);
-    
+
     const tag = cipher.getAuthTag();
-    
+
     // 결합: salt + iv + tag + encrypted
     const combined = Buffer.concat([salt, iv, tag, encrypted]);
-    
+
     return combined.toString('base64');
   } catch (error) {
     logger.error('Encryption failed:', error);
@@ -63,22 +67,25 @@ export function encrypt(text: string): string {
 export function decrypt(encryptedText: string): string {
   try {
     const combined = Buffer.from(encryptedText, 'base64');
-    
+
     // 분리: salt + iv + tag + encrypted
     const salt = combined.slice(0, SALT_LENGTH);
     const iv = combined.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-    const tag = combined.slice(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + TAG_LENGTH);
+    const tag = combined.slice(
+      SALT_LENGTH + IV_LENGTH,
+      SALT_LENGTH + IV_LENGTH + TAG_LENGTH
+    );
     const encrypted = combined.slice(SALT_LENGTH + IV_LENGTH + TAG_LENGTH);
-    
+
     const key = deriveKey(MASTER_KEY, salt);
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(tag);
-    
+
     const decrypted = Buffer.concat([
       decipher.update(encrypted),
-      decipher.final()
+      decipher.final(),
     ]);
-    
+
     return decrypted.toString('utf8');
   } catch (error) {
     logger.error('Decryption failed:', error);
@@ -110,7 +117,11 @@ export function hmacSha256(data: string, secret: string): string {
 /**
  * HMAC-SHA256 서명 검증
  */
-export function verifyHmacSha256(data: string, signature: string, secret: string): boolean {
+export function verifyHmacSha256(
+  data: string,
+  signature: string,
+  secret: string
+): boolean {
   const expectedSignature = hmacSha256(data, secret);
   return crypto.timingSafeEqual(
     Buffer.from(signature),
@@ -150,7 +161,7 @@ export function base64UrlDecode(data: string): string {
   const base64 = data
     .replace(/-/g, '+')
     .replace(/_/g, '/')
-    .padEnd(data.length + (4 - data.length % 4) % 4, '=');
+    .padEnd(data.length + ((4 - (data.length % 4)) % 4), '=');
   return base64Decode(base64);
 }
 
@@ -158,7 +169,10 @@ export function base64UrlDecode(data: string): string {
  * 랜덤 문자열 생성
  */
 export function generateRandomString(length: number = 32): string {
-  return crypto.randomBytes(Math.ceil(length / 2)).toString('hex').slice(0, length);
+  return crypto
+    .randomBytes(Math.ceil(length / 2))
+    .toString('hex')
+    .slice(0, length);
 }
 
 /**
@@ -178,14 +192,20 @@ export function generateUUID(): string {
 /**
  * 비밀번호 해싱 (bcrypt)
  */
-export async function hashPassword(password: string, rounds: number = 12): Promise<string> {
+export async function hashPassword(
+  password: string,
+  rounds: number = 12
+): Promise<string> {
   return bcrypt.hash(password, rounds);
 }
 
 /**
  * 비밀번호 검증 (bcrypt)
  */
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  hash: string
+): Promise<boolean> {
   return bcrypt.compare(password, hash);
 }
 
@@ -214,11 +234,8 @@ export function verifyShopifyWebhook(
     .createHmac('sha256', secret)
     .update(rawBody, 'utf8')
     .digest('base64');
-  
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(hash)
-  );
+
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(hash));
 }
 
 /**
@@ -231,7 +248,11 @@ export function createSignature(payload: string, secret: string): string {
 /**
  * JWT 스타일 서명 검증
  */
-export function verifySignature(payload: string, signature: string, secret: string): boolean {
+export function verifySignature(
+  payload: string,
+  signature: string,
+  secret: string
+): boolean {
   return verifyHmacSha256(payload, signature, secret);
 }
 
@@ -248,7 +269,8 @@ export function generateApiKey(prefix: string = 'sk_live'): string {
  * API 키 검증 패턴
  */
 export function validateApiKeyFormat(apiKey: string): boolean {
-  const pattern = /^(sk_live|sk_test|pk_live|pk_test)_[a-z0-9]+_[A-Za-z0-9_-]+$/;
+  const pattern =
+    /^(sk_live|sk_test|pk_live|pk_test)_[a-z0-9]+_[A-Za-z0-9_-]+$/;
   return pattern.test(apiKey);
 }
 
@@ -256,7 +278,7 @@ export function validateApiKeyFormat(apiKey: string): boolean {
  * 민감한 정보 마스킹
  */
 export function maskSensitiveData(
-  data: string, 
+  data: string,
   options: {
     visibleStart?: number;
     visibleEnd?: number;
@@ -268,21 +290,21 @@ export function maskSensitiveData(
     visibleStart = 4,
     visibleEnd = 4,
     maskChar = '*',
-    minLength = 8
+    minLength = 8,
   } = options;
 
   if (!data || data.length < minLength) {
     return maskChar.repeat(minLength);
   }
-  
+
   if (data.length <= visibleStart + visibleEnd) {
     return maskChar.repeat(data.length);
   }
-  
+
   const start = data.slice(0, visibleStart);
   const end = data.slice(-visibleEnd);
   const middle = maskChar.repeat(data.length - visibleStart - visibleEnd);
-  
+
   return `${start}${middle}${end}`;
 }
 
@@ -292,16 +314,16 @@ export function maskSensitiveData(
 export function maskEmail(email: string): string {
   const parts = email.split('@');
   if (parts.length !== 2) return maskSensitiveData(email);
-  
+
   const [localPart, domain] = parts;
   if (!localPart || !domain) return maskSensitiveData(email);
-  
-  const maskedLocal = maskSensitiveData(localPart, { 
-    visibleStart: 2, 
+
+  const maskedLocal = maskSensitiveData(localPart, {
+    visibleStart: 2,
     visibleEnd: 0,
-    minLength: 3 
+    minLength: 3,
   });
-  
+
   return `${maskedLocal}@${domain}`;
 }
 
@@ -311,18 +333,21 @@ export function maskEmail(email: string): string {
 export function maskPhoneNumber(phone: string): string {
   const cleaned = phone.replace(/\D/g, '');
   if (cleaned.length < 10) return maskSensitiveData(phone);
-  
+
   return maskSensitiveData(cleaned, {
     visibleStart: 3,
     visibleEnd: 4,
-    minLength: 10
+    minLength: 10,
   });
 }
 
 /**
  * 파일 체크섬 생성
  */
-export function generateChecksum(data: Buffer | string, algorithm: string = 'sha256'): string {
+export function generateChecksum(
+  data: Buffer | string,
+  algorithm: string = 'sha256'
+): string {
   const buffer = typeof data === 'string' ? Buffer.from(data) : data;
   return crypto.createHash(algorithm).update(buffer).digest('hex');
 }
@@ -331,8 +356,8 @@ export function generateChecksum(data: Buffer | string, algorithm: string = 'sha
  * 파일 무결성 검증
  */
 export function verifyChecksum(
-  data: Buffer | string, 
-  expectedChecksum: string, 
+  data: Buffer | string,
+  expectedChecksum: string,
   algorithm: string = 'sha256'
 ): boolean {
   const actualChecksum = generateChecksum(data, algorithm);
@@ -383,7 +408,7 @@ export function validatePasswordStrength(password: string): {
   return {
     isValid: score >= 4,
     score,
-    issues
+    issues,
   };
 }
 
@@ -393,11 +418,11 @@ export function validatePasswordStrength(password: string): {
 export function secureCompare(a: string | Buffer, b: string | Buffer): boolean {
   const bufferA = typeof a === 'string' ? Buffer.from(a) : a;
   const bufferB = typeof b === 'string' ? Buffer.from(b) : b;
-  
+
   if (bufferA.length !== bufferB.length) {
     return false;
   }
-  
+
   return crypto.timingSafeEqual(bufferA, bufferB);
 }
 

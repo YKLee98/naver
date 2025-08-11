@@ -19,56 +19,62 @@ export interface IPriceSyncRule extends Document {
   updatedAt: Date;
 }
 
-const PriceSyncRuleSchema = new Schema<IPriceSyncRule>({
-  name: {
-    type: String,
-    required: true,
-    trim: true,
-    index: true
+const PriceSyncRuleSchema = new Schema<IPriceSyncRule>(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
+    type: {
+      type: String,
+      required: true,
+      enum: ['category', 'sku', 'brand', 'price_range'],
+    },
+    value: {
+      type: String,
+      required: true,
+    },
+    marginRate: {
+      type: Number,
+      required: true,
+      min: 0.01,
+      max: 10,
+    },
+    priority: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
+    enabled: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    conditions: {
+      minPrice: Number,
+      maxPrice: Number,
+      tags: [String],
+    },
+    createdBy: {
+      type: String,
+      required: true,
+    },
+    updatedBy: {
+      type: String,
+      required: true,
+    },
   },
-  type: {
-    type: String,
-    required: true,
-    enum: ['category', 'sku', 'brand', 'price_range']
-  },
-  value: {
-    type: String,
-    required: true
-  },
-  marginRate: {
-    type: Number,
-    required: true,
-    min: 0.01,
-    max: 10
-  },
-  priority: {
-    type: Number,
-    default: 0,
-    index: true
-  },
-  enabled: {
-    type: Boolean,
-    default: true,
-    index: true
-  },
-  conditions: {
-    minPrice: Number,
-    maxPrice: Number,
-    tags: [String]
-  },
-  createdBy: {
-    type: String,
-    required: true
-  },
-  updatedBy: {
-    type: String,
-    required: true
+  {
+    timestamps: true,
   }
-}, {
-  timestamps: true
-});
+);
 
 // 복합 인덱스
 PriceSyncRuleSchema.index({ type: 1, enabled: 1, priority: -1 });
 
-export const PriceSyncRule = model<IPriceSyncRule>('PriceSyncRule', PriceSyncRuleSchema);
+export const PriceSyncRule = model<IPriceSyncRule>(
+  'PriceSyncRule',
+  PriceSyncRuleSchema
+);

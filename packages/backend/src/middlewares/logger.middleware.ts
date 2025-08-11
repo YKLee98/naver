@@ -27,9 +27,9 @@ export const requestLogger = (
 
   // 응답 로깅
   const originalSend = res.send;
-  res.send = function(data) {
+  res.send = function (data) {
     const responseTime = Date.now() - (req.requestTime || Date.now());
-    
+
     logger.info(`Response sent`, {
       method: req.method,
       url: req.originalUrl,

@@ -1,4 +1,3 @@
-
 /**
  * 네이버 가격을 Shopify 가격으로 변환
  */
@@ -33,7 +32,7 @@ export function convertShopifyPriceToNaver(
 export function extractNumericId(gid: string): string {
   // gid://shopify/Product/1234567890 -> 1234567890
   const parts = gid.split('/');
-  return parts[parts.length - 1];
+  return parts[parts.length - 1] || '';
 }
 
 /**
@@ -68,7 +67,7 @@ export function formatNaverDate(date: Date): string {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   const seconds = String(date.getSeconds()).padStart(2, '0');
-  
+
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
@@ -93,14 +92,14 @@ export function normalizeSku(sku: string): string {
 export function normalizePhoneNumber(phone: string): string {
   // 숫자만 추출
   const numbers = phone.replace(/\D/g, '');
-  
+
   // 한국 전화번호 형식으로 변환
   if (numbers.startsWith('82')) {
     return `+${numbers}`;
   } else if (numbers.startsWith('0')) {
     return `+82${numbers.substring(1)}`;
   }
-  
+
   return numbers;
 }
 
@@ -109,13 +108,13 @@ export function normalizePhoneNumber(phone: string): string {
  */
 export function formatBytes(bytes: number, decimals: number = 2): string {
   if (bytes === 0) return '0 Bytes';
-  
+
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  
+
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
+
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
@@ -132,11 +131,11 @@ export function calculatePercentage(value: number, total: number): number {
  */
 export function chunkArray<T>(array: T[], size: number): T[][] {
   const chunks: T[][] = [];
-  
+
   for (let i = 0; i < array.length; i += size) {
     chunks.push(array.slice(i, i + size));
   }
-  
+
   return chunks;
 }
 
@@ -151,5 +150,3 @@ export function removeNullish<T extends object>(obj: T): Partial<T> {
     return acc;
   }, {} as Partial<T>);
 }
-
-

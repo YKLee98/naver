@@ -121,7 +121,7 @@ export const errorHandler = (
     if (err.name === 'CastError') error = handleCastErrorDB(err);
     if (err.code === '11000') error = handleDuplicateFieldsDB(err);
     if (err.name === 'ValidationError') error = handleValidationErrorDB(err);
-    
+
     // JWT 에러 처리
     if (err.name === 'JsonWebTokenError') error = handleJWTError();
     if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();

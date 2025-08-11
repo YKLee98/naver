@@ -37,13 +37,15 @@ export class NotificationService extends EventEmitter {
    */
   async send(notification: NotificationData): Promise<void> {
     try {
-      const notificationId = notification.id || `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
+      const notificationId =
+        notification.id ||
+        `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
       const fullNotification: NotificationData = {
         ...notification,
         id: notificationId,
         read: false,
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       // Store in Redis
@@ -64,15 +66,22 @@ export class NotificationService extends EventEmitter {
       // Send via WebSocket if available
       if (this.io) {
         if (notification.userId) {
-          this.io.to(`user:${notification.userId}`).emit('notification', fullNotification);
+          this.io
+            .to(`user:${notification.userId}`)
+            .emit('notification', fullNotification);
         }
-        
+
         if (notification.channel) {
-          this.io.to(notification.channel).emit('notification', fullNotification);
+          this.io
+            .to(notification.channel)
+            .emit('notification', fullNotification);
         }
-        
+
         // Broadcast to admin channel for high priority
-        if (notification.priority === 'high' || notification.priority === 'urgent') {
+        if (
+          notification.priority === 'high' ||
+          notification.priority === 'urgent'
+        ) {
           this.io.to('admin').emit('notification', fullNotification);
         }
       }
@@ -84,7 +93,7 @@ export class NotificationService extends EventEmitter {
         id: notificationId,
         type: notification.type,
         title: notification.title,
-        userId: notification.userId
+        userId: notification.userId,
       });
     } catch (error) {
       logger.error('Failed to send notification:', error);
@@ -96,7 +105,9 @@ export class NotificationService extends EventEmitter {
    * Send bulk notifications
    */
   async sendBulk(notifications: NotificationData[]): Promise<void> {
-    const promises = notifications.map(notification => this.send(notification));
+    const promises = notifications.map((notification) =>
+      this.send(notification)
+    );
     await Promise.allSettled(promises);
   }
 
@@ -108,26 +119,30 @@ export class NotificationService extends EventEmitter {
     options: { limit?: number; offset?: number; unreadOnly?: boolean } = {}
   ): Promise<NotificationData[]> {
     const { limit = 20, offset = 0, unreadOnly = false } = options;
-    
+
     try {
       const userKey = `user:${userId}:notifications`;
-      const notificationIds = await this.redis.lrange(userKey, offset, offset + limit - 1);
-      
+      const notificationIds = await this.redis.lrange(
+        userKey,
+        offset,
+        offset + limit - 1
+      );
+
       const notifications: NotificationData[] = [];
-      
+
       for (const id of notificationIds) {
         const key = `notification:${id}`;
         const data = await this.redis.get(key);
-        
+
         if (data) {
           const notification = JSON.parse(data) as NotificationData;
-          
+
           if (!unreadOnly || !notification.read) {
             notifications.push(notification);
           }
         }
       }
-      
+
       return notifications;
     } catch (error) {
       logger.error('Failed to get user notifications:', error);
@@ -142,20 +157,20 @@ export class NotificationService extends EventEmitter {
     try {
       const key = `notification:${notificationId}`;
       const data = await this.redis.get(key);
-      
+
       if (data) {
         const notification = JSON.parse(data) as NotificationData;
         notification.read = true;
-        
+
         await this.redis.setex(
           key,
           this.notificationTTL,
           JSON.stringify(notification)
         );
-        
+
         // Emit event
         this.emit('notification:read', { notificationId, userId });
-        
+
         logger.info('Notification marked as read:', notificationId);
       }
     } catch (error) {
@@ -170,12 +185,12 @@ export class NotificationService extends EventEmitter {
     try {
       const key = `notification:${notificationId}`;
       await this.redis.del(key);
-      
+
       if (userId) {
         const userKey = `user:${userId}:notifications`;
         await this.redis.lrem(userKey, 0, notificationId);
       }
-      
+
       logger.info('Notification deleted:', notificationId);
     } catch (error) {
       logger.error('Failed to delete notification:', error);
@@ -197,21 +212,25 @@ export class NotificationService extends EventEmitter {
       message,
       metadata,
       channel: 'system',
-      priority: type === 'error' ? 'high' : 'normal'
+      priority: type === 'error' ? 'high' : 'normal',
     });
   }
 
   /**
    * Send inventory alert
    */
-  async sendInventoryAlert(sku: string, currentStock: number, threshold: number): Promise<void> {
+  async sendInventoryAlert(
+    sku: string,
+    currentStock: number,
+    threshold: number
+  ): Promise<void> {
     await this.send({
       type: 'warning',
       title: '재고 부족 경고',
       message: `SKU ${sku}의 재고가 ${currentStock}개로 임계값(${threshold})에 도달했습니다.`,
       metadata: { sku, currentStock, threshold },
       channel: 'inventory',
-      priority: 'high'
+      priority: 'high',
     });
   }
 
@@ -226,13 +245,13 @@ export class NotificationService extends EventEmitter {
     const typeMap = {
       started: 'info' as const,
       completed: 'success' as const,
-      failed: 'error' as const
+      failed: 'error' as const,
     };
 
     const titleMap = {
       started: '동기화 시작',
       completed: '동기화 완료',
-      failed: '동기화 실패'
+      failed: '동기화 실패',
     };
 
     await this.send({
@@ -241,7 +260,7 @@ export class NotificationService extends EventEmitter {
       message: `${syncType} 동기화가 ${titleMap[type].toLowerCase()}되었습니다.`,
       metadata: details,
       channel: 'sync',
-      priority: type === 'failed' ? 'high' : 'normal'
+      priority: type === 'failed' ? 'high' : 'normal',
     });
   }
 
@@ -251,23 +270,25 @@ export class NotificationService extends EventEmitter {
   async getStatistics(userId?: string): Promise<any> {
     try {
       if (userId) {
-        const notifications = await this.getUserNotifications(userId, { limit: 100 });
-        
+        const notifications = await this.getUserNotifications(userId, {
+          limit: 100,
+        });
+
         return {
           total: notifications.length,
-          unread: notifications.filter(n => !n.read).length,
+          unread: notifications.filter((n) => !n.read).length,
           byType: {
-            info: notifications.filter(n => n.type === 'info').length,
-            warning: notifications.filter(n => n.type === 'warning').length,
-            error: notifications.filter(n => n.type === 'error').length,
-            success: notifications.filter(n => n.type === 'success').length
-          }
+            info: notifications.filter((n) => n.type === 'info').length,
+            warning: notifications.filter((n) => n.type === 'warning').length,
+            error: notifications.filter((n) => n.type === 'error').length,
+            success: notifications.filter((n) => n.type === 'success').length,
+          },
         };
       }
-      
+
       // Global statistics would require scanning all keys
       return {
-        message: 'Global statistics not implemented'
+        message: 'Global statistics not implemented',
       };
     } catch (error) {
       logger.error('Failed to get notification statistics:', error);

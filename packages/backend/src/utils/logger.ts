@@ -17,7 +17,7 @@ const levels = {
   http: 3,
   verbose: 4,
   debug: 5,
-  silly: 6
+  silly: 6,
 };
 
 // Log colors
@@ -28,7 +28,7 @@ const colors = {
   http: 'magenta',
   verbose: 'cyan',
   debug: 'blue',
-  silly: 'grey'
+  silly: 'grey',
 };
 
 winston.addColors(colors);
@@ -47,11 +47,11 @@ const consoleFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
     let msg = `${timestamp} [${level}]: ${message}`;
-    
+
     if (Object.keys(meta).length > 0) {
       msg += ` ${JSON.stringify(meta, null, 2)}`;
     }
-    
+
     return msg;
   })
 );
@@ -67,7 +67,7 @@ if (config.isDevelopment || config.isTest) {
   transports.push(
     new winston.transports.Console({
       format: consoleFormat,
-      level: config.misc.logLevel
+      level: config.misc.logLevel,
     })
   );
 }
@@ -83,7 +83,7 @@ if (config.isProduction) {
       maxSize: '20m',
       maxFiles: '30d',
       level: 'error',
-      format: customFormat
+      format: customFormat,
     })
   );
 
@@ -95,7 +95,7 @@ if (config.isProduction) {
       zippedArchive: true,
       maxSize: '20m',
       maxFiles: '14d',
-      format: customFormat
+      format: customFormat,
     })
   );
 
@@ -103,7 +103,7 @@ if (config.isProduction) {
   transports.push(
     new winston.transports.Console({
       format: winston.format.simple(),
-      level: 'info'
+      level: 'info',
     })
   );
 }
@@ -114,14 +114,14 @@ const logger = winston.createLogger({
   levels,
   format: customFormat,
   transports,
-  exitOnError: false
+  exitOnError: false,
 });
 
 // Stream for Morgan
 export const stream = {
   write: (message: string) => {
     logger.http(message.trim());
-  }
+  },
 };
 
 // Extend logger with custom methods

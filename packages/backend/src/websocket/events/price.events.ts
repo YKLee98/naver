@@ -16,7 +16,7 @@ export function registerPriceEvents(io: Server, socket: Socket): void {
         shopifyPrice: 38.08,
         exchangeRate: 1300,
         margin: 0.1,
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
       };
 
       if (typeof callback === 'function') {
@@ -31,40 +31,48 @@ export function registerPriceEvents(io: Server, socket: Socket): void {
   });
 
   // Update price
-  socket.on('price:update', async (data: {
-    sku: string;
-    naverPrice?: number;
-    shopifyPrice?: number;
-    margin?: number;
-    reason?: string;
-  }, callback) => {
-    try {
-      logger.info(`Price update requested by ${socket.id}`, data);
-      
-      // Broadcast price update to all clients
-      io.emit('price:updated', {
-        ...data,
-        updatedBy: socket.id,
-        timestamp: Date.now()
-      });
+  socket.on(
+    'price:update',
+    async (
+      data: {
+        sku: string;
+        naverPrice?: number;
+        shopifyPrice?: number;
+        margin?: number;
+        reason?: string;
+      },
+      callback
+    ) => {
+      try {
+        logger.info(`Price update requested by ${socket.id}`, data);
 
-      if (typeof callback === 'function') {
-        callback({ success: true });
-      }
-    } catch (error: any) {
-      logger.error('Error updating price', error);
-      if (typeof callback === 'function') {
-        callback({ success: false, error: error.message });
+        // Broadcast price update to all clients
+        io.emit('price:updated', {
+          ...data,
+          updatedBy: socket.id,
+          timestamp: Date.now(),
+        });
+
+        if (typeof callback === 'function') {
+          callback({ success: true });
+        }
+      } catch (error: any) {
+        logger.error('Error updating price', error);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: error.message });
+        }
       }
     }
-  });
+  );
 
   // Subscribe to price updates for specific SKU
   socket.on('price:subscribe:sku', async (data: { sku: string }, callback) => {
     try {
       const room = `price:sku:${data.sku}`;
       await socket.join(room);
-      logger.info(`Socket ${socket.id} subscribed to price updates for SKU ${data.sku}`);
+      logger.info(
+        `Socket ${socket.id} subscribed to price updates for SKU ${data.sku}`
+      );
 
       if (typeof callback === 'function') {
         callback({ success: true, room });
@@ -78,22 +86,27 @@ export function registerPriceEvents(io: Server, socket: Socket): void {
   });
 
   // Unsubscribe from price updates
-  socket.on('price:unsubscribe:sku', async (data: { sku: string }, callback) => {
-    try {
-      const room = `price:sku:${data.sku}`;
-      await socket.leave(room);
-      logger.info(`Socket ${socket.id} unsubscribed from price updates for SKU ${data.sku}`);
+  socket.on(
+    'price:unsubscribe:sku',
+    async (data: { sku: string }, callback) => {
+      try {
+        const room = `price:sku:${data.sku}`;
+        await socket.leave(room);
+        logger.info(
+          `Socket ${socket.id} unsubscribed from price updates for SKU ${data.sku}`
+        );
 
-      if (typeof callback === 'function') {
-        callback({ success: true });
-      }
-    } catch (error: any) {
-      logger.error('Error unsubscribing from SKU price', error);
-      if (typeof callback === 'function') {
-        callback({ success: false, error: error.message });
+        if (typeof callback === 'function') {
+          callback({ success: true });
+        }
+      } catch (error: any) {
+        logger.error('Error unsubscribing from SKU price', error);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: error.message });
+        }
       }
     }
-  });
+  );
 
   // Get exchange rate
   socket.on('price:exchange-rate', async (callback) => {
@@ -104,7 +117,7 @@ export function registerPriceEvents(io: Server, socket: Socket): void {
         targetCurrency: 'USD',
         rate: 1300,
         lastUpdated: new Date().toISOString(),
-        source: 'exchangerate-api'
+        source: 'exchangerate-api',
       };
 
       if (typeof callback === 'function') {
@@ -141,8 +154,14 @@ export function emitPriceUpdate(
     timestamp: Date.now(),
     naverPriceChange: data.newNaverPrice - data.previousNaverPrice,
     shopifyPriceChange: data.newShopifyPrice - data.previousShopifyPrice,
-    naverPriceChangePercent: ((data.newNaverPrice - data.previousNaverPrice) / data.previousNaverPrice) * 100,
-    shopifyPriceChangePercent: ((data.newShopifyPrice - data.previousShopifyPrice) / data.previousShopifyPrice) * 100
+    naverPriceChangePercent:
+      ((data.newNaverPrice - data.previousNaverPrice) /
+        data.previousNaverPrice) *
+      100,
+    shopifyPriceChangePercent:
+      ((data.newShopifyPrice - data.previousShopifyPrice) /
+        data.previousShopifyPrice) *
+      100,
   };
 
   // Emit to all clients
@@ -173,26 +192,27 @@ export function emitBulkPriceUpdate(
 ): void {
   const event = {
     ...data,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 
   // Emit to all clients
   io.emit('price:bulk:updated', event);
 
   // Emit to individual SKU rooms
-  data.items.forEach(item => {
+  data.items.forEach((item) => {
     io.to(`price:sku:${item.sku}`).emit('price:sku:changed', {
       ...item,
       timestamp: Date.now(),
       reason: data.reason,
       priceChange: item.newPrice - item.previousPrice,
-      priceChangePercent: ((item.newPrice - item.previousPrice) / item.previousPrice) * 100
+      priceChangePercent:
+        ((item.newPrice - item.previousPrice) / item.previousPrice) * 100,
     });
   });
 
   logger.info('Emit bulk price update', {
     totalUpdated: data.totalUpdated,
-    totalFailed: data.totalFailed
+    totalFailed: data.totalFailed,
   });
 }
 
@@ -204,7 +224,11 @@ export function broadcastPriceAlert(
   data: {
     sku: string;
     productName: string;
-    alertType: 'PRICE_INCREASE' | 'PRICE_DECREASE' | 'MARGIN_LOW' | 'PRICE_MISMATCH';
+    alertType:
+      | 'PRICE_INCREASE'
+      | 'PRICE_DECREASE'
+      | 'MARGIN_LOW'
+      | 'PRICE_MISMATCH';
     severity: 'info' | 'warning' | 'critical';
     details: {
       currentPrice?: number;
@@ -220,7 +244,7 @@ export function broadcastPriceAlert(
   const event = {
     ...data,
     timestamp: Date.now(),
-    id: `price-alert-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    id: `price-alert-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
   };
 
   // Emit price alert to all clients
@@ -232,7 +256,7 @@ export function broadcastPriceAlert(
   // Also emit as general alert
   io.emit(`alert:${data.severity}`, {
     type: 'price',
-    ...event
+    ...event,
   });
 
   logger.warn('Broadcast price alert', event);
@@ -255,7 +279,7 @@ export function broadcastExchangeRateUpdate(
   const event = {
     ...data,
     timestamp: Date.now(),
-    change: data.newRate - data.previousRate
+    change: data.newRate - data.previousRate,
   };
 
   // Emit to all clients
@@ -267,7 +291,7 @@ export function broadcastExchangeRateUpdate(
       type: 'exchange_rate',
       severity: Math.abs(data.changePercent) > 5 ? 'warning' : 'info',
       message: `Exchange rate changed by ${data.changePercent.toFixed(2)}%`,
-      ...event
+      ...event,
     });
   }
 
@@ -290,7 +314,9 @@ export function broadcastPriceSyncStatus(
   const event = {
     ...data,
     timestamp: Date.now(),
-    progress: data.totalItems ? (data.itemsProcessed || 0) / data.totalItems * 100 : 0
+    progress: data.totalItems
+      ? ((data.itemsProcessed || 0) / data.totalItems) * 100
+      : 0,
   };
 
   // Emit to all clients
@@ -318,8 +344,16 @@ export function broadcastMarginAlert(
     ...data,
     timestamp: Date.now(),
     marginDifference: data.currentMargin - data.targetMargin,
-    alert: data.currentMargin < data.targetMargin ? 'MARGIN_BELOW_TARGET' : 'MARGIN_ABOVE_TARGET',
-    severity: data.currentMargin < 0 ? 'critical' : data.currentMargin < data.targetMargin * 0.5 ? 'warning' : 'info'
+    alert:
+      data.currentMargin < data.targetMargin
+        ? 'MARGIN_BELOW_TARGET'
+        : 'MARGIN_ABOVE_TARGET',
+    severity:
+      data.currentMargin < 0
+        ? 'critical'
+        : data.currentMargin < data.targetMargin * 0.5
+          ? 'warning'
+          : 'info',
   };
 
   // Emit to all clients
@@ -331,7 +365,7 @@ export function broadcastMarginAlert(
   // Also emit as general alert
   io.emit(`alert:${event.severity}`, {
     type: 'margin',
-    ...event
+    ...event,
   });
 
   logger.warn('Broadcast margin alert', event);

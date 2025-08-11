@@ -16,7 +16,7 @@ export enum SettingsCategory {
   SECURITY = 'security',
   FEATURE_FLAGS = 'feature_flags',
   INTEGRATION = 'integration',
-  UI_PREFERENCES = 'ui_preferences'
+  UI_PREFERENCES = 'ui_preferences',
 }
 
 /**
@@ -31,7 +31,7 @@ export enum SettingsValueType {
   ARRAY = 'array',
   DATE = 'date',
   URL = 'url',
-  EMAIL = 'email'
+  EMAIL = 'email',
 }
 
 /**
@@ -41,7 +41,7 @@ export enum SettingsAccessLevel {
   PUBLIC = 'public',
   AUTHENTICATED = 'authenticated',
   ADMIN = 'admin',
-  SYSTEM = 'system'
+  SYSTEM = 'system',
 }
 
 /**
@@ -120,7 +120,14 @@ export interface ISettingsModel extends Model<ISettings> {
   getByKey(key: string): Promise<ISettings | null>;
   getByCategory(category: SettingsCategory): Promise<ISettings[]>;
   getBulk(keys: string[]): Promise<Map<string, any>>;
-  setBulk(settings: Array<{ key: string; value: any; userId?: string; reason?: string }>): Promise<void>;
+  setBulk(
+    settings: Array<{
+      key: string;
+      value: any;
+      userId?: string;
+      reason?: string;
+    }>
+  ): Promise<void>;
   getPublicSettings(): Promise<ISettings[]>;
   getEffectiveSettings(): Promise<ISettings[]>;
   exportSettings(category?: SettingsCategory): Promise<Record<string, any>>;
@@ -137,145 +144,152 @@ export interface ISettingsModel extends Model<ISettings> {
 /**
  * Settings Schema
  */
-const settingsSchema = new Schema<ISettings>({
-  key: {
-    type: String,
-    required: true,
-    unique: true,
-    uppercase: true,
-    trim: true,
-    index: true,
-    validate: {
-      validator: (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v),
-      message: 'Setting key must be uppercase alphanumeric with underscores'
-    }
-  },
-  value: {
-    type: Schema.Types.Mixed,
-    required: true
-  },
-  category: {
-    type: String,
-    required: true,
-    enum: Object.values(SettingsCategory),
-    index: true
-  },
-  valueType: {
-    type: String,
-    required: true,
-    enum: Object.values(SettingsValueType)
-  },
-  displayName: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  description: {
-    type: String,
-    trim: true
-  },
-  isEncrypted: {
-    type: Boolean,
-    default: false
-  },
-  isPublic: {
-    type: Boolean,
-    default: false,
-    index: true
-  },
-  isEditable: {
-    type: Boolean,
-    default: true
-  },
-  accessLevel: {
-    type: String,
-    enum: Object.values(SettingsAccessLevel),
-    default: SettingsAccessLevel.ADMIN
-  },
-  validation: {
-    min: Number,
-    max: Number,
-    pattern: String,
-    enum: [Schema.Types.Mixed],
-    required: Boolean,
-    customValidator: String
-  },
-  metadata: {
-    lastModifiedBy: String,
-    lastModifiedReason: String,
-    previousValues: [{
-      value: Schema.Types.Mixed,
-      changedAt: {
-        type: Date,
-        default: Date.now
+const settingsSchema = new Schema<ISettings>(
+  {
+    key: {
+      type: String,
+      required: true,
+      unique: true,
+      uppercase: true,
+      trim: true,
+      index: true,
+      validate: {
+        validator: (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v),
+        message: 'Setting key must be uppercase alphanumeric with underscores',
       },
-      changedBy: String,
-      reason: String
-    }],
-    relatedSettings: [String],
-    tags: [String],
-    source: String,
-    environment: [String]
-  },
-  defaultValue: Schema.Types.Mixed,
-  group: {
-    type: String,
-    index: true
-  },
-  order: {
-    type: Number,
-    default: 0
-  },
-  deprecated: {
-    type: Boolean,
-    default: false,
-    index: true
-  },
-  deprecationMessage: String,
-  effectiveDate: Date,
-  expiryDate: {
-    type: Date,
-    index: true
-  },
-  version: {
-    type: Number,
-    default: 1
-  },
-  cacheTTL: {
-    type: Number,
-    default: 300 // 5 minutes
-  },
-  requiresRestart: {
-    type: Boolean,
-    default: false
-  },
-  auditLog: [{
-    action: {
-      type: String,
-      required: true
     },
-    timestamp: {
+    value: {
+      type: Schema.Types.Mixed,
+      required: true,
+    },
+    category: {
+      type: String,
+      required: true,
+      enum: Object.values(SettingsCategory),
+      index: true,
+    },
+    valueType: {
+      type: String,
+      required: true,
+      enum: Object.values(SettingsValueType),
+    },
+    displayName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    isEncrypted: {
+      type: Boolean,
+      default: false,
+    },
+    isPublic: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    isEditable: {
+      type: Boolean,
+      default: true,
+    },
+    accessLevel: {
+      type: String,
+      enum: Object.values(SettingsAccessLevel),
+      default: SettingsAccessLevel.ADMIN,
+    },
+    validation: {
+      min: Number,
+      max: Number,
+      pattern: String,
+      enum: [Schema.Types.Mixed],
+      required: Boolean,
+      customValidator: String,
+    },
+    metadata: {
+      lastModifiedBy: String,
+      lastModifiedReason: String,
+      previousValues: [
+        {
+          value: Schema.Types.Mixed,
+          changedAt: {
+            type: Date,
+            default: Date.now,
+          },
+          changedBy: String,
+          reason: String,
+        },
+      ],
+      relatedSettings: [String],
+      tags: [String],
+      source: String,
+      environment: [String],
+    },
+    defaultValue: Schema.Types.Mixed,
+    group: {
+      type: String,
+      index: true,
+    },
+    order: {
+      type: Number,
+      default: 0,
+    },
+    deprecated: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deprecationMessage: String,
+    effectiveDate: Date,
+    expiryDate: {
       type: Date,
-      default: Date.now
+      index: true,
     },
-    userId: {
-      type: String,
-      required: true
+    version: {
+      type: Number,
+      default: 1,
     },
-    details: Schema.Types.Mixed
-  }]
-}, {
-  timestamps: true,
-  toJSON: {
-    transform: function(_doc: any, ret: any) {
-      delete ret._id;
-      if (ret.__v !== undefined) {
-        delete ret.__v;
-      }
-      return ret;
-    }
+    cacheTTL: {
+      type: Number,
+      default: 300, // 5 minutes
+    },
+    requiresRestart: {
+      type: Boolean,
+      default: false,
+    },
+    auditLog: [
+      {
+        action: {
+          type: String,
+          required: true,
+        },
+        timestamp: {
+          type: Date,
+          default: Date.now,
+        },
+        userId: {
+          type: String,
+          required: true,
+        },
+        details: Schema.Types.Mixed,
+      },
+    ],
+  },
+  {
+    timestamps: true,
+    toJSON: {
+      transform: function (_doc: any, ret: any) {
+        delete ret._id;
+        if (ret.__v !== undefined) {
+          delete ret.__v;
+        }
+        return ret;
+      },
+    },
   }
-});
+);
 
 // Indexes
 settingsSchema.index({ key: 1, version: -1 });
@@ -285,12 +299,12 @@ settingsSchema.index({ 'metadata.lastModifiedBy': 1, updatedAt: -1 });
 settingsSchema.index({ effectiveDate: 1, expiryDate: 1 });
 
 // Virtual for history count
-settingsSchema.virtual('historyCount').get(function() {
+settingsSchema.virtual('historyCount').get(function () {
   return this.metadata?.previousValues?.length || 0;
 });
 
 // Instance Methods
-settingsSchema.methods.getValue = function(): any {
+settingsSchema.methods.getValue = function (): any {
   if (this.isExpired()) {
     logger.warn(`Setting ${this.key} has expired`);
     return this.defaultValue;
@@ -312,7 +326,9 @@ settingsSchema.methods.getValue = function(): any {
     case SettingsValueType.BOOLEAN:
       return Boolean(this.value);
     case SettingsValueType.JSON:
-      return typeof this.value === 'string' ? JSON.parse(this.value) : this.value;
+      return typeof this.value === 'string'
+        ? JSON.parse(this.value)
+        : this.value;
     case SettingsValueType.ARRAY:
       return Array.isArray(this.value) ? this.value : [];
     case SettingsValueType.DATE:
@@ -322,9 +338,9 @@ settingsSchema.methods.getValue = function(): any {
   }
 };
 
-settingsSchema.methods.setValue = async function(
-  value: any, 
-  userId: string = 'system', 
+settingsSchema.methods.setValue = async function (
+  value: any,
+  userId: string = 'system',
   reason?: string
 ): Promise<void> {
   if (!this.isEditable && userId !== 'system') {
@@ -352,10 +368,10 @@ settingsSchema.methods.setValue = async function(
   this.metadata.lastModifiedReason = reason || 'Direct update';
 
   // Log audit
-  this.logAudit('UPDATE', userId, { 
-    previousValue: this.metadata.previousValues?.[0]?.value, 
+  this.logAudit('UPDATE', userId, {
+    previousValue: this.metadata.previousValues?.[0]?.value,
     newValue: value,
-    reason 
+    reason,
   });
 
   // Increment version
@@ -364,12 +380,15 @@ settingsSchema.methods.setValue = async function(
   await this.save();
 };
 
-settingsSchema.methods.validateValue = function(value: any): boolean {
+settingsSchema.methods.validateValue = function (value: any): boolean {
   if (!this.validation) return true;
 
   try {
     // Required check
-    if (this.validation.required && (value === null || value === undefined || value === '')) {
+    if (
+      this.validation.required &&
+      (value === null || value === undefined || value === '')
+    ) {
       return false;
     }
 
@@ -378,24 +397,45 @@ settingsSchema.methods.validateValue = function(value: any): boolean {
       case SettingsValueType.NUMBER:
         const numValue = Number(value);
         if (isNaN(numValue)) return false;
-        if (this.validation.min !== undefined && numValue < this.validation.min) return false;
-        if (this.validation.max !== undefined && numValue > this.validation.max) return false;
+        if (this.validation.min !== undefined && numValue < this.validation.min)
+          return false;
+        if (this.validation.max !== undefined && numValue > this.validation.max)
+          return false;
         break;
 
       case SettingsValueType.STRING:
       case SettingsValueType.ENCRYPTED:
         const strValue = String(value);
-        if (this.validation.pattern && !new RegExp(this.validation.pattern).test(strValue)) {
+        if (
+          this.validation.pattern &&
+          !new RegExp(this.validation.pattern).test(strValue)
+        ) {
           return false;
         }
-        if (this.validation.min !== undefined && strValue.length < this.validation.min) return false;
-        if (this.validation.max !== undefined && strValue.length > this.validation.max) return false;
+        if (
+          this.validation.min !== undefined &&
+          strValue.length < this.validation.min
+        )
+          return false;
+        if (
+          this.validation.max !== undefined &&
+          strValue.length > this.validation.max
+        )
+          return false;
         break;
 
       case SettingsValueType.ARRAY:
         if (!Array.isArray(value)) return false;
-        if (this.validation.min !== undefined && value.length < this.validation.min) return false;
-        if (this.validation.max !== undefined && value.length > this.validation.max) return false;
+        if (
+          this.validation.min !== undefined &&
+          value.length < this.validation.min
+        )
+          return false;
+        if (
+          this.validation.max !== undefined &&
+          value.length > this.validation.max
+        )
+          return false;
         break;
 
       case SettingsValueType.JSON:
@@ -436,13 +476,15 @@ settingsSchema.methods.validateValue = function(value: any): boolean {
   }
 };
 
-settingsSchema.methods.resetToDefault = async function(userId: string = 'system'): Promise<void> {
+settingsSchema.methods.resetToDefault = async function (
+  userId: string = 'system'
+): Promise<void> {
   if (this.defaultValue !== undefined) {
     await this.setValue(this.defaultValue, userId, 'Reset to default value');
   }
 };
 
-settingsSchema.methods.getDecryptedValue = function(): any {
+settingsSchema.methods.getDecryptedValue = function (): any {
   if (!this.isEncrypted || !this.value) {
     return this.value;
   }
@@ -455,17 +497,17 @@ settingsSchema.methods.getDecryptedValue = function(): any {
   }
 };
 
-settingsSchema.methods.isExpired = function(): boolean {
+settingsSchema.methods.isExpired = function (): boolean {
   return this.expiryDate ? new Date() > this.expiryDate : false;
 };
 
-settingsSchema.methods.isEffective = function(): boolean {
+settingsSchema.methods.isEffective = function (): boolean {
   return this.effectiveDate ? new Date() >= this.effectiveDate : true;
 };
 
-settingsSchema.methods.addToHistory = function(
-  value: any, 
-  userId: string, 
+settingsSchema.methods.addToHistory = function (
+  value: any,
+  userId: string,
   reason?: string
 ): void {
   if (!this.metadata) {
@@ -485,13 +527,13 @@ settingsSchema.methods.addToHistory = function(
     value: this.isEncrypted ? '***ENCRYPTED***' : value,
     changedAt: new Date(),
     changedBy: userId,
-    reason
+    reason,
   });
 };
 
-settingsSchema.methods.logAudit = function(
-  action: string, 
-  userId: string, 
+settingsSchema.methods.logAudit = function (
+  action: string,
+  userId: string,
   details?: any
 ): void {
   if (!this.auditLog) {
@@ -507,12 +549,12 @@ settingsSchema.methods.logAudit = function(
     action,
     timestamp: new Date(),
     userId,
-    details
+    details,
   });
 };
 
-settingsSchema.methods.canBeAccessedBy = function(
-  userId: string, 
+settingsSchema.methods.canBeAccessedBy = function (
+  userId: string,
   userRole: string
 ): boolean {
   switch (this.accessLevel) {
@@ -529,21 +571,21 @@ settingsSchema.methods.canBeAccessedBy = function(
   }
 };
 
-settingsSchema.methods.toPublicJSON = function(): any {
+settingsSchema.methods.toPublicJSON = function (): any {
   const obj = this.toJSON();
-  
+
   // Remove sensitive information
   if (this.isEncrypted) {
     obj.value = '***ENCRYPTED***';
   }
-  
+
   delete obj.auditLog;
   delete obj.metadata?.previousValues;
-  
+
   return obj;
 };
 
-settingsSchema.methods.clone = function(newKey: string): ISettings {
+settingsSchema.methods.clone = function (newKey: string): ISettings {
   const cloned = new (this.constructor as any)({
     ...this.toObject(),
     _id: undefined,
@@ -552,60 +594,66 @@ settingsSchema.methods.clone = function(newKey: string): ISettings {
     metadata: {
       ...this.metadata,
       previousValues: [],
-      source: `Cloned from ${this.key}`
+      source: `Cloned from ${this.key}`,
     },
-    auditLog: [{
-      action: 'CLONE',
-      timestamp: new Date(),
-      userId: 'system',
-      details: { sourceKey: this.key }
-    }]
+    auditLog: [
+      {
+        action: 'CLONE',
+        timestamp: new Date(),
+        userId: 'system',
+        details: { sourceKey: this.key },
+      },
+    ],
   });
-  
+
   return cloned;
 };
 
 // Static Methods
-settingsSchema.statics.getByKey = async function(key: string): Promise<ISettings | null> {
-  return this.findOne({ 
+settingsSchema.statics.getByKey = async function (
+  key: string
+): Promise<ISettings | null> {
+  return this.findOne({
     key: key.toUpperCase(),
-    deprecated: { $ne: true }
+    deprecated: { $ne: true },
   });
 };
 
-settingsSchema.statics.getByCategory = async function(
+settingsSchema.statics.getByCategory = async function (
   category: SettingsCategory
 ): Promise<ISettings[]> {
-  return this.find({ 
+  return this.find({
     category,
-    deprecated: { $ne: true }
+    deprecated: { $ne: true },
   }).sort({ group: 1, order: 1, displayName: 1 });
 };
 
-settingsSchema.statics.getBulk = async function(keys: string[]): Promise<Map<string, any>> {
-  const settings = await this.find({ 
-    key: { $in: keys.map(k => k.toUpperCase()) },
-    deprecated: { $ne: true }
+settingsSchema.statics.getBulk = async function (
+  keys: string[]
+): Promise<Map<string, any>> {
+  const settings = await this.find({
+    key: { $in: keys.map((k) => k.toUpperCase()) },
+    deprecated: { $ne: true },
   });
-  
+
   const result = new Map<string, any>();
-  
+
   for (const setting of settings) {
     result.set(setting.key, setting.getValue());
   }
-  
+
   return result;
 };
 
-settingsSchema.statics.setBulk = async function(
+settingsSchema.statics.setBulk = async function (
   settings: Array<{ key: string; value: any; userId?: string; reason?: string }>
 ): Promise<void> {
   for (const { key, value, userId, reason } of settings) {
-    const setting = await this.findOne({ 
+    const setting = await this.findOne({
       key: key.toUpperCase(),
-      deprecated: { $ne: true }
+      deprecated: { $ne: true },
     });
-    
+
     if (setting) {
       await setting.setValue(value, userId, reason);
     } else {
@@ -614,32 +662,35 @@ settingsSchema.statics.setBulk = async function(
   }
 };
 
-settingsSchema.statics.getPublicSettings = async function(): Promise<ISettings[]> {
-  return this.find({ 
+settingsSchema.statics.getPublicSettings = async function (): Promise<
+  ISettings[]
+> {
+  return this.find({
     isPublic: true,
-    deprecated: { $ne: true }
+    deprecated: { $ne: true },
   }).sort({ category: 1, displayName: 1 });
 };
 
-settingsSchema.statics.getEffectiveSettings = async function(): Promise<ISettings[]> {
+settingsSchema.statics.getEffectiveSettings = async function (): Promise<
+  ISettings[]
+> {
   const now = new Date();
-  
+
   return this.find({
     deprecated: { $ne: true },
     $or: [
       { effectiveDate: { $exists: false } },
-      { effectiveDate: { $lte: now } }
+      { effectiveDate: { $lte: now } },
     ],
     $and: [
-      { $or: [
-        { expiryDate: { $exists: false } },
-        { expiryDate: { $gt: now } }
-      ]}
-    ]
+      {
+        $or: [{ expiryDate: { $exists: false } }, { expiryDate: { $gt: now } }],
+      },
+    ],
   });
 };
 
-settingsSchema.statics.exportSettings = async function(
+settingsSchema.statics.exportSettings = async function (
   category?: SettingsCategory
 ): Promise<Record<string, any>> {
   const query: any = { deprecated: { $ne: true } };
@@ -658,8 +709,8 @@ settingsSchema.statics.exportSettings = async function(
         metadata: {
           category: setting.category,
           valueType: setting.valueType,
-          isEncrypted: true
-        }
+          isEncrypted: true,
+        },
       };
     } else {
       result[setting.key] = {
@@ -668,8 +719,8 @@ settingsSchema.statics.exportSettings = async function(
           category: setting.category,
           valueType: setting.valueType,
           displayName: setting.displayName,
-          description: setting.description
-        }
+          description: setting.description,
+        },
       };
     }
   }
@@ -677,7 +728,7 @@ settingsSchema.statics.exportSettings = async function(
   return result;
 };
 
-settingsSchema.statics.importSettings = async function(
+settingsSchema.statics.importSettings = async function (
   data: Record<string, any>,
   userId: string
 ): Promise<void> {
@@ -688,7 +739,7 @@ settingsSchema.statics.importSettings = async function(
     }
 
     let setting = await this.findOne({ key: key.toUpperCase() });
-    
+
     if (!setting && config.metadata) {
       // Create new setting
       setting = new this({
@@ -700,9 +751,9 @@ settingsSchema.statics.importSettings = async function(
         description: config.metadata.description,
         isPublic: false,
         isEditable: true,
-        accessLevel: SettingsAccessLevel.ADMIN
+        accessLevel: SettingsAccessLevel.ADMIN,
       });
-      
+
       await setting.save();
       setting.logAudit('IMPORT', userId, { source: 'import' });
     } else if (setting) {
@@ -712,122 +763,129 @@ settingsSchema.statics.importSettings = async function(
   }
 };
 
-settingsSchema.statics.searchSettings = async function(
+settingsSchema.statics.searchSettings = async function (
   query: string,
   options: any = {}
 ): Promise<ISettings[]> {
   const searchRegex = new RegExp(query, 'i');
-  
+
   return this.find({
     deprecated: { $ne: true },
     $or: [
       { key: searchRegex },
       { displayName: searchRegex },
       { description: searchRegex },
-      { 'metadata.tags': searchRegex }
-    ]
+      { 'metadata.tags': searchRegex },
+    ],
   })
-  .limit(options.limit || 50)
-  .skip(options.skip || 0)
-  .sort(options.sort || { displayName: 1 });
+    .limit(options.limit || 50)
+    .skip(options.skip || 0)
+    .sort(options.sort || { displayName: 1 });
 };
 
-settingsSchema.statics.getDeprecatedSettings = async function(): Promise<ISettings[]> {
+settingsSchema.statics.getDeprecatedSettings = async function (): Promise<
+  ISettings[]
+> {
   return this.find({ deprecated: true }).sort({ deprecatedAt: -1 });
 };
 
-settingsSchema.statics.purgeExpiredSettings = async function(): Promise<number> {
-  const result = await this.deleteMany({
-    expiryDate: { $lte: new Date() },
-    isEditable: true
-  });
-  
-  return result.deletedCount || 0;
-};
+settingsSchema.statics.purgeExpiredSettings =
+  async function (): Promise<number> {
+    const result = await this.deleteMany({
+      expiryDate: { $lte: new Date() },
+      isEditable: true,
+    });
 
-settingsSchema.statics.validateAllSettings = async function(): Promise<Array<{ key: string; errors: string[] }>> {
+    return result.deletedCount || 0;
+  };
+
+settingsSchema.statics.validateAllSettings = async function (): Promise<
+  Array<{ key: string; errors: string[] }>
+> {
   const settings = await this.find({ deprecated: { $ne: true } });
   const results: Array<{ key: string; errors: string[] }> = [];
-  
+
   for (const setting of settings) {
     const errors: string[] = [];
-    
+
     // Validate current value
     if (!setting.validateValue(setting.getValue())) {
       errors.push('Current value fails validation');
     }
-    
+
     // Check for required related settings
     if (setting.metadata?.relatedSettings) {
       for (const relatedKey of setting.metadata.relatedSettings) {
-        const related = await this.findOne({ 
+        const related = await this.findOne({
           key: relatedKey.toUpperCase(),
-          deprecated: { $ne: true }
+          deprecated: { $ne: true },
         });
         if (!related) {
           errors.push(`Related setting ${relatedKey} not found`);
         }
       }
     }
-    
+
     if (errors.length > 0) {
       results.push({ key: setting.key, errors });
     }
   }
-  
+
   return results;
 };
 
-settingsSchema.statics.getDependentSettings = async function(key: string): Promise<ISettings[]> {
+settingsSchema.statics.getDependentSettings = async function (
+  key: string
+): Promise<ISettings[]> {
   return this.find({
     'metadata.relatedSettings': key.toUpperCase(),
-    deprecated: { $ne: true }
+    deprecated: { $ne: true },
   });
 };
 
-settingsSchema.statics.createSetting = async function(
+settingsSchema.statics.createSetting = async function (
   data: Partial<ISettings>,
   userId: string
 ): Promise<ISettings> {
   const setting = new this({
     ...data,
     key: data.key?.toUpperCase(),
-    version: 1
+    version: 1,
   });
-  
+
   await setting.save();
-  
-  setting.logAudit('CREATE', userId, { 
-    initialValue: data.value 
+
+  setting.logAudit('CREATE', userId, {
+    initialValue: data.value,
   });
-  
+
   await setting.save();
-  
+
   return setting;
 };
 
-settingsSchema.statics.archiveSetting = async function(
+settingsSchema.statics.archiveSetting = async function (
   key: string,
   userId: string
 ): Promise<void> {
-  const setting = await this.findOne({ 
+  const setting = await this.findOne({
     key: key.toUpperCase(),
-    deprecated: { $ne: true }
+    deprecated: { $ne: true },
   });
-  
+
   if (!setting) {
     throw new Error(`Setting ${key} not found`);
   }
-  
+
   setting.deprecated = true;
   setting.deprecationMessage = `Archived by ${userId} on ${new Date().toISOString()}`;
   setting.logAudit('ARCHIVE', userId);
-  
+
   await setting.save();
 };
 
 // Pre-save middleware
-settingsSchema.pre('save', function(next) {
+settingsSchema.pre('save', function (next) {
   // Ensure key is uppercase
   if (this.key) {
     this.key = this.key.toUpperCase();
@@ -858,20 +916,23 @@ settingsSchema.pre('save', function(next) {
 });
 
 // Post-save middleware for cache invalidation
-settingsSchema.post('save', function(doc) {
+settingsSchema.post('save', function (doc) {
   logger.info(`Setting ${doc.key} saved, version: ${doc.version}`);
   // Here you would invalidate any caches
 });
 
 // Post-remove middleware - using the deprecated findOneAndDelete hook instead
-settingsSchema.post('findOneAndDelete', function(doc) {
+settingsSchema.post('findOneAndDelete', function (doc) {
   if (doc) {
     logger.info(`Setting ${doc.key} removed`);
   }
 });
 
 // Create and export model
-export const Settings = model<ISettings, ISettingsModel>('Settings', settingsSchema);
+export const Settings = model<ISettings, ISettingsModel>(
+  'Settings',
+  settingsSchema
+);
 
 // Create default settings on startup
 export async function initializeDefaultSettings(): Promise<void> {
@@ -887,7 +948,7 @@ export async function initializeDefaultSettings(): Promise<void> {
       isEditable: true,
       defaultValue: true,
       group: 'general',
-      order: 1
+      order: 1,
     },
     {
       key: 'SYNC_INTERVAL_MINUTES',
@@ -901,11 +962,11 @@ export async function initializeDefaultSettings(): Promise<void> {
       validation: {
         min: 5,
         max: 1440,
-        required: true
+        required: true,
       },
       defaultValue: 30,
       group: 'general',
-      order: 2
+      order: 2,
     },
     {
       key: 'API_RATE_LIMIT_PER_MINUTE',
@@ -919,17 +980,17 @@ export async function initializeDefaultSettings(): Promise<void> {
       validation: {
         min: 1,
         max: 1000,
-        required: true
+        required: true,
       },
       defaultValue: 60,
       group: 'limits',
-      order: 1
-    }
+      order: 1,
+    },
   ];
 
   for (const settingData of defaultSettings) {
     const existing = await Settings.getByKey(settingData.key);
-    
+
     if (!existing) {
       await Settings.createSetting(settingData, 'system');
       logger.info(`Default setting ${settingData.key} created`);

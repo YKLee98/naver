@@ -10,9 +10,7 @@ describe('Sync API', () => {
       // Create test data
       await createProductMapping().save();
 
-      const response = await request(app)
-        .post('/api/v1/sync/full')
-        .expect(200);
+      const response = await request(app).post('/api/v1/sync/full').expect(200);
 
       expect(response.body.success).toBe(true);
       expect(response.body.data).toHaveProperty('jobId');
@@ -21,11 +19,11 @@ describe('Sync API', () => {
 
     it('should return error if sync is already running', async () => {
       // Mock sync in progress
-      jest.spyOn(SyncService.prototype, 'isSyncRunning').mockResolvedValue(true);
+      jest
+        .spyOn(SyncService.prototype, 'isSyncRunning')
+        .mockResolvedValue(true);
 
-      const response = await request(app)
-        .post('/api/v1/sync/full')
-        .expect(409);
+      const response = await request(app).post('/api/v1/sync/full').expect(409);
 
       expect(response.body.success).toBe(false);
       expect(response.body.error.code).toBe('SYNC_IN_PROGRESS');

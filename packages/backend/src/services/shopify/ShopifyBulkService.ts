@@ -50,16 +50,16 @@ export class ShopifyBulkService extends ShopifyService {
   /**
    * Override initialize to also initialize GraphQL service
    */
-  public async initialize(): Promise<void> {
+  public override async initialize(): Promise<void> {
     // Initialize parent service first
     await super.initialize();
-    
+
     // Initialize GraphQL service
     this.graphqlService = new ShopifyGraphQLService();
     if (typeof (this.graphqlService as any).initialize === 'function') {
       await (this.graphqlService as any).initialize();
     }
-    
+
     logger.info('ShopifyBulkService initialized successfully');
   }
 
@@ -87,7 +87,7 @@ export class ShopifyBulkService extends ShopifyService {
    * Rate limiting helper
    */
   private async rateLimit(): Promise<void> {
-    await new Promise(resolve => setTimeout(resolve, this.RATE_LIMIT_DELAY));
+    await new Promise((resolve) => setTimeout(resolve, this.RATE_LIMIT_DELAY));
   }
 
   /**
@@ -99,7 +99,7 @@ export class ShopifyBulkService extends ShopifyService {
   ): Promise<BulkUpdateStats> {
     this.ensureInitialized();
     this.ensureGraphQLService();
-    
+
     const startTime = Date.now();
     logger.info(`Starting bulk price update for ${updates.length} items`);
 
@@ -108,7 +108,7 @@ export class ShopifyBulkService extends ShopifyService {
       success: 0,
       failed: 0,
       skipped: 0,
-      errors: []
+      errors: [],
     };
 
     // Validate input
@@ -119,7 +119,7 @@ export class ShopifyBulkService extends ShopifyService {
 
     // SKU로 variant 정보 조회 (병렬 처리)
     const variantUpdates = await this.prepareVariantUpdates(updates, stats);
-    const validUpdates = variantUpdates.filter(u => u !== null);
+    const validUpdates = variantUpdates.filter((u) => u !== null);
 
     if (validUpdates.length === 0) {
       logger.warn('No valid variants found for price update');
@@ -137,7 +137,7 @@ export class ShopifyBulkService extends ShopifyService {
 
       try {
         await this.processPriceBatch(batch, stats);
-        
+
         // Rate limiting between batches
         if (i < batches.length - 1) {
           await this.rateLimit();
@@ -148,7 +148,7 @@ export class ShopifyBulkService extends ShopifyService {
           stats.failed++;
           stats.errors.push({
             sku: item.sku,
-            error: error.message
+            error: error.message,
           });
         });
       }
@@ -156,7 +156,7 @@ export class ShopifyBulkService extends ShopifyService {
 
     stats.duration = Date.now() - startTime;
     this.logBulkUpdateSummary('Price', stats);
-    
+
     return stats;
   }
 
@@ -164,10 +164,10 @@ export class ShopifyBulkService extends ShopifyService {
    * Prepare variant updates with parallel processing
    */
   private async prepareVariantUpdates(
-    updates: PriceUpdate[], 
+    updates: PriceUpdate[],
     stats: BulkUpdateStats
   ): Promise<any[]> {
-    const variantPromises = updates.map(async update => {
+    const variantPromises = updates.map(async (update) => {
       try {
         const variant = await this.graphqlService!.findVariantBySku(update.sku);
         if (variant) {
@@ -177,12 +177,12 @@ export class ShopifyBulkService extends ShopifyService {
             sku: update.sku,
           };
         }
-        
+
         logger.warn(`Variant not found for SKU: ${update.sku}`);
         stats.skipped++;
         stats.errors.push({
           sku: update.sku,
-          error: 'Variant not found'
+          error: 'Variant not found',
         });
         return null;
       } catch (error: any) {
@@ -190,7 +190,7 @@ export class ShopifyBulkService extends ShopifyService {
         stats.failed++;
         stats.errors.push({
           sku: update.sku,
-          error: error.message
+          error: error.message,
         });
         return null;
       }
@@ -203,7 +203,7 @@ export class ShopifyBulkService extends ShopifyService {
    * Process single price batch with retry logic
    */
   private async processPriceBatch(
-    batch: any[], 
+    batch: any[],
     stats: BulkUpdateStats
   ): Promise<void> {
     for (const update of batch) {
@@ -217,16 +217,21 @@ export class ShopifyBulkService extends ShopifyService {
           success = true;
         } catch (error: any) {
           attempts++;
-          
+
           if (attempts >= this.DEFAULT_RETRY_ATTEMPTS) {
-            logger.error(`Failed to update price for ${update.sku} after ${attempts} attempts:`, error);
+            logger.error(
+              `Failed to update price for ${update.sku} after ${attempts} attempts:`,
+              error
+            );
             stats.failed++;
             stats.errors.push({
               sku: update.sku,
-              error: error.message
+              error: error.message,
             });
           } else {
-            logger.warn(`Retrying price update for ${update.sku} (attempt ${attempts})`);
+            logger.warn(
+              `Retrying price update for ${update.sku} (attempt ${attempts})`
+            );
             await this.rateLimit();
           }
         }
@@ -237,7 +242,10 @@ export class ShopifyBulkService extends ShopifyService {
   /**
    * Update single variant price
    */
-  private async updateVariantPrice(variantId: string, price: string): Promise<void> {
+  private async updateVariantPrice(
+    variantId: string,
+    price: string
+  ): Promise<void> {
     const mutation = `
       mutation productVariantUpdate($input: ProductVariantInput!) {
         productVariantUpdate(input: $input) {
@@ -256,15 +264,17 @@ export class ShopifyBulkService extends ShopifyService {
     const variables = {
       input: {
         id: variantId,
-        price: price
-      }
+        price: price,
+      },
     };
 
     const response = await this.graphqlService!.query(mutation, variables);
-    
+
     if (response.data?.productVariantUpdate?.userErrors?.length > 0) {
       const errors = response.data.productVariantUpdate.userErrors;
-      throw new Error(`Variant update failed: ${errors.map((e: any) => e.message).join(', ')}`);
+      throw new Error(
+        `Variant update failed: ${errors.map((e: any) => e.message).join(', ')}`
+      );
     }
   }
 
@@ -278,16 +288,18 @@ export class ShopifyBulkService extends ShopifyService {
   ): Promise<BulkUpdateStats> {
     this.ensureInitialized();
     this.ensureGraphQLService();
-    
+
     const startTime = Date.now();
-    logger.info(`Starting bulk inventory update for ${updates.length} items at location ${locationId}`);
+    logger.info(
+      `Starting bulk inventory update for ${updates.length} items at location ${locationId}`
+    );
 
     const stats: BulkUpdateStats = {
       total: updates.length,
       success: 0,
       failed: 0,
       skipped: 0,
-      errors: []
+      errors: [],
     };
 
     // Validate input
@@ -301,8 +313,12 @@ export class ShopifyBulkService extends ShopifyService {
     }
 
     // Prepare inventory items
-    const inventoryItems = await this.prepareInventoryItems(updates, locationId, stats);
-    const validItems = inventoryItems.filter(item => item !== null);
+    const inventoryItems = await this.prepareInventoryItems(
+      updates,
+      locationId,
+      stats
+    );
+    const validItems = inventoryItems.filter((item) => item !== null);
 
     if (validItems.length === 0) {
       logger.warn('No valid inventory items found for update');
@@ -320,7 +336,7 @@ export class ShopifyBulkService extends ShopifyService {
 
       try {
         await this.processInventoryBatch(batch, stats);
-        
+
         // Rate limiting between batches
         if (i < batches.length - 1) {
           await this.rateLimit();
@@ -331,7 +347,7 @@ export class ShopifyBulkService extends ShopifyService {
           stats.failed++;
           stats.errors.push({
             sku: item.sku,
-            error: error.message
+            error: error.message,
           });
         });
       }
@@ -339,7 +355,7 @@ export class ShopifyBulkService extends ShopifyService {
 
     stats.duration = Date.now() - startTime;
     this.logBulkUpdateSummary('Inventory', stats);
-    
+
     return stats;
   }
 
@@ -351,7 +367,7 @@ export class ShopifyBulkService extends ShopifyService {
     locationId: string,
     stats: BulkUpdateStats
   ): Promise<any[]> {
-    const itemPromises = updates.map(async update => {
+    const itemPromises = updates.map(async (update) => {
       try {
         const variant = await this.graphqlService!.findVariantBySku(update.sku);
         if (!variant) {
@@ -359,7 +375,7 @@ export class ShopifyBulkService extends ShopifyService {
           stats.skipped++;
           stats.errors.push({
             sku: update.sku,
-            error: 'Variant not found'
+            error: 'Variant not found',
           });
           return null;
         }
@@ -374,7 +390,7 @@ export class ShopifyBulkService extends ShopifyService {
           stats.skipped++;
           stats.errors.push({
             sku: update.sku,
-            error: 'Inventory item not found'
+            error: 'Inventory item not found',
           });
           return null;
         }
@@ -384,14 +400,17 @@ export class ShopifyBulkService extends ShopifyService {
           locationId: locationId,
           quantity: update.quantity,
           adjustment: update.adjustment || false,
-          sku: update.sku
+          sku: update.sku,
         };
       } catch (error: any) {
-        logger.error(`Failed to prepare inventory item for SKU ${update.sku}:`, error);
+        logger.error(
+          `Failed to prepare inventory item for SKU ${update.sku}:`,
+          error
+        );
         stats.failed++;
         stats.errors.push({
           sku: update.sku,
-          error: error.message
+          error: error.message,
         });
         return null;
       }
@@ -425,30 +444,38 @@ export class ShopifyBulkService extends ShopifyService {
       }
     `;
 
-    const adjustments = batch.map(item => ({
+    const adjustments = batch.map((item) => ({
       inventoryItemId: item.inventoryItemId,
-      availableDelta: item.adjustment ? item.quantity : item.quantity - (item.currentQuantity || 0)
+      availableDelta: item.adjustment
+        ? item.quantity
+        : item.quantity - (item.currentQuantity || 0),
     }));
 
     try {
       const response = await this.graphqlService!.query(mutation, {
         inventoryItemAdjustments: adjustments,
-        locationId: batch[0].locationId
+        locationId: batch[0].locationId,
       });
 
-      if (response.data?.inventoryBulkAdjustQuantityAtLocation?.userErrors?.length > 0) {
-        const errors = response.data.inventoryBulkAdjustQuantityAtLocation.userErrors;
-        throw new Error(`Inventory update failed: ${errors.map((e: any) => e.message).join(', ')}`);
+      if (
+        response.data?.inventoryBulkAdjustQuantityAtLocation?.userErrors
+          ?.length > 0
+      ) {
+        const errors =
+          response.data.inventoryBulkAdjustQuantityAtLocation.userErrors;
+        throw new Error(
+          `Inventory update failed: ${errors.map((e: any) => e.message).join(', ')}`
+        );
       }
 
       stats.success += batch.length;
     } catch (error: any) {
       logger.error('Inventory batch update failed:', error);
-      batch.forEach(item => {
+      batch.forEach((item) => {
         stats.failed++;
         stats.errors.push({
           sku: item.sku,
-          error: error.message
+          error: error.message,
         });
       });
     }
@@ -471,44 +498,44 @@ export class ShopifyBulkService extends ShopifyService {
     totalDuration: number;
   }> {
     this.ensureInitialized();
-    
+
     const startTime = Date.now();
     const {
       updatePrices = true,
       updateInventory = true,
-      batchSize = this.DEFAULT_BATCH_SIZE
+      batchSize = this.DEFAULT_BATCH_SIZE,
     } = options;
 
     logger.info(`Starting bulk sync for ${items.length} items`, {
       updatePrices,
       updateInventory,
-      locationId
+      locationId,
     });
 
     const results = {
       price: null as any,
       inventory: null as any,
-      totalDuration: 0
+      totalDuration: 0,
     };
 
     // 가격 업데이트
     if (updatePrices) {
-      const priceUpdates: PriceUpdate[] = items.map(item => ({
+      const priceUpdates: PriceUpdate[] = items.map((item) => ({
         sku: item.sku,
-        price: item.price
+        price: item.price,
       }));
-      
+
       results.price = await this.bulkUpdatePrices(priceUpdates, batchSize);
     }
 
     // 재고 업데이트
     if (updateInventory) {
-      const inventoryUpdates: InventoryUpdate[] = items.map(item => ({
+      const inventoryUpdates: InventoryUpdate[] = items.map((item) => ({
         sku: item.sku,
         quantity: item.quantity,
-        adjustment: false
+        adjustment: false,
       }));
-      
+
       results.inventory = await this.bulkUpdateInventory(
         inventoryUpdates,
         locationId,
@@ -517,11 +544,11 @@ export class ShopifyBulkService extends ShopifyService {
     }
 
     results.totalDuration = Date.now() - startTime;
-    
+
     logger.info('Bulk sync completed', {
       totalDuration: results.totalDuration,
       priceStats: results.price,
-      inventoryStats: results.inventory
+      inventoryStats: results.inventory,
     });
 
     return results;
@@ -531,9 +558,8 @@ export class ShopifyBulkService extends ShopifyService {
    * Log bulk update summary
    */
   private logBulkUpdateSummary(type: string, stats: BulkUpdateStats): void {
-    const successRate = stats.total > 0 
-      ? ((stats.success / stats.total) * 100).toFixed(2)
-      : '0';
+    const successRate =
+      stats.total > 0 ? ((stats.success / stats.total) * 100).toFixed(2) : '0';
 
     logger.info(`
 ╔════════════════════════════════════════════════════════════╗
@@ -561,14 +587,14 @@ export class ShopifyBulkService extends ShopifyService {
       ...parentStatus,
       hasGraphQLService: !!this.graphqlService,
       batchSize: this.DEFAULT_BATCH_SIZE,
-      retryAttempts: this.DEFAULT_RETRY_ATTEMPTS
+      retryAttempts: this.DEFAULT_RETRY_ATTEMPTS,
     };
   }
 
   /**
    * Cleanup resources
    */
-  public async cleanup(): Promise<void> {
+  public override async cleanup(): Promise<void> {
     await super.cleanup();
     this.graphqlService = null;
     logger.info('ShopifyBulkService cleanup completed');

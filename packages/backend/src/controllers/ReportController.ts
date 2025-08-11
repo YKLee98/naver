@@ -8,11 +8,11 @@ export class ReportController {
    */
   async generateReport(req: Request, res: Response, next: NextFunction) {
     try {
-      const { 
-        type = 'summary', 
-        startDate, 
+      const {
+        type = 'summary',
+        startDate,
         endDate,
-        format = 'json' 
+        format = 'json',
       } = req.body;
 
       // Mock report generation
@@ -21,24 +21,27 @@ export class ReportController {
         type,
         period: {
           start: startDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-          end: endDate || new Date()
+          end: endDate || new Date(),
         },
         generatedAt: new Date(),
         status: 'completed',
         data: {
-          summary: 'Report data would be here'
-        }
+          summary: 'Report data would be here',
+        },
       };
 
       if (format === 'pdf') {
         // Generate PDF (mock)
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=report-${Date.now()}.pdf`);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename=report-${Date.now()}.pdf`
+        );
         res.send('PDF content would be here');
       } else {
         res.json({
           success: true,
-          data: report
+          data: report,
         });
       }
     } catch (error) {
@@ -61,15 +64,15 @@ export class ReportController {
           type: 'summary',
           generatedAt: new Date(),
           status: 'completed',
-          size: '2.5 MB'
+          size: '2.5 MB',
         },
         {
           id: 'report-2',
           type: 'detailed',
           generatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
           status: 'completed',
-          size: '5.1 MB'
-        }
+          size: '5.1 MB',
+        },
       ];
 
       res.json({
@@ -78,8 +81,8 @@ export class ReportController {
         pagination: {
           total: reports.length,
           limit: Number(limit),
-          offset: Number(offset)
-        }
+          offset: Number(offset),
+        },
       });
     } catch (error) {
       logger.error('Get report history error:', error);
@@ -98,19 +101,25 @@ export class ReportController {
       // Mock download
       if (format === 'csv') {
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=report-${id}.csv`);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename=report-${id}.csv`
+        );
         res.send('CSV content would be here');
       } else if (format === 'pdf') {
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=report-${id}.pdf`);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename=report-${id}.pdf`
+        );
         res.send('PDF content would be here');
       } else {
         res.json({
           success: true,
           data: {
             id,
-            content: 'Report content would be here'
-          }
+            content: 'Report content would be here',
+          },
         });
       }
     } catch (error) {
@@ -131,7 +140,7 @@ export class ReportController {
 
       res.json({
         success: true,
-        message: '보고서가 삭제되었습니다.'
+        message: '보고서가 삭제되었습니다.',
       });
     } catch (error) {
       logger.error('Delete report error:', error);

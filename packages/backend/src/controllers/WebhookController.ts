@@ -94,7 +94,7 @@ export class WebhookController {
       // 멱등성 체크
       const redis = getRedisClient();
       const processed = await redis.get(`webhook:${webhookId}`);
-      
+
       if (processed) {
         logger.info(`Webhook already processed: ${webhookId}`);
         res.status(200).send('OK');
@@ -105,16 +105,22 @@ export class WebhookController {
       const syncRecord = await this.processShopifyOrder(order);
 
       // 처리 완료 표시 (24시간 TTL)
-      await redis.setex(`webhook:${webhookId}`, 86400, JSON.stringify({
-        processedAt: new Date(),
-        orderId: order.id,
-        syncStatus: syncRecord.syncStatus,
-      }));
+      await redis.setex(
+        `webhook:${webhookId}`,
+        86400,
+        JSON.stringify({
+          processedAt: new Date(),
+          orderId: order.id,
+          syncStatus: syncRecord.syncStatus,
+        })
+      );
 
       logger.info(`Order webhook processed successfully: ${order.name}`, {
         syncStatus: syncRecord.syncStatus,
-        processedItems: syncRecord.items.filter(i => i.status === 'completed').length,
-        failedItems: syncRecord.items.filter(i => i.status === 'failed').length,
+        processedItems: syncRecord.items.filter((i) => i.status === 'completed')
+          .length,
+        failedItems: syncRecord.items.filter((i) => i.status === 'failed')
+          .length,
       });
 
       res.status(200).send('OK');
@@ -137,15 +143,18 @@ export class WebhookController {
       const order: ShopifyOrder = req.body;
       const webhookId = req.headers['x-shopify-webhook-id'] as string;
 
-      logger.info(`Processing Shopify order cancellation webhook: ${order.name}`, {
-        webhookId,
-        orderId: order.id,
-      });
+      logger.info(
+        `Processing Shopify order cancellation webhook: ${order.name}`,
+        {
+          webhookId,
+          orderId: order.id,
+        }
+      );
 
       // 멱등성 체크
       const redis = getRedisClient();
       const processed = await redis.get(`webhook:${webhookId}`);
-      
+
       if (processed) {
         logger.info(`Cancellation webhook already processed: ${webhookId}`);
         res.status(200).send('OK');
@@ -155,11 +164,15 @@ export class WebhookController {
       // 주문 취소 처리
       await this.processOrderCancellation(order);
 
-      await redis.setex(`webhook:${webhookId}`, 86400, JSON.stringify({
-        processedAt: new Date(),
-        orderId: order.id,
-        action: 'cancelled',
-      }));
+      await redis.setex(
+        `webhook:${webhookId}`,
+        86400,
+        JSON.stringify({
+          processedAt: new Date(),
+          orderId: order.id,
+          action: 'cancelled',
+        })
+      );
 
       logger.info(`Order cancellation processed successfully: ${order.name}`);
 
@@ -181,18 +194,18 @@ export class WebhookController {
     try {
       const inventoryLevel: ShopifyInventoryLevel = req.body;
       const webhookId = req.headers['x-shopify-webhook-id'] as string;
-      
+
       logger.info('Inventory update webhook received:', {
         webhookId,
         inventoryItemId: inventoryLevel.inventory_item_id,
         locationId: inventoryLevel.location_id,
         available: inventoryLevel.available,
       });
-      
+
       // 멱등성 체크
       const redis = getRedisClient();
       const processed = await redis.get(`webhook:${webhookId}`);
-      
+
       if (processed) {
         logger.info(`Inventory webhook already processed: ${webhookId}`);
         res.status(200).send('OK');
@@ -202,11 +215,15 @@ export class WebhookController {
       // 재고 업데이트 처리
       await this.processInventoryUpdate(inventoryLevel);
 
-      await redis.setex(`webhook:${webhookId}`, 86400, JSON.stringify({
-        processedAt: new Date(),
-        inventoryItemId: inventoryLevel.inventory_item_id,
-        available: inventoryLevel.available,
-      }));
+      await redis.setex(
+        `webhook:${webhookId}`,
+        86400,
+        JSON.stringify({
+          processedAt: new Date(),
+          inventoryItemId: inventoryLevel.inventory_item_id,
+          available: inventoryLevel.available,
+        })
+      );
 
       res.status(200).send('OK');
     } catch (error) {
@@ -218,7 +235,9 @@ export class WebhookController {
   /**
    * Shopify 주문 처리
    */
-  private async processShopifyOrder(order: ShopifyOrder): Promise<OrderSyncRecord> {
+  private async processShopifyOrder(
+    order: ShopifyOrder
+  ): Promise<OrderSyncRecord> {
     const syncRecord: OrderSyncRecord = {
       orderId: order.id.toString(),
       platform: 'shopify',
@@ -255,13 +274,15 @@ export class WebhookController {
 
           if (item.variant_id && item.quantity > 0) {
             // SKU로 매핑 조회
-            const mapping = await ProductMapping.findOne({ 
+            const mapping = await ProductMapping.findOne({
               shopifyVariantId: item.variant_id.toString(),
               isActive: true,
             });
 
             if (!mapping) {
-              throw new Error(`No active mapping found for variant ${item.variant_id}`);
+              throw new Error(
+                `No active mapping found for variant ${item.variant_id}`
+              );
             }
 
             // 재고 동기화 실행
@@ -281,8 +302,9 @@ export class WebhookController {
           }
         } catch (itemError) {
           itemRecord.status = 'failed';
-          itemRecord.error = itemError instanceof Error ? itemError.message : 'Unknown error';
-          
+          itemRecord.error =
+            itemError instanceof Error ? itemError.message : 'Unknown error';
+
           logger.error(`Failed to sync inventory for item: ${item.sku}`, {
             orderId: order.id,
             error: itemError,
@@ -291,10 +313,13 @@ export class WebhookController {
       }
 
       // 전체 동기화 상태 업데이트
-      const failedItems = syncRecord.items.filter(i => i.status === 'failed');
-      syncRecord.syncStatus = failedItems.length === 0 ? 'completed' : 
-                             failedItems.length === syncRecord.items.length ? 'failed' : 
-                             'completed';
+      const failedItems = syncRecord.items.filter((i) => i.status === 'failed');
+      syncRecord.syncStatus =
+        failedItems.length === 0
+          ? 'completed'
+          : failedItems.length === syncRecord.items.length
+            ? 'failed'
+            : 'completed';
       syncRecord.processedAt = new Date();
 
       // Redis 상태 업데이트
@@ -307,8 +332,9 @@ export class WebhookController {
       return syncRecord;
     } catch (error) {
       syncRecord.syncStatus = 'failed';
-      syncRecord.error = error instanceof Error ? error.message : 'Unknown error';
-      
+      syncRecord.error =
+        error instanceof Error ? error.message : 'Unknown error';
+
       logger.error(`Order processing failed: ${order.name}`, error);
       throw error;
     }
@@ -319,11 +345,13 @@ export class WebhookController {
    */
   private async processOrderCancellation(order: ShopifyOrder): Promise<void> {
     const redis = getRedisClient();
-    
+
     // 이전 동기화 기록 확인
     const previousSync = await redis.get(`order:sync:${order.id}`);
     if (!previousSync) {
-      logger.warn(`No previous sync record found for cancelled order: ${order.name}`);
+      logger.warn(
+        `No previous sync record found for cancelled order: ${order.name}`
+      );
       return;
     }
 
@@ -333,8 +361,11 @@ export class WebhookController {
     for (const item of syncRecord.items) {
       if (item.status === 'completed' && item.quantity > 0) {
         try {
-          const mapping = await ProductMapping.findOne({ sku: item.sku, isActive: true });
-          
+          const mapping = await ProductMapping.findOne({
+            sku: item.sku,
+            isActive: true,
+          });
+
           if (mapping) {
             // 재고 복원 (양수로 조정)
             await this.inventorySyncService.adjustInventory(
@@ -344,13 +375,19 @@ export class WebhookController {
               'shopify'
             );
 
-            logger.info(`Inventory restored for cancelled order item: ${item.sku}`, {
-              orderId: order.id,
-              quantity: item.quantity,
-            });
+            logger.info(
+              `Inventory restored for cancelled order item: ${item.sku}`,
+              {
+                orderId: order.id,
+                quantity: item.quantity,
+              }
+            );
           }
         } catch (error) {
-          logger.error(`Failed to restore inventory for item: ${item.sku}`, error);
+          logger.error(
+            `Failed to restore inventory for item: ${item.sku}`,
+            error
+          );
         }
       }
     }
@@ -369,7 +406,9 @@ export class WebhookController {
   /**
    * 재고 업데이트 처리
    */
-  private async processInventoryUpdate(inventoryLevel: ShopifyInventoryLevel): Promise<void> {
+  private async processInventoryUpdate(
+    inventoryLevel: ShopifyInventoryLevel
+  ): Promise<void> {
     try {
       // inventory_item_id로 매핑 조회
       const mapping = await ProductMapping.findOne({

@@ -1,5 +1,9 @@
 // packages/backend/src/services/sync/ConflictResolver.ts
-import { ProductMapping, InventoryTransaction, PriceHistory } from '../../models';
+import {
+  ProductMapping,
+  InventoryTransaction,
+  PriceHistory,
+} from '../../models';
 import { logger } from '../../utils/logger';
 import { Schema, model, Document } from 'mongoose';
 
@@ -17,53 +21,56 @@ interface IConflictLog extends Document {
   updatedAt: Date;
 }
 
-const ConflictLogSchema = new Schema<IConflictLog>({
-  type: { 
-    type: String, 
-    required: true, 
-    enum: ['inventory', 'price', 'order'],
-    index: true 
+const ConflictLogSchema = new Schema<IConflictLog>(
+  {
+    type: {
+      type: String,
+      required: true,
+      enum: ['inventory', 'price', 'order'],
+      index: true,
+    },
+    sku: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    conflict: {
+      type: Schema.Types.Mixed,
+      required: true,
+    },
+    resolution: {
+      type: Schema.Types.Mixed,
+      required: true,
+    },
+    strategy: {
+      type: String,
+      required: true,
+    },
+    resolved: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    resolvedAt: {
+      type: Date,
+      index: true,
+    },
+    resolvedBy: {
+      type: String,
+      default: 'system',
+      required: true,
+    },
+    metadata: {
+      type: Map,
+      of: Schema.Types.Mixed,
+      default: {},
+    },
   },
-  sku: { 
-    type: String, 
-    required: true,
-    index: true 
-  },
-  conflict: { 
-    type: Schema.Types.Mixed, 
-    required: true 
-  },
-  resolution: { 
-    type: Schema.Types.Mixed, 
-    required: true 
-  },
-  strategy: { 
-    type: String, 
-    required: true 
-  },
-  resolved: {
-    type: Boolean,
-    default: false,
-    index: true
-  },
-  resolvedAt: { 
-    type: Date,
-    index: true 
-  },
-  resolvedBy: { 
-    type: String, 
-    default: 'system',
-    required: true
-  },
-  metadata: {
-    type: Map,
-    of: Schema.Types.Mixed,
-    default: {}
+  {
+    timestamps: true,
+    collection: 'conflict_logs',
   }
-}, {
-  timestamps: true,
-  collection: 'conflict_logs',
-});
+);
 
 // 복합 인덱스
 ConflictLogSchema.index({ type: 1, resolved: 1, createdAt: -1 });
@@ -104,7 +111,7 @@ export class ConflictResolver {
       if (recentTransactions.length > 0) {
         // 가장 최근 트랜잭션 기준으로 해결
         const latestTransaction = recentTransactions[0];
-        
+
         const resolution = {
           type: 'inventory' as const,
           sku,
@@ -123,7 +130,7 @@ export class ConflictResolver {
 
     // 전략 2: 더 적은 수량 채택 (보수적 접근)
     const minQuantity = Math.min(naverQuantity, shopifyQuantity);
-    
+
     const resolution = {
       type: 'inventory' as const,
       sku,
@@ -159,7 +166,8 @@ export class ConflictResolver {
     }
 
     // 예상 Shopify 가격 계산
-    const expectedShopifyPrice = naverPrice * exchangeRate * mapping.priceMargin;
+    const expectedShopifyPrice =
+      naverPrice * exchangeRate * mapping.priceMargin;
     const priceDifference = Math.abs(shopifyPrice - expectedShopifyPrice);
     const differencePercentage = (priceDifference / expectedShopifyPrice) * 100;
 
@@ -186,11 +194,15 @@ export class ConflictResolver {
       .limit(5);
 
     if (recentPriceHistory.length > 0) {
-      const avgRecentPrice = recentPriceHistory.reduce((sum, h) => sum + h.newPrice, 0) 
-        / recentPriceHistory.length;
-      
+      const avgRecentPrice =
+        recentPriceHistory.reduce((sum, h) => sum + h.newPrice, 0) /
+        recentPriceHistory.length;
+
       // 평균 가격과의 차이가 10% 이내면 평균값 사용
-      if (Math.abs(avgRecentPrice - expectedShopifyPrice) / avgRecentPrice <= 0.1) {
+      if (
+        Math.abs(avgRecentPrice - expectedShopifyPrice) / avgRecentPrice <=
+        0.1
+      ) {
         const resolution = {
           type: 'price' as const,
           sku,
@@ -238,20 +250,21 @@ export class ConflictResolver {
 
     // 상태 우선순위 매핑
     const statusPriority: Record<string, number> = {
-      'CANCELED': 10,
-      'RETURNED': 9,
-      'EXCHANGED': 8,
-      'DELIVERED': 7,
-      'SHIPPING': 6,
-      'PAYED': 5,
-      'PENDING': 4,
+      CANCELED: 10,
+      RETURNED: 9,
+      EXCHANGED: 8,
+      DELIVERED: 7,
+      SHIPPING: 6,
+      PAYED: 5,
+      PENDING: 4,
     };
 
     const naverPriority = statusPriority[naverStatus] || 0;
     const shopifyPriority = statusPriority[shopifyStatus] || 0;
 
     // 더 높은 우선순위 상태 채택
-    const finalStatus = naverPriority > shopifyPriority ? naverStatus : shopifyStatus;
+    const finalStatus =
+      naverPriority > shopifyPriority ? naverStatus : shopifyStatus;
     const source = naverPriority > shopifyPriority ? 'naver' : 'shopify';
 
     const resolution = {
@@ -285,7 +298,7 @@ export class ConflictResolver {
         resolvedBy: 'system',
         metadata: {
           timestamp: new Date().toISOString(),
-        }
+        },
       });
     } catch (error) {
       logger.error('Failed to log conflict resolution:', error);
@@ -295,23 +308,23 @@ export class ConflictResolver {
   /**
    * 미해결 충돌 조회
    */
-  async getUnresolvedConflicts(type?: 'inventory' | 'price' | 'order'): Promise<IConflictLog[]> {
+  async getUnresolvedConflicts(
+    type?: 'inventory' | 'price' | 'order'
+  ): Promise<IConflictLog[]> {
     const query: any = { resolved: false };
-    
+
     if (type) {
       query.type = type;
     }
 
-    return ConflictLog.find(query)
-      .sort({ createdAt: -1 })
-      .limit(100);
+    return ConflictLog.find(query).sort({ createdAt: -1 }).limit(100);
   }
 
   /**
    * 충돌 수동 해결
    */
   async markConflictResolved(
-    conflictId: string, 
+    conflictId: string,
     resolvedBy: string,
     resolution?: any
   ): Promise<void> {
@@ -333,18 +346,18 @@ export class ConflictResolver {
     const stats = await ConflictLog.aggregate([
       {
         $match: {
-          createdAt: { $gte: startDate }
-        }
+          createdAt: { $gte: startDate },
+        },
       },
       {
         $group: {
           _id: {
             type: '$type',
             strategy: '$strategy',
-            resolved: '$resolved'
+            resolved: '$resolved',
           },
-          count: { $sum: 1 }
-        }
+          count: { $sum: 1 },
+        },
       },
       {
         $group: {
@@ -353,12 +366,12 @@ export class ConflictResolver {
             $push: {
               strategy: '$_id.strategy',
               resolved: '$_id.resolved',
-              count: '$count'
-            }
+              count: '$count',
+            },
           },
-          total: { $sum: '$count' }
-        }
-      }
+          total: { $sum: '$count' },
+        },
+      },
     ]);
 
     return stats;

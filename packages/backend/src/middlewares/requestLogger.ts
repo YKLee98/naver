@@ -25,24 +25,27 @@ export function requestLogger(
     body: sanitizeBody(req.body),
     ip: req.ip,
     userAgent: req.get('user-agent'),
-    requestId: req.id
+    requestId: req.id,
   });
 
   // Capture response
   const originalSend = res.send;
-  res.send = function(data: any) {
+  res.send = function (data: any) {
     res.send = originalSend;
     const result = res.send(data);
-    
+
     // Calculate duration
     const duration = performance.now() - (req.startTime || 0);
-    
+
     // Log response
-    logger.http(`← ${req.method} ${req.path} ${res.statusCode} ${duration.toFixed(2)}ms`, {
-      statusCode: res.statusCode,
-      duration: duration.toFixed(2),
-      requestId: req.id
-    });
+    logger.http(
+      `← ${req.method} ${req.path} ${res.statusCode} ${duration.toFixed(2)}ms`,
+      {
+        statusCode: res.statusCode,
+        duration: duration.toFixed(2),
+        requestId: req.id,
+      }
+    );
 
     return result;
   };
@@ -57,7 +60,13 @@ function sanitizeBody(body: any): any {
   if (!body) return body;
 
   const sanitized = { ...body };
-  const sensitiveFields = ['password', 'token', 'secret', 'apiKey', 'creditCard'];
+  const sensitiveFields = [
+    'password',
+    'token',
+    'secret',
+    'apiKey',
+    'creditCard',
+  ];
 
   for (const field of sensitiveFields) {
     if (sanitized[field]) {

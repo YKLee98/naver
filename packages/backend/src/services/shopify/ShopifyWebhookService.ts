@@ -26,7 +26,7 @@ export class ShopifyWebhookService extends ShopifyService {
 
   constructor() {
     super();
-    this.webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET!;
+    this.webhookSecret = process.env['SHOPIFY_WEBHOOK_SECRET']!;
   }
 
   /**
@@ -161,9 +161,11 @@ export class ShopifyWebhookService extends ShopifyService {
       const existingWebhooks = await this.listWebhooks();
 
       for (const webhook of requiredWebhooks) {
-        const existingWebhook = existingWebhooks.find(w => w.topic === webhook.topic);
+        const existingWebhook = existingWebhooks.find(
+          (w) => w.topic === webhook.topic
+        );
         const webhookUrl = `${baseUrl}${webhook.path}`;
-        
+
         if (!existingWebhook) {
           // 새 웹훅 등록
           await this.registerWebhook(webhook.topic, webhookUrl);
@@ -186,7 +188,7 @@ export class ShopifyWebhookService extends ShopifyService {
   async removeAllWebhooks(): Promise<void> {
     try {
       const webhooks = await this.listWebhooks();
-      
+
       for (const webhook of webhooks) {
         await this.deleteWebhook(webhook.id.toString());
       }

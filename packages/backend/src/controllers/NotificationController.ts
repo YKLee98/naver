@@ -18,7 +18,7 @@ export class NotificationController {
           title: '동기화 완료',
           message: '10개 상품의 재고가 성공적으로 동기화되었습니다.',
           read: false,
-          createdAt: new Date()
+          createdAt: new Date(),
         },
         {
           id: '2',
@@ -26,8 +26,8 @@ export class NotificationController {
           title: '재고 부족',
           message: 'SKU-123 상품의 재고가 10개 미만입니다.',
           read: true,
-          createdAt: new Date()
-        }
+          createdAt: new Date(),
+        },
       ];
 
       res.json({
@@ -36,8 +36,8 @@ export class NotificationController {
         pagination: {
           total: notifications.length,
           limit: Number(limit),
-          offset: Number(offset)
-        }
+          offset: Number(offset),
+        },
       });
     } catch (error) {
       logger.error('Get notifications error:', error);
@@ -57,7 +57,7 @@ export class NotificationController {
 
       res.json({
         success: true,
-        message: '알림이 읽음 처리되었습니다.'
+        message: '알림이 읽음 처리되었습니다.',
       });
     } catch (error) {
       logger.error('Mark as read error:', error);
@@ -77,7 +77,7 @@ export class NotificationController {
 
       res.json({
         success: true,
-        message: '알림이 삭제되었습니다.'
+        message: '알림이 삭제되었습니다.',
       });
     } catch (error) {
       logger.error('Delete notification error:', error);
@@ -97,7 +97,7 @@ export class NotificationController {
 
       res.json({
         success: true,
-        message: '테스트 알림이 전송되었습니다.'
+        message: '테스트 알림이 전송되었습니다.',
       });
     } catch (error) {
       logger.error('Send test notification error:', error);
