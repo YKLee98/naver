@@ -3,3 +3,5 @@ export { ShopifyService } from './ShopifyService';
 export { ShopifyGraphQLService } from './ShopifyGraphQLService';
 export { ShopifyWebhookService } from './ShopifyWebhookService';
 export { ShopifyBulkService } from './ShopifyBulkService';
+export { ShopifyInventoryService } from './ShopifyInventoryService';
+export { ShopifyProductSearchService } from './ShopifyProductSearchService';

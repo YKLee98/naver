@@ -1,6 +1,7 @@
 // packages/backend/src/controllers/MappingController.ts
 import { Request, Response, NextFunction } from 'express';
 import { ProductMapping, Activity } from '../models/index.js';
+import { ProductStatus } from '../models/ProductMapping.js';
 import { MappingService } from '../services/sync/index.js';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -12,7 +13,9 @@ import mongoose from 'mongoose';
 // MongoDB replica set 확인 헬퍼 함수
 async function isReplicaSet(): Promise<boolean> {
   try {
-    const admin = mongoose.connection.db.admin();
+    const db = mongoose.connection.db;
+    if (!db) return false;
+    const admin = db.admin();
     const status = await admin.replSetGetStatus();
     return !!status;
   } catch (error) {
@@ -258,12 +261,12 @@ export class MappingController {
 
       // PENDING 상태에서 모든 ID가 채워지면 ACTIVE로 변경
       if (
-        mapping.status === 'PENDING' &&
+        mapping.status === ProductStatus.PENDING &&
         mapping.naverProductId !== 'PENDING' &&
         mapping.shopifyProductId !== 'PENDING' &&
         mapping.shopifyVariantId !== 'PENDING'
       ) {
-        mapping.status = 'ACTIVE';
+        mapping.status = ProductStatus.ACTIVE;
         mapping.isActive = true;
       }
 
@@ -501,7 +504,7 @@ export class MappingController {
     next: NextFunction
   ): Promise<void> {
     try {
-      const { matchBy = 'sku', limit = 100 } = req.body;
+      const { limit = 100 } = req.body;
 
       const discoveries = [];
 
@@ -862,7 +865,7 @@ export class MappingController {
             logger.info('Searching Shopify products...');
 
             const shopifyResult =
-              await this.shopifySearchService.searchBySKU(skuUpper);
+              await this.shopifySearchService!.searchBySKU(skuUpper);
 
             if (
               shopifyResult &&
@@ -949,16 +952,16 @@ export class MappingController {
         throw new AppError('Mapping not found', 404);
       }
 
-      if (mapping.status !== 'PENDING') {
+      if (mapping.status !== ProductStatus.PENDING) {
         throw new AppError('Only PENDING mappings can be retried', 400);
       }
 
       // 재시도 카운트 증가
-      mapping.retryCount = (mapping.retryCount || 0) + 1;
-      mapping.lastRetryAt = new Date();
+      (mapping as any).retryCount = ((mapping as any).retryCount || 0) + 1;
+      (mapping as any).lastRetryAt = new Date();
 
       // 자동 검색 시도
-      const searchResults = await this.searchProductsBySku(
+      await this.searchProductsBySku(
         {
           params: { sku: mapping.sku },
           query: {},
@@ -967,45 +970,8 @@ export class MappingController {
         next
       );
 
-      // 검색 결과가 있으면 업데이트
-      if (searchResults) {
-        const naverProduct = searchResults.naver?.products?.[0];
-        const shopifyProduct = searchResults.shopify?.products?.[0];
-
-        if (naverProduct && mapping.naverProductId === 'PENDING') {
-          mapping.naverProductId = naverProduct.id;
-        }
-
-        if (shopifyProduct) {
-          if (mapping.shopifyProductId === 'PENDING') {
-            mapping.shopifyProductId = shopifyProduct.id;
-          }
-          if (mapping.shopifyVariantId === 'PENDING') {
-            mapping.shopifyVariantId = shopifyProduct.variantId;
-          }
-        }
-
-        // 모든 필드가 채워졌으면 ACTIVE로 변경
-        if (
-          mapping.naverProductId !== 'PENDING' &&
-          mapping.shopifyProductId !== 'PENDING' &&
-          mapping.shopifyVariantId !== 'PENDING'
-        ) {
-          mapping.status = 'ACTIVE';
-          mapping.isActive = true;
-        }
-      }
-
-      await mapping.save();
-
-      res.json({
-        success: true,
-        data: mapping,
-        message:
-          mapping.status === 'ACTIVE'
-            ? '매핑이 업데이트되었습니다.'
-            : '일부 정보를 찾을 수 없습니다. 수동으로 입력해주세요.',
-      });
+      // 검색 결과는 response에 직접 전송됨
+      return;
     } catch (error) {
       next(error);
     }

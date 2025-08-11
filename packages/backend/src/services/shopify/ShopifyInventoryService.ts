@@ -464,6 +464,115 @@ export class ShopifyInventoryService extends ShopifyService {
   }
 
   /**
+   * Get inventory by SKU
+   */
+  async getInventoryBySku(sku: string): Promise<number> {
+    try {
+      this.ensureInitialized();
+
+      // First, find the product variant by SKU
+      if (!this.client) {
+        // Mock mode
+        logger.debug(`Mock mode: returning dummy inventory for SKU ${sku}`);
+        return 100;
+      }
+
+      // Search for product variant with this SKU
+      const productsResponse = await this.client.get({
+        path: 'products',
+        query: { limit: '250' },
+      });
+
+      let inventoryItemId: string | null = null;
+      
+      if (productsResponse?.body?.products) {
+        for (const product of productsResponse.body.products) {
+          const variant = product.variants?.find((v: any) => v.sku === sku);
+          if (variant) {
+            inventoryItemId = variant.inventory_item_id;
+            break;
+          }
+        }
+      }
+
+      if (!inventoryItemId) {
+        logger.warn(`No inventory item found for SKU: ${sku}`);
+        return 0;
+      }
+
+      // Get the primary location
+      const locations = await this.getLocations();
+      const primaryLocation = locations.find(loc => loc.active);
+      
+      if (!primaryLocation) {
+        throw new Error('No active location found');
+      }
+
+      // Get inventory level for this item
+      const level = await this.getInventoryLevel(inventoryItemId, primaryLocation.id);
+      return level?.available || 0;
+
+    } catch (error: any) {
+      logger.error(`Failed to get inventory for SKU ${sku}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Update inventory by SKU
+   */
+  async updateInventoryBySku(sku: string, quantity: number): Promise<boolean> {
+    try {
+      this.ensureInitialized();
+
+      if (!this.client) {
+        // Mock mode
+        logger.debug(`Mock mode: updating inventory for SKU ${sku} to ${quantity}`);
+        return true;
+      }
+
+      // Search for product variant with this SKU
+      const productsResponse = await this.client.get({
+        path: 'products',
+        query: { limit: '250' },
+      });
+
+      let inventoryItemId: string | null = null;
+      
+      if (productsResponse?.body?.products) {
+        for (const product of productsResponse.body.products) {
+          const variant = product.variants?.find((v: any) => v.sku === sku);
+          if (variant) {
+            inventoryItemId = variant.inventory_item_id;
+            break;
+          }
+        }
+      }
+
+      if (!inventoryItemId) {
+        logger.warn(`No inventory item found for SKU: ${sku}`);
+        return false;
+      }
+
+      // Get the primary location
+      const locations = await this.getLocations();
+      const primaryLocation = locations.find(loc => loc.active);
+      
+      if (!primaryLocation) {
+        throw new Error('No active location found');
+      }
+
+      // Update inventory level
+      await this.setInventoryLevel(inventoryItemId, primaryLocation.id, quantity);
+      return true;
+
+    } catch (error: any) {
+      logger.error(`Failed to update inventory for SKU ${sku}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Get service status
    */
   public getStatus(): any {

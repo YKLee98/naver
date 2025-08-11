@@ -28,19 +28,14 @@ interface DashboardStats {
   lowStockCount: number;
   outOfStockCount: number;
   syncSuccessRate: number;
-  lastSyncTime?: Date;
+  lastSyncTime: Date | undefined;
   activeProducts: number;
   totalProducts: number;
   priceDiscrepancies: number;
   pendingSyncs: number;
 }
 
-interface ChartDataPoint {
-  label: string;
-  value: number;
-  timestamp?: Date;
-  metadata?: Record<string, any>;
-}
+// ChartDataPoint interface removed - not used
 
 interface ChartData {
   labels: string[];
@@ -77,7 +72,7 @@ export class DashboardController {
    * Get comprehensive dashboard statistics
    */
   getStatistics = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
@@ -102,8 +97,8 @@ export class DashboardController {
         recentSync,
         lowStockProducts,
         outOfStockProducts,
-        todayTransactions,
-        recentActivities,
+        _todayTransactions,
+        _recentActivities,
         pendingSyncs,
         priceDiscrepancies,
         inventoryValue,
@@ -421,7 +416,7 @@ export class DashboardController {
    * Get summary data
    */
   getSummary = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
@@ -441,7 +436,7 @@ export class DashboardController {
    * Get quick stats
    */
   getQuickStats = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
@@ -589,7 +584,7 @@ export class DashboardController {
    * Get widgets
    */
   getWidgets = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
@@ -658,7 +653,7 @@ export class DashboardController {
    * Get dashboard config
    */
   getDashboardConfig = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
@@ -701,7 +696,7 @@ export class DashboardController {
    * Reset dashboard config
    */
   resetDashboardConfig = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
@@ -1075,18 +1070,14 @@ export class DashboardController {
 
   private async generateSalesChartData(
     period: string,
-    platform?: string
+    _platform?: string
   ): Promise<ChartData> {
     const endDate = new Date();
-    let startDate: Date;
-    let groupBy: string;
     let labels: string[] = [];
     let salesData: number[] = [];
 
     switch (period) {
       case 'hour':
-        startDate = subHours(endDate, 24);
-        groupBy = 'hour';
         for (let i = 23; i >= 0; i--) {
           const hour = subHours(endDate, i);
           labels.push(format(hour, 'HH:00'));
@@ -1098,7 +1089,6 @@ export class DashboardController {
         }
         break;
       case 'day':
-        startDate = subDays(endDate, 7);
         for (let i = 6; i >= 0; i--) {
           const day = subDays(endDate, i);
           labels.push(format(day, 'EEE'));
@@ -1110,7 +1100,6 @@ export class DashboardController {
         }
         break;
       case 'week':
-        startDate = subDays(endDate, 28);
         for (let i = 3; i >= 0; i--) {
           const weekStart = subDays(endDate, (i + 1) * 7);
           const weekEnd = subDays(endDate, i * 7);
@@ -1120,7 +1109,6 @@ export class DashboardController {
         }
         break;
       case 'month':
-        startDate = subMonths(endDate, 12);
         for (let i = 11; i >= 0; i--) {
           const month = subMonths(endDate, i);
           labels.push(format(month, 'MMM'));
@@ -1132,7 +1120,6 @@ export class DashboardController {
         }
         break;
       default:
-        startDate = subDays(endDate, 7);
         for (let i = 6; i >= 0; i--) {
           const day = subDays(endDate, i);
           labels.push(format(day, 'MM/dd'));
@@ -1182,7 +1169,7 @@ export class DashboardController {
   }
 
   private async generateInventoryChartData(
-    period: string,
+    _period: string,
     sku?: string
   ): Promise<ChartData> {
     // Get inventory status distribution
@@ -1235,7 +1222,7 @@ export class DashboardController {
             'rgba(75, 192, 192, 1)',
             'rgba(255, 206, 86, 1)',
             'rgba(255, 99, 132, 1)',
-          ],
+          ] as any,
           borderWidth: 1,
         },
       ],
@@ -1373,7 +1360,7 @@ export class DashboardController {
   }
 
   private async generatePerformanceChartData(
-    metric: string
+    _metric: string
   ): Promise<ChartData> {
     // This would typically come from monitoring tools
     // For now, return mock data
@@ -1395,12 +1382,12 @@ export class DashboardController {
     };
   }
 
-  private async fetchAlerts(status: string, severity?: string) {
+  private async fetchAlerts(_status: string, _severity?: string) {
     // Implementation would depend on Alert model
     return [];
   }
 
-  private async fetchAlertById(id: string) {
+  private async fetchAlertById(_id: string) {
     // Implementation would depend on Alert model
     return null;
   }
@@ -1467,14 +1454,14 @@ export class DashboardController {
     return this.fetchDashboardConfig();
   }
 
-  private async createExport(format: string, dateRange: any) {
+  private async createExport(_format: string, _dateRange: any) {
     // Create export job
     const exportId = `export-${Date.now()}`;
     // Implementation would create actual export
     return exportId;
   }
 
-  private async checkExportStatus(exportId: string) {
+  private async checkExportStatus(_exportId: string) {
     // Check export job status
     return { status: 'completed', progress: 100 };
   }
@@ -1489,7 +1476,7 @@ export class DashboardController {
 
   private async generateSummary() {
     const [stats, recentActivities, alerts] = await Promise.all([
-      this.calculateStats({}),
+      this.calculateQuickStats(),
       Activity.find().sort({ createdAt: -1 }).limit(5).lean(),
       this.fetchAlerts('active'),
     ]);

@@ -370,8 +370,8 @@ class Server {
     return new Promise((resolve, reject) => {
       try {
         // App 클래스의 listen 메소드를 사용
-        this.app!.listen(port);
-        this.httpServer = this.app!.getServer();
+        this.httpServer = this.app!.listen(port);
+        // HttpServer를 직접 받아옴
         
         logger.info(`🌐 HTTP server listening on http://${host}:${port}`);
         logger.info(

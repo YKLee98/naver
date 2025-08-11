@@ -118,23 +118,20 @@ export class InventoryAdjustController {
       ) {
         try {
           // 현재 재고 조회
-          const currentInventory =
-            await this.shopifyInventoryService.getInventoryLevel(
-              mapping.shopifyInventoryItemId,
-              mapping.shopifyLocationId
-            );
+          const currentInventory = await this.shopifyInventoryService.getInventoryBySku(
+            adjustData.sku
+          );
 
           const newQuantity = this.calculateNewQuantity(
-            currentInventory.available,
+            currentInventory,
             adjustData.shopifyQuantity,
             adjustData.adjustType
           );
 
           // 재고 조정
-          await this.shopifyInventoryService.adjustInventoryLevel(
-            mapping.shopifyInventoryItemId,
-            mapping.shopifyLocationId,
-            newQuantity - currentInventory.available
+          await this.shopifyInventoryService.updateInventoryBySku(
+            adjustData.sku,
+            newQuantity
           );
 
           // 트랜잭션 기록
@@ -142,7 +139,7 @@ export class InventoryAdjustController {
             sku: adjustData.sku,
             platform: 'shopify',
             type: adjustData.adjustType,
-            previousQuantity: currentInventory.available,
+            previousQuantity: currentInventory,
             newQuantity,
             adjustmentQuantity: adjustData.shopifyQuantity,
             reason: adjustData.reason,
@@ -152,13 +149,13 @@ export class InventoryAdjustController {
 
           results.shopify = {
             success: true,
-            previousQuantity: currentInventory.available,
+            previousQuantity: currentInventory,
             newQuantity,
             adjustmentQuantity: adjustData.shopifyQuantity,
           };
 
           logger.info(
-            `Shopify inventory adjusted for SKU ${adjustData.sku}: ${currentInventory.available} -> ${newQuantity}`
+            `Shopify inventory adjusted for SKU ${adjustData.sku}: ${currentInventory} -> ${newQuantity}`
           );
         } catch (error) {
           logger.error(

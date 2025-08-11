@@ -4,9 +4,7 @@ import {
   PriceSyncJob,
   InventoryTransaction,
   ProductMapping,
-  PriceHistory,
   Activity,
-  SyncHistory,
 } from '../models/index.js';
 import { logger } from '../utils/logger.js';
 import { CacheService } from '../services/cache/CacheService.js';
@@ -15,8 +13,6 @@ import {
   subDays,
   startOfDay,
   endOfDay,
-  format,
-  subMonths,
   subHours,
 } from 'date-fns';
 
@@ -59,7 +55,7 @@ export class DashboardControllerOptimized {
    * Get comprehensive dashboard statistics with optimized queries
    */
   getStatistics = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
@@ -470,7 +466,7 @@ export class DashboardControllerOptimized {
    * Invalidate dashboard cache
    */
   invalidateCache = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {

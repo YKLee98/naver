@@ -20,6 +20,8 @@ interface RedisConfig {
   family?: 4 | 6;
   lazyConnect?: boolean;
   showFriendlyErrorStack?: boolean;
+  keepAlive?: number;
+  commandTimeout?: number;
 }
 
 /**

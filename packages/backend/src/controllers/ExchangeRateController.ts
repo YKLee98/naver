@@ -1,5 +1,5 @@
 // ===== 2. packages/backend/src/controllers/ExchangeRateController.ts =====
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import { ExchangeRateService } from '../services/exchangeRate/ExchangeRateService';
 import { asyncHandler } from '../utils/asyncHandler';
 import { AppError } from '../utils/errors';
@@ -17,7 +17,7 @@ export class ExchangeRateController {
    * GET /api/v1/exchange-rates/current
    */
   getCurrentRate = asyncHandler(
-    async (req: Request, res: Response): Promise<void> => {
+    async (_req: Request, res: Response): Promise<void> => {
       const rate = await this.exchangeRateService.getCurrentRate();
 
       // KRW to USD 변환 (프론트엔드 기대값)
@@ -47,7 +47,7 @@ export class ExchangeRateController {
       );
 
       res.json({
-        data: history.map((h) => ({
+        data: history.map((h: any) => ({
           ...h,
           krwToUsd: 1 / h.rate,
         })),
@@ -121,7 +121,7 @@ export class ExchangeRateController {
    * POST /api/v1/exchange-rates/refresh
    */
   refreshRate = asyncHandler(
-    async (req: Request, res: Response): Promise<void> => {
+    async (_req: Request, res: Response): Promise<void> => {
       const newRate = await this.exchangeRateService.updateExchangeRate();
       const krwToUsd = 1 / newRate;
 

@@ -10,9 +10,9 @@ export class HealthController {
    * 기본 헬스 체크
    */
   check = async (
-    req: Request,
+    _req: Request,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
   ): Promise<void> => {
     try {
       const healthStatus = {
@@ -39,9 +39,9 @@ export class HealthController {
    * 상세 헬스 체크
    */
   detailed = async (
-    req: Request,
+    _req: Request,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
   ): Promise<void> => {
     try {
       const checks = {
@@ -83,7 +83,7 @@ export class HealthController {
       // Redis 상태 확인
       try {
         const redis = getRedisClient();
-        const pong = await redis.ping();
+        const pong = redis ? await redis.ping() : null;
         checks.services.redis = pong === 'PONG' ? 'connected' : 'disconnected';
       } catch (error) {
         checks.services.redis = 'error';
@@ -93,8 +93,8 @@ export class HealthController {
       // 외부 서비스 상태 확인 (캐시된 값 사용)
       try {
         const redis = getRedisClient();
-        const naverHealth = await redis.get('health:naver');
-        const shopifyHealth = await redis.get('health:shopify');
+        const naverHealth = redis ? await redis.get('health:naver') : null;
+        const shopifyHealth = redis ? await redis.get('health:shopify') : null;
 
         checks.services.naver = naverHealth || 'unknown';
         checks.services.shopify = shopifyHealth || 'unknown';
@@ -131,9 +131,9 @@ export class HealthController {
    * 준비 상태 체크 (Kubernetes readiness probe용)
    */
   ready = async (
-    req: Request,
+    _req: Request,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
   ): Promise<void> => {
     try {
       // 필수 서비스 확인
@@ -142,7 +142,7 @@ export class HealthController {
       let isRedisReady = false;
       try {
         const redis = getRedisClient();
-        await redis.ping();
+        if (redis) await redis.ping();
         isRedisReady = true;
       } catch (error) {
         isRedisReady = false;
@@ -179,9 +179,9 @@ export class HealthController {
    * 라이브니스 체크 (Kubernetes liveness probe용)
    */
   live = async (
-    req: Request,
+    _req: Request,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
   ): Promise<void> => {
     try {
       // 기본적인 앱 동작 확인
@@ -216,12 +216,12 @@ export class HealthController {
    * 메트릭스 조회
    */
   metrics = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      const metrics = {
+      const metrics: any = {
         timestamp: new Date().toISOString(),
         process: {
           uptime: process.uptime(),
@@ -246,7 +246,7 @@ export class HealthController {
       // Redis 메트릭스 추가
       try {
         const redis = getRedisClient();
-        const info = await redis.info();
+        const info = redis ? await redis.info() : '';
         metrics['redis'] = {
           connected: true,
           info: info.split('\n').slice(0, 10).join('\n'), // 처음 10줄만

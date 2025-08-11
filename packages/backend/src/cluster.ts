@@ -1,5 +1,5 @@
 // packages/backend/src/cluster.ts
-import cluster from 'cluster';
+import cluster, { Worker } from 'cluster';
 import os from 'os';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
@@ -143,7 +143,7 @@ export class ClusterManager {
    * Perform rolling restart of all workers
    */
   async rollingRestart(): Promise<void> {
-    const workers = Object.values(cluster.workers).filter(Boolean);
+    const workers = Object.values(cluster.workers || {}).filter(Boolean) as Worker[];
     
     for (const worker of workers) {
       if (!worker) continue;
@@ -183,7 +183,7 @@ export class ClusterManager {
     memory: NodeJS.MemoryUsage;
     uptime: number;
   } {
-    const workers = Object.values(cluster.workers).filter(Boolean);
+    const workers = Object.values(cluster.workers || {}).filter(Boolean) as Worker[];
     
     return {
       workers: this.workerCount,
@@ -199,8 +199,8 @@ export class ClusterManager {
  */
 export async function startWorker(): Promise<void> {
   try {
-    // Import and start the server
-    const { default: serverModule } = await import('./server.js');
+    // Import and start the server - server.js auto-starts
+    await import('./server.js');
     
     // Setup worker-specific handlers
     process.on('message', (message: any) => {

@@ -246,4 +246,157 @@ export class InventorySyncService {
       .limit(limit)
       .lean();
   }
+
+  /**
+   * 단일 상품 재고 동기화
+   */
+  async syncSingleInventory(sku: string): Promise<any> {
+    try {
+      const mapping = await ProductMapping.findOne({ sku });
+      if (!mapping) {
+        throw new Error(`No mapping found for SKU: ${sku}`);
+      }
+
+      // Get current inventory from both platforms
+      const [naverInventory, shopifyInventory] = await Promise.all([
+        this.naverProductService.getInventory(mapping.naverProductId),
+        this.shopifyInventoryService.getInventoryBySku(sku)
+      ]);
+
+      // Determine sync direction based on configuration
+      const syncDirection = mapping.syncDirection || 'bidirectional';
+      
+      if (syncDirection === 'shopify_to_naver' || syncDirection === 'bidirectional') {
+        // Sync from Shopify to Naver
+        if (naverInventory !== shopifyInventory) {
+          await this.naverProductService.updateInventory(
+            mapping.naverProductId,
+            shopifyInventory
+          );
+          
+          await InventoryTransaction.create({
+            sku,
+            platform: 'naver',
+            transactionType: 'sync',
+            quantity: shopifyInventory - naverInventory,
+            previousQuantity: naverInventory,
+            newQuantity: shopifyInventory,
+            reason: 'sync_from_shopify',
+            performedBy: 'system',
+            syncStatus: 'completed',
+            syncedAt: new Date(),
+          });
+        }
+      }
+
+      if (syncDirection === 'naver_to_shopify' || syncDirection === 'bidirectional') {
+        // Sync from Naver to Shopify
+        if (shopifyInventory !== naverInventory) {
+          await this.shopifyInventoryService.updateInventoryBySku(
+            sku,
+            naverInventory
+          );
+          
+          await InventoryTransaction.create({
+            sku,
+            platform: 'shopify',
+            transactionType: 'sync',
+            quantity: naverInventory - shopifyInventory,
+            previousQuantity: shopifyInventory,
+            newQuantity: naverInventory,
+            reason: 'sync_from_naver',
+            performedBy: 'system',
+            syncStatus: 'completed',
+            syncedAt: new Date(),
+          });
+        }
+      }
+
+      return {
+        success: true,
+        sku,
+        naverInventory,
+        shopifyInventory,
+        syncDirection,
+        synced: true
+      };
+    } catch (error: any) {
+      logger.error(`Failed to sync inventory for SKU ${sku}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 전체 재고 동기화
+   */
+  async syncAllInventory(): Promise<any> {
+    try {
+      const mappings = await ProductMapping.find({ isActive: true });
+      const results = [];
+      
+      for (const mapping of mappings) {
+        try {
+          const result = await this.syncSingleInventory(mapping.sku);
+          results.push(result);
+        } catch (error: any) {
+          logger.error(`Failed to sync inventory for SKU ${mapping.sku}:`, error);
+          results.push({
+            success: false,
+            sku: mapping.sku,
+            error: error.message
+          });
+        }
+      }
+
+      const successful = results.filter(r => r.success).length;
+      const failed = results.filter(r => !r.success).length;
+
+      return {
+        total: results.length,
+        successful,
+        failed,
+        results
+      };
+    } catch (error: any) {
+      logger.error('Failed to sync all inventory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 재고 업데이트
+   */
+  async updateInventory(sku: string, platform: 'shopify' | 'naver', quantity: number): Promise<boolean> {
+    try {
+      const mapping = await ProductMapping.findOne({ sku });
+      if (!mapping) {
+        throw new Error(`No mapping found for SKU: ${sku}`);
+      }
+
+      if (platform === 'shopify') {
+        await this.shopifyInventoryService.updateInventoryBySku(sku, quantity);
+      } else {
+        await this.naverProductService.updateInventory(mapping.naverProductId, quantity);
+      }
+
+      // Record transaction
+      await InventoryTransaction.create({
+        sku,
+        platform,
+        transactionType: 'update',
+        quantity: quantity,
+        previousQuantity: 0, // Would need to fetch this
+        newQuantity: quantity,
+        reason: 'manual_update',
+        performedBy: 'user',
+        syncStatus: 'completed',
+        syncedAt: new Date(),
+      });
+
+      return true;
+    } catch (error: any) {
+      logger.error(`Failed to update inventory for SKU ${sku}:`, error);
+      return false;
+    }
+  }
 }

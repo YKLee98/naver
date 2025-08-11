@@ -124,7 +124,7 @@ export class AuthController {
       await user.save();
 
       // 응답 데이터 준비 (민감한 정보 제거)
-      const userResponse = user.toObject();
+      const userResponse = user.toObject() as any;
       delete userResponse.password;
       delete userResponse.refreshToken;
       delete userResponse.__v;
@@ -145,7 +145,7 @@ export class AuthController {
         },
         message: '로그인에 성공했습니다.',
       });
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Login error:', {
         message: error.message,
         stack: error.stack,
@@ -231,7 +231,7 @@ export class AuthController {
       });
 
       // 응답 데이터 준비 (민감한 정보 제거)
-      const userResponse = user.toObject();
+      const userResponse = user.toObject() as any;
       delete userResponse.password;
       delete userResponse.__v;
 
@@ -245,7 +245,7 @@ export class AuthController {
         data: userResponse,
         message: '회원가입이 완료되었습니다.',
       });
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Registration error:', {
         message: error.message,
         email: req.body?.email,

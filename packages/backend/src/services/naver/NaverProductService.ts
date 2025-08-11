@@ -416,4 +416,36 @@ export class NaverProductService {
       throw error;
     }
   }
+
+  /**
+   * 상품 재고 조회 (SKU별)
+   */
+  async getInventory(productId: string): Promise<number> {
+    try {
+      const product = await this.getProduct(productId);
+      return product?.stockQuantity || 0;
+    } catch (error) {
+      logger.error(`Error getting inventory for ${productId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 상품 조회 (ID별)
+   */
+  async getProductById(productId: string): Promise<any> {
+    return this.getProduct(productId);
+  }
+
+  /**
+   * 재고 업데이트
+   */
+  async updateInventory(productId: string, quantity: number): Promise<boolean> {
+    try {
+      return await this.updateProductStock(productId, quantity);
+    } catch (error) {
+      logger.error(`Error updating inventory for ${productId}:`, error);
+      throw error;
+    }
+  }
 }

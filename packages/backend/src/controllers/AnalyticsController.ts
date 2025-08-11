@@ -9,27 +9,15 @@ import {
 } from '../models/index.js';
 
 export class AnalyticsController {
-  private syncService: any;
-  private shopifyService: any;
-  private naverProductService: any;
-
-  constructor(syncService?: any, shopifyService?: any, naverProductService?: any) {
-    this.syncService = syncService;
-    this.shopifyService = shopifyService;
-    this.naverProductService = naverProductService;
-  }
+  constructor() {}
+  
   /**
    * Get analytics overview
    */
-  async getOverview(req: Request, res: Response, next: NextFunction) {
+  async getOverview(_req: Request, res: Response, next: NextFunction) {
     try {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const startOfLastMonth = new Date(
-        now.getFullYear(),
-        now.getMonth() - 1,
-        1
-      );
 
       // Get various metrics
       const [
@@ -172,19 +160,19 @@ export class AnalyticsController {
       switch (period) {
         case '24h':
           startDate.setDate(startDate.getDate() - 1);
-          groupBy = { $hour: '$createdAt' };
+          groupBy = { $hour: '$createdAt' } as any;
           break;
         case '7d':
           startDate.setDate(startDate.getDate() - 7);
-          groupBy = { $dayOfMonth: '$createdAt' };
+          groupBy = { $dayOfMonth: '$createdAt' } as any;
           break;
         case '30d':
           startDate.setDate(startDate.getDate() - 30);
-          groupBy = { $dayOfMonth: '$createdAt' };
+          groupBy = { $dayOfMonth: '$createdAt' } as any;
           break;
         default:
           startDate.setDate(startDate.getDate() - 7);
-          groupBy = { $dayOfMonth: '$createdAt' };
+          groupBy = { $dayOfMonth: '$createdAt' } as any;
       }
 
       let collection;

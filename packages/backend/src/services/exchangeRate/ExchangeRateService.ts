@@ -289,6 +289,55 @@ export class ExchangeRateService {
   }
 
   /**
+   * Get current rate (USD to KRW)
+   */
+  async getCurrentRate(): Promise<number> {
+    return this.getRate('USD', 'KRW');
+  }
+
+  /**
+   * Get rate history
+   */
+  async getRateHistory(days: number = 30): Promise<any[]> {
+    const history = await this.getHistoricalRates('USD', 'KRW', days);
+    return history.map(h => ({
+      rate: h.rate,
+      date: h.date,
+      source: h.source
+    }));
+  }
+
+  /**
+   * Set manual rate
+   */
+  async setManualRate(rate: number, validHours: number = 24): Promise<void> {
+    const cacheKey = 'exchange_rate:USD:KRW';
+    const ttl = validHours * 3600; // Convert hours to seconds
+    
+    // Save to cache
+    await this.redis.setex(cacheKey, ttl, rate.toString());
+    
+    // Save to database
+    await this.saveRate('USD', 'KRW', rate);
+    
+    logger.info(`Manual rate set: USD/KRW = ${rate} for ${validHours} hours`);
+  }
+
+  /**
+   * Update exchange rate from API
+   */
+  async updateExchangeRate(): Promise<number> {
+    const rate = await this.fetchRateFromAPI('USD', 'KRW');
+    await this.saveRate('USD', 'KRW', rate);
+    
+    // Clear cache to force refresh
+    const cacheKey = 'exchange_rate:USD:KRW';
+    await this.redis.del(cacheKey);
+    
+    return rate;
+  }
+
+  /**
    * Calculate price with margin
    */
   calculatePriceWithMargin(
