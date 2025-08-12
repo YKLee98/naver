@@ -49,6 +49,7 @@ export default defineConfig(({ mode }) => {
         '@store': path.resolve(__dirname, './src/store'),
         '@styles': path.resolve(__dirname, './src/styles'),
         '@assets': path.resolve(__dirname, './src/assets'),
+        'prop-types': path.resolve(__dirname, '../../node_modules/prop-types'),
       },
     },
     
