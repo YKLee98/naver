@@ -264,7 +264,7 @@ export class App {
 
     // API routes
     const router = await setupRoutes();
-    this.app.use('/api', router);
+    this.app.use('/api/v1', router);
 
     // Static files (if needed)
     if (config.isDevelopment) {

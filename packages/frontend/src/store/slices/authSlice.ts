@@ -31,9 +31,15 @@ export const logout = createAsyncThunk('auth/logout', async () => {
 });
 
 export const getCurrentUser = createAsyncThunk('auth/getCurrentUser', async () => {
-  const user = authService.getCurrentUser();
+  // API 호출로 현재 사용자 정보 가져오기
+  const user = await authService.updateCurrentUser();
   if (!user) {
-    throw new Error('No user found');
+    // localStorage에서 가져오기 시도
+    const localUser = authService.getCurrentUser();
+    if (!localUser) {
+      throw new Error('No user found');
+    }
+    return localUser;
   }
   return user;
 });
@@ -80,11 +86,17 @@ const authSlice = createSlice({
         state.isAuthenticated = false;
       })
       // Get current user
+      .addCase(getCurrentUser.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
       .addCase(getCurrentUser.fulfilled, (state, action) => {
+        state.loading = false;
         state.user = action.payload;
         state.isAuthenticated = true;
       })
       .addCase(getCurrentUser.rejected, (state) => {
+        state.loading = false;
         state.isAuthenticated = false;
         state.user = null;
       })

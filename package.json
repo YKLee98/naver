@@ -8,17 +8,26 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "lerna run dev --parallel",
-    "build": "lerna run build",
-    "start": "lerna run start --scope=@hallyu/backend",
-    "test": "lerna run test",
-    "lint": "lerna run lint",
-    "clean": "lerna clean && rimraf node_modules",
-    "bootstrap": "lerna bootstrap",
+    "dev": "pnpm run --parallel -r dev",
+    "dev:frontend": "pnpm --filter @hallyu/frontend dev",
+    "dev:backend": "pnpm --filter @hallyu/backend dev",
+    "build": "pnpm run -r build",
+    "build:frontend": "pnpm --filter @hallyu/frontend build",
+    "build:backend": "pnpm --filter @hallyu/backend build",
+    "start": "pnpm --filter @hallyu/backend start",
+    "test": "pnpm run -r test",
+    "lint": "pnpm run -r lint",
+    "lint:fix": "pnpm run -r lint:fix",
+    "type-check": "pnpm run -r type-check",
+    "clean": "pnpm run -r clean && rimraf node_modules .pnpm-store",
+    "clean:cache": "pnpm store prune && pnpm run -r clean",
+    "install:fresh": "pnpm run clean:cache && pnpm install",
     "deploy": "./scripts/deploy/deploy.sh",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up",
-    "docker:down": "docker-compose down"
+    "docker:down": "docker-compose down",
+    "analyze": "pnpm --filter @hallyu/frontend build:analyze",
+    "prepare": "husky install"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
@@ -39,8 +48,9 @@
   },
   "engines": {
     "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "pnpm": ">=8.0.0"
   },
+  "packageManager": "pnpm@10.13.1",
   "lint-staged": {
     "*.{js,ts,tsx}": [
       "eslint --fix",

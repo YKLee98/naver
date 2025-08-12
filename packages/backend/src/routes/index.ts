@@ -40,7 +40,7 @@ export async function setupRoutes(): Promise<Router> {
     console.log('API routes error:', error.message);
   }
 
-  // Dashboard routes - 동적 import 사용
+  // Dashboard routes - 별도로 마운트
   try {
     const dashboardModule = await import('./dashboard.routes.js');
     const setupDashboardRoutes = dashboardModule.setupDashboardRoutes;

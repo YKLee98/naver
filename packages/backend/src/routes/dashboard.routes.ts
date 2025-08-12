@@ -4,14 +4,14 @@ import { ServiceContainer } from '../services/ServiceContainer.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { logger } from '../utils/logger.js';
 
-export function setupDashboardRoutes(services: ServiceContainer): Router {
+export function setupDashboardRoutes(services?: ServiceContainer): Router {
   const router = Router();
 
   // Apply authentication to all dashboard routes
   router.use(authenticate);
 
   // If DashboardController exists, use it
-  if (services.dashboardController) {
+  if (services?.dashboardController) {
     const ctrl = services.dashboardController;
 
     // Statistics

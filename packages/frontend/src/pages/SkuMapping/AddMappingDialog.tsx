@@ -35,19 +35,20 @@ import {
   Badge,
   Skeleton,
 } from '@mui/material';
-import {
-  Search as SearchIcon,
-  CheckCircle as CheckCircleIcon,
-  Image as ImageIcon,
-  Close as CloseIcon,
-  LocalOffer as TagIcon,
-  Inventory as InventoryIcon,
-  AttachMoney as MoneyIcon,
-  Store as StoreIcon,
-  ShoppingCart as ShoppingCartIcon,
-  Percent as PercentIcon,
-  Business as BusinessIcon,
-} from '@mui/icons-material';
+import { getIcon } from '@/utils/iconLoader';
+
+// 아이콘 컴포넌트 래퍼
+const SearchIcon = (props: any) => getIcon('Search')(props);
+const CheckCircleIcon = (props: any) => getIcon('CheckCircle')(props);
+const ImageIcon = (props: any) => getIcon('Image')(props);
+const CloseIcon = (props: any) => getIcon('Close')(props);
+const TagIcon = (props: any) => getIcon('Tag')(props);
+const InventoryIcon = (props: any) => getIcon('Inventory')(props);
+const MoneyIcon = (props: any) => getIcon('AttachMoney')(props);
+const StoreIcon = (props: any) => getIcon('Store')(props);
+const ShoppingCartIcon = (props: any) => getIcon('ShoppingCart')(props);
+const PercentIcon = (props: any) => getIcon('Percent')(props);
+const BusinessIcon = (props: any) => getIcon('Business')(props);
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { mappingService } from '@/services/api/mapping.service';

@@ -1,4 +1,4 @@
-/ ===== 2. packages/frontend/src/components/mapping/MappingForm/index.tsx =====
+// packages/frontend/src/components/mapping/MappingForm/index.tsx
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -26,10 +26,7 @@ import {
   Avatar,
   Paper,
 } from '@mui/material';
-import {
-  Search as SearchIcon,
-  CheckCircle as CheckCircleIcon,
-} from '@mui/icons-material';
+import Icon from '@/components/common/Icon';
 import { useForm, Controller } from 'react-hook-form';
 import { mappingService, type SkuSearchResult } from '@/services/api/mapping.service';
 import { ProductMapping } from '@/types';
@@ -210,7 +207,7 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
                           disabled={isSearching || !skuValue}
                           edge="end"
                         >
-                          {isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
+                          {isSearching ? <CircularProgress size={20} /> : <Icon name="Search" />}
                         </IconButton>
                       </Tooltip>
                     </InputAdornment>
@@ -286,7 +283,7 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
                                 }
                               />
                               {selectedNaverProduct?.id === product.id && (
-                                <CheckCircleIcon color="primary" />
+                                <Icon name="CheckCircle" color="primary" />
                               )}
                             </ListItemButton>
                           </ListItem>
@@ -348,7 +345,7 @@ const MappingForm: React.FC<MappingFormProps> = ({ mapping, onSuccess, onCancel 
                                 }
                               />
                               {selectedShopifyProduct?.variantId === product.variantId && (
-                                <CheckCircleIcon color="success" />
+                                <Icon name="CheckCircle" color="success" />
                               )}
                             </ListItemButton>
                           </ListItem>

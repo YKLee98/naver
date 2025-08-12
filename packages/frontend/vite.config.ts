@@ -2,13 +2,40 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { visualizer } from 'rollup-plugin-visualizer';
+import compression from 'vite-plugin-compression';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const isDev = mode === 'development';
+  const isProd = mode === 'production';
   
   return {
-    plugins: [react()],
+    plugins: [
+      react({
+        fastRefresh: isDev,
+        babel: {
+          plugins: isProd ? ['transform-remove-console'] : [],
+        },
+      }),
+      isProd && compression({
+        algorithm: 'gzip',
+        ext: '.gz',
+        threshold: 10240,
+      }),
+      isProd && compression({
+        algorithm: 'brotliCompress',
+        ext: '.br',
+        threshold: 10240,
+      }),
+      isProd && visualizer({
+        filename: 'dist/stats.html',
+        open: false,
+        gzipSize: true,
+        brotliSize: true,
+      }),
+    ].filter(Boolean),
     
     resolve: {
       alias: {
@@ -31,9 +58,33 @@ export default defineConfig(({ mode }) => {
       host: true,
       open: false,
       cors: true,
+      hmr: {
+        overlay: true,
+        clientPort: 5173,
+      },
       watch: {
-        usePolling: true,
+        usePolling: process.platform === 'win32',
         interval: 1000,
+        binaryInterval: 1000,
+        ignored: [
+          '**/node_modules/**',
+          '**/.ignored_node_modules/**',
+          '**/dist/**',
+          '**/.git/**',
+          '**/.idea/**',
+          '**/.vscode/**',
+          '**/coverage/**',
+          '**/cypress/**',
+          '**/.DS_Store',
+          '**/package-lock.json',
+          '**/yarn.lock',
+          '**/pnpm-lock.yaml',
+        ],
+        depth: 3,
+        awaitWriteFinish: {
+          stabilityThreshold: 500,
+          pollInterval: 100,
+        },
       },
       fs: {
         strict: false,
@@ -56,14 +107,12 @@ export default defineConfig(({ mode }) => {
     },
     
     optimizeDeps: {
-      // 실제로 설치된 패키지만 include
       include: [
         'react',
         'react-dom',
         'react-router-dom',
         '@mui/material',
-        // '@mui/lab', // 설치 확인 후 추가
-        // '@mui/x-date-pickers', // 설치 확인 후 추가
+        '@mui/x-data-grid',
         '@emotion/react',
         '@emotion/styled',
         '@reduxjs/toolkit',
@@ -74,47 +123,110 @@ export default defineConfig(({ mode }) => {
         'react-hook-form',
         'yup',
         'socket.io-client',
+        '@mui/system',
+        '@mui/utils',
       ],
-      // MUI icons는 exclude
       exclude: [
         '@mui/icons-material',
+        '@mui/lab',
       ],
-      // 강제 재최적화 옵션
-      force: false, // development에서도 false로 변경
+      force: false,
+      entries: [],
+      esbuildOptions: {
+        target: 'es2020',
+        keepNames: true,
+        loader: {
+          '.js': 'jsx',
+        },
+        define: {
+          'process.env.NODE_ENV': JSON.stringify(mode),
+        },
+      },
+      holdUntilCrawlEnd: true,
     },
     
     build: {
       outDir: 'dist',
-      sourcemap: mode === 'development',
-      minify: mode === 'production' ? 'terser' : false,
-      chunkSizeWarningLimit: 1000,
+      sourcemap: isDev,
+      minify: isProd ? 'terser' : false,
+      target: 'es2020',
+      chunkSizeWarningLimit: 2000,
+      reportCompressedSize: false,
+      cssCodeSplit: true,
+      assetsInlineLimit: 4096,
+      terserOptions: isProd ? {
+        compress: {
+          drop_console: true,
+          drop_debugger: true,
+          pure_funcs: ['console.log', 'console.info'],
+        },
+        format: {
+          comments: false,
+        },
+      } : undefined,
       rollupOptions: {
         output: {
           manualChunks: (id) => {
-            // node_modules 패키지 분리
             if (id.includes('node_modules')) {
-              // MUI icons는 별도 청크
               if (id.includes('@mui/icons-material')) {
-                return 'mui-icons';
+                const parts = id.split('/');
+                const iconName = parts[parts.length - 1].replace('.js', '');
+                return `icons/${iconName.slice(0, 2).toLowerCase()}`;
               }
-              // React 코어
-              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
-                return 'react-vendor';
+              if (id.includes('react') || id.includes('react-dom')) {
+                return 'react-core';
               }
-              // MUI 코어
-              if (id.includes('@mui') && !id.includes('icons')) {
-                return 'mui-vendor';
+              if (id.includes('react-router')) {
+                return 'react-router';
               }
-              // Redux
+              if (id.includes('@mui/material')) {
+                return 'mui-core';
+              }
+              if (id.includes('@mui/x-data-grid')) {
+                return 'mui-grid';
+              }
+              if (id.includes('@mui')) {
+                return 'mui-others';
+              }
               if (id.includes('redux') || id.includes('@reduxjs')) {
-                return 'redux-vendor';
+                return 'state-management';
               }
-              // 기타 유틸리티
-              if (id.includes('axios') || id.includes('date-fns') || id.includes('lodash')) {
-                return 'utils-vendor';
+              if (id.includes('recharts')) {
+                return 'charts';
               }
+              if (id.includes('axios') || id.includes('socket.io')) {
+                return 'network';
+              }
+              if (id.includes('date-fns') || id.includes('yup') || id.includes('react-hook-form')) {
+                return 'utils';
+              }
+              return 'vendor';
             }
           },
+          chunkFileNames: (chunkInfo) => {
+            const facadeModuleId = chunkInfo.facadeModuleId ? chunkInfo.facadeModuleId.split('/').pop() : 'chunk';
+            return `js/[name]-${facadeModuleId}-[hash].js`;
+          },
+          entryFileNames: 'js/[name]-[hash].js',
+          assetFileNames: (assetInfo) => {
+            const extType = assetInfo.name?.split('.').pop() || 'asset';
+            if (/png|jpe?g|svg|gif|tiff|bmp|ico/i.test(extType)) {
+              return 'images/[name]-[hash][extname]';
+            }
+            if (/woff2?|ttf|otf|eot/i.test(extType)) {
+              return 'fonts/[name]-[hash][extname]';
+            }
+            if (extType === 'css') {
+              return 'css/[name]-[hash][extname]';
+            }
+            return 'assets/[name]-[hash][extname]';
+          },
+        },
+        external: [],
+        treeshake: {
+          moduleSideEffects: false,
+          propertyReadSideEffects: false,
+          tryCatchDeoptimization: false,
         },
       },
     },
@@ -122,6 +234,23 @@ export default defineConfig(({ mode }) => {
     esbuild: {
       logLevel: 'info',
       logOverride: { 'this-is-undefined-in-esm': 'silent' },
+      treeShaking: true,
+      legalComments: 'none',
     },
+    
+    preview: {
+      port: 4173,
+      strictPort: false,
+      host: true,
+      cors: true,
+    },
+    
+    define: {
+      __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    },
+    
+    clearScreen: false,
+    logLevel: isDev ? 'info' : 'warn',
   };
 });

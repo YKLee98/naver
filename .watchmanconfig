@@ -1,0 +1,14 @@
+{
+  "ignore_dirs": [
+    "node_modules",
+    ".ignored_node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".git",
+    ".cache",
+    "logs",
+    "tmp",
+    "temp"
+  ]
+}

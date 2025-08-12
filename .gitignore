@@ -1,11 +1,15 @@
 # Dependencies
 node_modules/
+.ignored_node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 .pnpm-store/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
 
 # Environment variables
 .env
@@ -20,6 +24,8 @@ lerna-debug.log*
 dist/
 build/
 *.tsbuildinfo
+.vite/
+.turbo/
 
 # IDE
 .vscode/

@@ -20,24 +20,7 @@ import {
   Avatar,
   Chip,
 } from '@mui/material';
-import {
-  Menu as MenuIcon,
-  Dashboard,
-  Inventory2,
-  AttachMoney,
-  Link as LinkIcon,
-  Assessment,
-  Settings,
-  Sync,
-  Language,
-  Notifications,
-  AccountCircle,
-  Logout,
-  Store,
-  Warning,
-  Error,
-  CheckCircle,
-} from '@mui/icons-material';
+import Icon from '@/components/common/Icon';
 import { useAppSelector, useAppDispatch } from '@/hooks';
 import { logout } from '@/store/slices/authSlice';
 import WebSocketStatus from '@/components/WebSocketStatus';
@@ -45,12 +28,12 @@ import WebSocketStatus from '@/components/WebSocketStatus';
 const drawerWidth = 240;
 
 const menuItems = [
-  { path: '/dashboard', label: '대시보드', icon: <Dashboard /> },
-  { path: '/inventory', label: '재고 관리', icon: <Inventory2 /> },
-  { path: '/pricing', label: '가격 관리', icon: <AttachMoney /> },
-  { path: '/sku-mapping', label: 'SKU 매핑', icon: <LinkIcon /> },
-  { path: '/reports', label: '리포트', icon: <Assessment /> },
-  { path: '/settings', label: '설정', icon: <Settings /> },
+  { path: '/dashboard', label: '대시보드', icon: <Icon name="Dashboard" /> },
+  { path: '/inventory', label: '재고 관리', icon: <Icon name="Inventory2" /> },
+  { path: '/pricing', label: '가격 관리', icon: <Icon name="AttachMoney" /> },
+  { path: '/sku-mapping', label: 'SKU 매핑', icon: <Icon name="Link" /> },
+  { path: '/reports', label: '리포트', icon: <Icon name="Assessment" /> },
+  { path: '/settings', label: '설정', icon: <Icon name="Settings" /> },
 ];
 
 const Layout: React.FC = () => {
@@ -75,7 +58,7 @@ const Layout: React.FC = () => {
     <Box>
       <Toolbar>
         <Typography variant="h6" noWrap component="div" sx={{ display: 'flex', alignItems: 'center' }}>
-          <Store sx={{ mr: 1 }} />
+          <Icon name="Store" sx={{ mr: 1 }} />
           한류-포마홀릭
         </Typography>
       </Toolbar>
@@ -113,7 +96,7 @@ const Layout: React.FC = () => {
             onClick={handleDrawerToggle}
             sx={{ mr: 2, display: { sm: 'none' } }}
           >
-            <MenuIcon />
+            <Icon name="Menu" />
           </IconButton>
           
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
@@ -123,11 +106,11 @@ const Layout: React.FC = () => {
           <WebSocketStatus />
 
           <IconButton color="inherit">
-            <Sync />
+            <Icon name="Sync" />
           </IconButton>
 
           <IconButton color="inherit">
-            <Language />
+            <Icon name="Language" />
           </IconButton>
 
           <IconButton
@@ -135,7 +118,7 @@ const Layout: React.FC = () => {
             onClick={(e) => setNotificationAnchor(e.currentTarget)}
           >
             <Badge badgeContent={3} color="error">
-              <Notifications />
+              <Icon name="Notifications" />
             </Badge>
           </IconButton>
 
@@ -143,7 +126,7 @@ const Layout: React.FC = () => {
             color="inherit"
             onClick={(e) => setAnchorEl(e.currentTarget)}
           >
-            <AccountCircle />
+            <Icon name="AccountCircle" />
           </IconButton>
         </Toolbar>
       </AppBar>
@@ -206,7 +189,7 @@ const Layout: React.FC = () => {
         <Divider />
         <MenuItem onClick={handleLogout}>
           <ListItemIcon>
-            <Logout fontSize="small" />
+            <Icon name="Logout" fontSize="small" />
           </ListItemIcon>
           로그아웃
         </MenuItem>
@@ -228,7 +211,7 @@ const Layout: React.FC = () => {
         <List>
           <ListItem>
             <ListItemIcon>
-              <Warning color="warning" />
+              <Icon name="Warning" color="warning" />
             </ListItemIcon>
             <ListItemText
               primary="재고 부족 경고"
@@ -237,7 +220,7 @@ const Layout: React.FC = () => {
           </ListItem>
           <ListItem>
             <ListItemIcon>
-              <Error color="error" />
+              <Icon name="Error" color="error" />
             </ListItemIcon>
             <ListItemText
               primary="동기화 오류"
@@ -246,7 +229,7 @@ const Layout: React.FC = () => {
           </ListItem>
           <ListItem>
             <ListItemIcon>
-              <CheckCircle color="success" />
+              <Icon name="CheckCircle" color="success" />
             </ListItemIcon>
             <ListItemText
               primary="가격 업데이트 완료"

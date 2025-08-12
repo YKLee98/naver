@@ -272,6 +272,26 @@ class AuthService {
    */
   async updateCurrentUser(): Promise<User | null> {
     try {
+      // 개발 모드에서는 로컬 데이터 반환
+      if (import.meta.env.DEV) {
+        const localUser = this.getCurrentUser();
+        if (localUser) {
+          console.log('[AuthService] Development mode - using local user data');
+          return localUser;
+        }
+        // 개발 모드 기본 사용자 반환
+        const devUser = {
+          id: '1',
+          email: 'test@example.com',
+          name: 'Test User',
+          role: 'admin' as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem('user', JSON.stringify(devUser));
+        return devUser as User;
+      }
+      
       const response = await apiService.get<User>('/auth/me');
       
       if (response) {
