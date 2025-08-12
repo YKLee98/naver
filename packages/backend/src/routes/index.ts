@@ -32,7 +32,9 @@ export async function setupRoutes(): Promise<Router> {
     const apiModule = await import('./api.routes.js');
     const setupApiRoutes = apiModule.setupApiRoutes;
     if (typeof setupApiRoutes === 'function') {
-      const apiRouter = await setupApiRoutes();
+      // ServiceContainer가 전역 변수로 설정되었는지 확인
+      const container = (global as any).serviceContainer;
+      const apiRouter = await setupApiRoutes(container);
       router.use('/', apiRouter);
       console.log('✅ API routes registered');
     }

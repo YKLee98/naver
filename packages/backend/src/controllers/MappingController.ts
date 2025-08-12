@@ -145,8 +145,8 @@ export class MappingController {
         shopifyProductId === 'PENDING' ||
         !shopifyVariantId ||
         shopifyVariantId === 'PENDING'
-          ? 'PENDING'
-          : 'ACTIVE';
+          ? 'pending'
+          : 'active';
 
       // 매핑 생성
       const mappingData = {
@@ -156,11 +156,26 @@ export class MappingController {
         shopifyVariantId: shopifyVariantId || 'PENDING',
         productName: productName || sku,
         vendor: vendor || 'album',
+        category: req.body.category || '기타',
         priceMargin: typeof priceMargin === 'number' ? priceMargin : 0.15,
-        isActive: mappingStatus === 'ACTIVE' ? isActive : false,
+        isActive: mappingStatus === 'active' ? isActive : false,
         status: mappingStatus,
         syncStatus: 'pending',
         retryCount: 0,
+        pricing: {
+          naver: {
+            regular: req.body.pricing?.naver?.regular || 10000,
+            sale: req.body.pricing?.naver?.sale || req.body.pricing?.naver?.regular || 10000,
+            currency: 'KRW'
+          },
+          shopify: {
+            regular: req.body.pricing?.shopify?.regular || 10.00,
+            sale: req.body.pricing?.shopify?.sale || req.body.pricing?.shopify?.regular || 10.00,
+            currency: 'USD'
+          },
+          tier: 'standard',
+          autoSync: true
+        },
         metadata: {
           createdBy: (req as any).user?.id,
           autoSearchUsed: autoSearch,
@@ -302,26 +317,100 @@ export class MappingController {
     try {
       const { id } = req.params;
 
+      // MongoDB ObjectId 유효성 검사
+      if (!id || id.length !== 24) {
+        throw new AppError('Invalid mapping ID format', 400);
+      }
+
+      const mapping = await ProductMapping.findByIdAndDelete(id);
+      if (!mapping) {
+        // ID로 찾지 못하면 SKU로 시도
+        const mappingBySku = await ProductMapping.findOneAndDelete({ sku: id.toUpperCase() });
+        if (!mappingBySku) {
+          throw new AppError('Mapping not found', 404);
+        }
+        
+        res.json({
+          success: true,
+          message: `매핑 ${mappingBySku.sku}이(가) 삭제되었습니다.`,
+        });
+        return;
+      }
+
+      // 활동 로그 기록 (선택사항)
+      try {
+        await Activity.create({
+          type: 'mapping_deleted',
+          action: `매핑 삭제: ${mapping.sku}`,
+          userId: (req as any).user?.id,
+        });
+      } catch (logError) {
+        // 로그 실패는 무시
+        console.log('Activity log failed:', logError);
+      }
+
+      res.json({
+        success: true,
+        message: `매핑 ${mapping.sku}이(가) 삭제되었습니다.`,
+      });
+    } catch (error: any) {
+      if (error.name === 'CastError') {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid mapping ID format'
+        });
+      } else {
+        next(error);
+      }
+    }
+  }
+
+  /**
+   * 매핑 상태 토글
+   * PATCH /api/v1/mappings/:id/toggle
+   */
+  async toggleMapping(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const { id } = req.params;
+
+      // MongoDB ObjectId 유효성 검사
+      if (!id || id.length !== 24) {
+        throw new AppError('Invalid mapping ID format', 400);
+      }
+
       const mapping = await ProductMapping.findById(id);
       if (!mapping) {
         throw new AppError('Mapping not found', 404);
       }
 
-      await mapping.deleteOne();
-
-      // 활동 로그 기록
-      await Activity.create({
-        type: 'mapping_deleted',
-        action: `매핑 삭제: ${mapping.sku}`,
-        userId: (req as any).user?.id,
-      });
+      // isActive 상태 토글
+      mapping.isActive = !mapping.isActive;
+      mapping.status = mapping.isActive ? 'active' : 'inactive';
+      await mapping.save();
 
       res.json({
         success: true,
-        message: '매핑이 삭제되었습니다.',
+        message: `매핑이 ${mapping.isActive ? '활성화' : '비활성화'}되었습니다.`,
+        data: {
+          _id: mapping._id,
+          sku: mapping.sku,
+          isActive: mapping.isActive,
+          status: mapping.status
+        }
       });
-    } catch (error) {
-      next(error);
+    } catch (error: any) {
+      if (error.name === 'CastError') {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid mapping ID format'
+        });
+      } else {
+        next(error);
+      }
     }
   }
 
@@ -401,13 +490,12 @@ export class MappingController {
         syncNeededCount,
       ] = await Promise.all([
         ProductMapping.countDocuments({}),
-        ProductMapping.countDocuments({ isActive: true, status: 'ACTIVE' }),
+        ProductMapping.countDocuments({ isActive: true }),
         ProductMapping.countDocuments({ isActive: false }),
-        ProductMapping.countDocuments({ status: 'ERROR' }),
-        ProductMapping.countDocuments({ status: 'PENDING' }),
+        ProductMapping.countDocuments({ status: 'error' }),
+        ProductMapping.countDocuments({ status: 'pending' }),
         ProductMapping.countDocuments({
           syncStatus: { $in: ['pending', 'failed'] },
-          status: 'ACTIVE',
         }),
       ]);
 
@@ -748,8 +836,9 @@ export class MappingController {
 
       // 네이버 상품 검색
       if (this.mappingService) {
-        const naverProductService = (this.mappingService as any)
-          .naverProductService;
+        // ServiceContainer에서 naverProductService 가져오기
+        const container = (global as any).serviceContainer;
+        const naverProductService = container?.naverProductService;
 
         if (naverProductService) {
           const naverPromise = (async () => {
@@ -892,9 +981,10 @@ export class MappingController {
               searchResults.shopify.message = '검색 결과가 없습니다.';
             }
           } catch (error: any) {
-            logger.error('Shopify search error:', error);
-            searchResults.shopify.error =
-              error.message || 'Shopify 검색 중 오류가 발생했습니다.';
+            // Circular structure 에러 방지를 위해 에러 메시지만 로깅
+            const errorMessage = error.message || 'Shopify 검색 중 오류가 발생했습니다.';
+            console.error('Shopify search error:', errorMessage, 'SKU:', skuUpper);
+            searchResults.shopify.error = errorMessage;
           }
         })();
 

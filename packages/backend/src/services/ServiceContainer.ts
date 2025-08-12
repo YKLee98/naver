@@ -545,7 +545,9 @@ export class ServiceContainer {
       );
 
       this.inventoryController = new InventoryController(
-        this.inventorySyncService
+        this.inventorySyncService,
+        this.naverProductService,
+        this.shopifyInventoryService
       );
 
       this.syncController = new SyncController(this.syncService);

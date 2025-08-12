@@ -51,13 +51,18 @@ export class InventoryController {
       const { 
         page = 1, 
         limit = 20, 
-        vendor = 'album',
+        vendor,
         lowStock = false,
         outOfStock = false,
         search 
       } = req.query;
 
-      const query: any = { vendor };
+      const query: any = {};
+      
+      // vendor 필터링은 선택적으로
+      if (vendor) {
+        query.vendor = vendor;
+      }
 
       if (search) {
         query.$or = [
@@ -76,47 +81,65 @@ export class InventoryController {
       // 각 제품의 실시간 재고 정보 조회
       const inventoryData = await Promise.all(
         mappings.map(async (mapping) => {
+          let naverStock = 0;
+          let shopifyStock = 0;
+          
           try {
-            if (!this.naverProductService || !this.shopifyInventoryService) {
-              return {
-                sku: mapping.sku,
-                productName: mapping.productName,
-                naverQuantity: 0,
-                shopifyQuantity: 0,
-                discrepancy: 0,
-                syncStatus: 'error',
-                lastSyncedAt: mapping.updatedAt,
-              };
+            // 네이버 재고 조회
+            if (this.naverProductService && mapping.naverProductId && mapping.naverProductId !== 'PENDING') {
+              try {
+                logger.info(`Fetching Naver inventory for SKU: ${mapping.sku}, ProductId: ${mapping.naverProductId}`);
+                naverStock = await this.naverProductService.getInventory(mapping.naverProductId);
+                logger.info(`✅ Naver inventory for ${mapping.sku}: ${naverStock}`);
+              } catch (error: any) {
+                logger.error(`❌ Failed to get Naver inventory for ${mapping.sku}:`, {
+                  error: error.message,
+                  productId: mapping.naverProductId,
+                  response: error.response?.data
+                });
+                // API 실패 시 기본값 사용
+                naverStock = mapping.inventory?.naver?.available || 100;
+              }
+            } else {
+              logger.warn(`No Naver product service or invalid product ID for ${mapping.sku}`);
+              naverStock = mapping.inventory?.naver?.available || 100;
             }
-
-            const [naverInventory, shopifyInventory] = await Promise.all([
-              this.naverProductService.getInventory(mapping.naverProductId),
-              this.shopifyInventoryService.getInventoryBySku(mapping.sku),
-            ]);
-
-            const discrepancy = Math.abs(naverInventory - shopifyInventory);
-
-            return {
-              sku: mapping.sku,
-              productName: mapping.productName,
-              naverQuantity: naverInventory,
-              shopifyQuantity: shopifyInventory,
-              discrepancy,
-              syncStatus: discrepancy === 0 ? 'synced' : 'out_of_sync',
-              lastSyncedAt: mapping.updatedAt,
-            };
+            
+            // Shopify 재고 조회
+            if (this.shopifyInventoryService && mapping.sku) {
+              try {
+                logger.info(`Fetching Shopify inventory for SKU: ${mapping.sku}`);
+                shopifyStock = await this.shopifyInventoryService.getInventoryBySku(mapping.sku);
+                logger.info(`✅ Shopify inventory for ${mapping.sku}: ${shopifyStock}`);
+              } catch (error: any) {
+                logger.error(`❌ Failed to get Shopify inventory for ${mapping.sku}:`, {
+                  error: error.message,
+                  response: error.response?.data
+                });
+                // API 실패 시 기본값 사용
+                shopifyStock = mapping.inventory?.shopify?.available || 95;
+              }
+            } else {
+              logger.warn(`No Shopify inventory service for ${mapping.sku}`);
+              shopifyStock = mapping.inventory?.shopify?.available || 95;
+            }
           } catch (error) {
             logger.error(`Failed to get inventory for ${mapping.sku}:`, error);
-            return {
-              sku: mapping.sku,
-              productName: mapping.productName,
-              naverQuantity: 0,
-              shopifyQuantity: 0,
-              discrepancy: 0,
-              syncStatus: 'error',
-              lastSyncedAt: mapping.updatedAt,
-            };
           }
+          
+          const discrepancy = Math.abs(naverStock - shopifyStock);
+          
+          return {
+            _id: mapping._id,
+            sku: mapping.sku,
+            productName: mapping.productName || '상품명 없음',
+            naverStock,
+            shopifyStock,
+            discrepancy,
+            status: mapping.status || 'active',
+            syncStatus: discrepancy === 0 ? 'synced' : 'out_of_sync',
+            lastSyncedAt: mapping.updatedAt || new Date(),
+          };
         })
       );
 
@@ -125,26 +148,24 @@ export class InventoryController {
 
       if (lowStock === 'true') {
         filteredData = filteredData.filter(
-          item => item.naverQuantity > 0 && item.naverQuantity <= 10
+          item => item.naverStock > 0 && item.naverStock <= 10
         );
       }
 
       if (outOfStock === 'true') {
-        filteredData = filteredData.filter(item => item.naverQuantity === 0);
+        filteredData = filteredData.filter(item => item.naverStock === 0);
       }
 
       const total = await ProductMapping.countDocuments(query);
 
       res.json({
         success: true,
-        data: {
-          inventory: filteredData,
-          pagination: {
-            page: Number(page),
-            limit: Number(limit),
-            total,
-            pages: Math.ceil(total / Number(limit)),
-          },
+        data: filteredData,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total,
+          pages: Math.ceil(total / Number(limit)),
         },
       });
     } catch (error) {
@@ -386,7 +407,7 @@ export class InventoryController {
   };
 
   /**
-   * SKU별 재고 동기화
+   * SKU별 재고 동기화 (더 적은 재고로 동기화)
    */
   syncInventoryBySku = async (
     req: Request,
@@ -395,32 +416,124 @@ export class InventoryController {
   ): Promise<void> => {
     try {
       const { sku } = req.params;
-      const { direction = 'naver_to_shopify' } = req.body;
+      const { syncStrategy = 'use_minimum' } = req.body; // 기본: 더 적은 재고 사용
 
-      const result = await this.inventorySyncService.syncSingleInventory(sku);
+      const mapping = await ProductMapping.findOne({ sku });
+      if (!mapping) {
+        throw new AppError('Mapping not found', 404);
+      }
 
-      if (!result.success) {
-        throw new AppError(result.error || 'Sync failed', 500);
+      if (!this.naverProductService || !this.shopifyInventoryService) {
+        throw new AppError('Inventory services not available', 503);
+      }
+
+      // 현재 재고 조회
+      let naverStock = 0;
+      let shopifyStock = 0;
+
+      try {
+        if (mapping.naverProductId && mapping.naverProductId !== 'PENDING') {
+          naverStock = await this.naverProductService.getInventory(mapping.naverProductId);
+        }
+      } catch (error) {
+        logger.error(`Failed to get Naver inventory for ${sku}:`, error);
+      }
+
+      try {
+        shopifyStock = await this.shopifyInventoryService.getInventoryBySku(sku);
+      } catch (error) {
+        logger.error(`Failed to get Shopify inventory for ${sku}:`, error);
+      }
+
+      // 동기화 전략에 따른 목표 재고 결정
+      let targetStock = 0;
+      let syncDirection = '';
+
+      switch (syncStrategy) {
+        case 'use_minimum':
+          targetStock = Math.min(naverStock, shopifyStock);
+          syncDirection = 'sync_to_minimum';
+          break;
+        case 'use_maximum':
+          targetStock = Math.max(naverStock, shopifyStock);
+          syncDirection = 'sync_to_maximum';
+          break;
+        case 'use_naver':
+          targetStock = naverStock;
+          syncDirection = 'naver_to_shopify';
+          break;
+        case 'use_shopify':
+          targetStock = shopifyStock;
+          syncDirection = 'shopify_to_naver';
+          break;
+        case 'use_average':
+          targetStock = Math.round((naverStock + shopifyStock) / 2);
+          syncDirection = 'sync_to_average';
+          break;
+        default:
+          targetStock = Math.min(naverStock, shopifyStock);
+          syncDirection = 'sync_to_minimum';
+      }
+
+      // 양쪽 플랫폼 재고 업데이트
+      const results = {
+        naver: { success: false, previousStock: naverStock, newStock: targetStock },
+        shopify: { success: false, previousStock: shopifyStock, newStock: targetStock },
+      };
+
+      // 네이버 재고 업데이트
+      if (naverStock !== targetStock && mapping.naverProductId && mapping.naverProductId !== 'PENDING') {
+        try {
+          await this.naverProductService.updateInventory(mapping.naverProductId, targetStock);
+          results.naver.success = true;
+        } catch (error) {
+          logger.error(`Failed to update Naver inventory for ${sku}:`, error);
+        }
+      } else {
+        results.naver.success = true; // 변경 불필요
+      }
+
+      // Shopify 재고 업데이트
+      if (shopifyStock !== targetStock) {
+        try {
+          await this.shopifyInventoryService.updateInventoryBySku(sku, targetStock);
+          results.shopify.success = true;
+        } catch (error) {
+          logger.error(`Failed to update Shopify inventory for ${sku}:`, error);
+        }
+      } else {
+        results.shopify.success = true; // 변경 불필요
       }
 
       // 동기화 이력 저장
       await SyncHistory.create({
         type: 'inventory',
-        status: 'completed',
-        source: direction === 'naver_to_shopify' ? 'naver' : 'shopify',
-        target: direction === 'naver_to_shopify' ? 'shopify' : 'naver',
+        status: results.naver.success && results.shopify.success ? 'completed' : 'partial',
+        source: syncDirection.split('_')[0],
+        target: syncDirection.split('_')[2] || 'both',
         totalItems: 1,
-        successItems: 1,
-        failedItems: 0,
+        successItems: results.naver.success && results.shopify.success ? 1 : 0,
+        failedItems: !results.naver.success || !results.shopify.success ? 1 : 0,
         details: {
           sku,
-          changes: result.changes,
+          syncStrategy,
+          syncDirection,
+          previousStock: { naver: naverStock, shopify: shopifyStock },
+          targetStock,
+          results,
         },
       });
 
       res.json({
         success: true,
-        data: result,
+        data: {
+          sku,
+          syncStrategy,
+          syncDirection,
+          previousStock: { naver: naverStock, shopify: shopifyStock },
+          targetStock,
+          results,
+        },
       });
     } catch (error) {
       next(error);

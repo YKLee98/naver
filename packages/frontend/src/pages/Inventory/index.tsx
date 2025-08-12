@@ -100,23 +100,22 @@ const Inventory: React.FC = () => {
         stockLevel: stockFilter === 'all' ? undefined : stockFilter,
       });
 
-      // 백엔드의 InventoryController를 보면 data가 직접 배열로 옵니다
+      // API 응답에서 데이터 파싱
       const inventoryData = response.data.data || [];
-      const totalData = response.data.total || 0;
-      const pageData = response.data.page || 1;
-      const totalPages = response.data.totalPages || 1;
+      const pagination = response.data.pagination || {};
+      const totalData = pagination.total || 0;
 
-      // 각 항목에서 플랫폼별 재고 정보 추출
+      // 각 항목에서 재고 정보 추출
       const processedInventories = inventoryData.map((item: any) => ({
-        _id: item.sku,
+        _id: item._id || item.sku,
         sku: item.sku,
         productName: item.productName || '',
-        naverStock: item.currentQuantity || 0, // 플랫폼별 재고는 별도로 조회 필요
-        shopifyStock: item.currentQuantity || 0,
-        difference: 0,
-        status: item.currentQuantity === 0 ? 'error' : 
-                item.currentQuantity <= 10 ? 'warning' : 'normal',
-        lastSyncAt: item.lastUpdated || new Date().toISOString(),
+        naverStock: item.naverStock || 0,
+        shopifyStock: item.shopifyStock || 0,
+        difference: Math.abs((item.naverStock || 0) - (item.shopifyStock || 0)),
+        status: (item.naverStock === 0 || item.shopifyStock === 0) ? 'error' : 
+                (item.naverStock <= 10 || item.shopifyStock <= 10) ? 'warning' : 'normal',
+        lastSyncAt: item.lastSyncedAt || item.lastSync || new Date().toISOString(),
         syncStatus: item.syncStatus || 'synced'
       }));
 

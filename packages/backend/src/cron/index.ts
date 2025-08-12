@@ -36,9 +36,9 @@ export class CronManager {
     const jobs: CronJob[] = [
       {
         name: 'Inventory Sync',
-        schedule: process.env.CRON_INVENTORY_SYNC || '0 */30 * * * *', // Every 30 minutes
+        schedule: process.env.CRON_INVENTORY_SYNC || '*/5 * * * *', // Every 5 minutes
         handler: () => this.syncInventory(),
-        enabled: process.env.ENABLE_INVENTORY_SYNC === 'true',
+        enabled: process.env.ENABLE_INVENTORY_SYNC !== 'false', // 기본적으로 활성화
       },
       {
         name: 'Price Sync',
@@ -138,21 +138,14 @@ export class CronManager {
    * Sync inventory
    */
   private async syncInventory(): Promise<void> {
-    if (!this.services?.hasService('syncService')) {
-      logger.warn('Sync service not available');
-      return;
-    }
-
     try {
-      const syncService = this.services.getService('syncService');
-      await syncService.startSync({
-        type: 'inventory',
-        priority: 'normal',
-        metadata: {
-          source: 'cron',
-          scheduled: true,
-        },
-      });
+      // InventorySyncJob 사용
+      const { InventorySyncJob } = await import('../jobs/InventorySyncJob.js');
+      const inventorySyncJob = new InventorySyncJob(this.services);
+      
+      logger.info('🔄 Running inventory sync from cron...');
+      const result = await inventorySyncJob.triggerManualSync();
+      logger.info('✅ Inventory sync completed from cron:', result);
     } catch (error) {
       logger.error('Inventory sync cron failed:', error);
       throw error;

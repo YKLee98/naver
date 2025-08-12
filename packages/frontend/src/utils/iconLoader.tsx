@@ -415,6 +415,62 @@ const CustomIcons = {
       </svg>
     );
   },
+  Image: (props: IconProps) => {
+    const size = getFontSize(props.fontSize);
+    return (
+      <svg 
+        className={props.className}
+        style={{ width: size, height: size, ...props.style }}
+        fill={props.color || 'currentColor'}
+        viewBox="0 0 24 24"
+        onClick={props.onClick}
+      >
+        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+      </svg>
+    );
+  },
+  Tag: (props: IconProps) => {
+    const size = getFontSize(props.fontSize);
+    return (
+      <svg 
+        className={props.className}
+        style={{ width: size, height: size, ...props.style }}
+        fill={props.color || 'currentColor'}
+        viewBox="0 0 24 24"
+        onClick={props.onClick}
+      >
+        <path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/>
+      </svg>
+    );
+  },
+  Store: (props: IconProps) => {
+    const size = getFontSize(props.fontSize);
+    return (
+      <svg 
+        className={props.className}
+        style={{ width: size, height: size, ...props.style }}
+        fill={props.color || 'currentColor'}
+        viewBox="0 0 24 24"
+        onClick={props.onClick}
+      >
+        <path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>
+      </svg>
+    );
+  },
+  Percent: (props: IconProps) => {
+    const size = getFontSize(props.fontSize);
+    return (
+      <svg 
+        className={props.className}
+        style={{ width: size, height: size, ...props.style }}
+        fill={props.color || 'currentColor'}
+        viewBox="0 0 24 24"
+        onClick={props.onClick}
+      >
+        <path d="M7.5 11C9.43 11 11 9.43 11 7.5S9.43 4 7.5 4 4 5.57 4 7.5 5.57 11 7.5 11zm0-5C8.33 6 9 6.67 9 7.5S8.33 9 7.5 9 6 8.33 6 7.5 6.67 6 7.5 6zM16.5 13c-1.93 0-3.5 1.57-3.5 3.5s1.57 3.5 3.5 3.5 3.5-1.57 3.5-3.5-1.57-3.5-3.5-3.5zm0 5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5.41 20L4 18.59 18.59 4 20 5.41z"/>
+      </svg>
+    );
+  },
 };
 
 // Icon mapping
@@ -468,6 +524,10 @@ const iconMap = {
   FilterList: CustomIcons.FilterList,
   KeyboardArrowDown: CustomIcons.ExpandMore,
   KeyboardArrowUp: CustomIcons.ExpandLess,
+  Image: CustomIcons.Image,
+  Tag: CustomIcons.Tag,
+  Store: CustomIcons.Store,
+  Percent: CustomIcons.Percent,
 } as const;
 
 export type IconName = keyof typeof iconMap;
@@ -502,6 +562,16 @@ export const useDynamicIcon = (iconName: IconName) => {
     IconComponent, 
     isLoaded: !!IconComponent 
   };
+};
+
+// getIcon function for backward compatibility
+export const getIcon = (name: IconName) => {
+  const IconComponent = iconMap[name];
+  if (!IconComponent) {
+    console.warn(`Icon "${name}" not found in iconMap`);
+    return () => null;
+  }
+  return IconComponent;
 };
 
 export default DynamicIcon;

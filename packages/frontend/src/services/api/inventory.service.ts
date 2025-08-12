@@ -105,7 +105,7 @@ class InventoryService {
    * 재고 목록 조회
    */
   async getInventoryList(params?: InventoryListParams): Promise<AxiosResponse<InventoryListResponse>> {
-    return apiClient.get('/inventory/status', { params });
+    return apiClient.get('/inventory', { params });
   }
 
   /**

@@ -39,6 +39,9 @@ export class App {
     }
 
     try {
+      // ServiceContainer를 전역 변수로 설정
+      (global as any).serviceContainer = this.services;
+      
       // Setup middleware
       this.setupSecurityMiddleware();
       this.setupCommonMiddleware();
@@ -94,24 +97,37 @@ export class App {
       })
     );
 
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: config.api.rateLimit.windowMs,
-      max: config.api.rateLimit.maxRequests,
-      message: 'Too many requests from this IP, please try again later.',
-      standardHeaders: true,
-      legacyHeaders: false,
-      handler: (req, res) => {
-        logger.warn(`Rate limit exceeded for IP: ${req.ip}`);
-        res.status(429).json({
-          error: 'Too many requests',
-          message: 'Rate limit exceeded. Please try again later.',
-          retryAfter: Math.ceil(config.api.rateLimit.windowMs / 1000),
-        });
-      },
-    });
-
-    this.app.use('/api/', limiter);
+    // Rate limiting - 개발 환경에서는 매우 관대하게 설정
+    if (config.isProduction) {
+      const limiter = rateLimit({
+        windowMs: config.api.rateLimit.windowMs,
+        max: config.api.rateLimit.maxRequests,
+        message: 'Too many requests from this IP, please try again later.',
+        standardHeaders: true,
+        legacyHeaders: false,
+        handler: (req, res) => {
+          logger.warn(`Rate limit exceeded for IP: ${req.ip}`);
+          res.status(429).json({
+            error: 'Too many requests',
+            message: 'Rate limit exceeded. Please try again later.',
+            retryAfter: Math.ceil(config.api.rateLimit.windowMs / 1000),
+          });
+        },
+      });
+      this.app.use('/api/', limiter);
+    } else {
+      // 개발 환경에서는 매우 관대한 rate limit 설정
+      const devLimiter = rateLimit({
+        windowMs: 1000, // 1초
+        max: 1000, // 초당 1000개 요청 허용
+        message: 'Too many requests',
+        standardHeaders: true,
+        legacyHeaders: false,
+        skip: () => true, // 개발 환경에서는 모든 요청 허용
+      });
+      this.app.use('/api/', devLimiter);
+      logger.info('🔓 Rate limiting disabled for development');
+    }
 
     // Prevent MongoDB injection attacks
     this.app.use(

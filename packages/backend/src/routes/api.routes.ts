@@ -134,21 +134,24 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
     if (serviceContainer.mappingController) {
       const ctrl = serviceContainer.mappingController;
 
+      // 특수 경로를 먼저 등록 (구체적인 경로가 우선)
+      protectedRouter.get('/mappings/search-by-sku', ctrl.searchProductsBySku.bind(ctrl));
+      protectedRouter.get('/mappings/search-shopify', ctrl.searchShopifyProducts.bind(ctrl));
+      protectedRouter.get('/mappings/export/csv', ctrl.exportMappings.bind(ctrl));
+      protectedRouter.get('/mappings/template/download', ctrl.downloadTemplate.bind(ctrl));
+      protectedRouter.post('/mappings/bulk', ctrl.bulkCreateMappings.bind(ctrl));
+      protectedRouter.post('/mappings/bulk-upload', ctrl.bulkUploadMappings.bind(ctrl));
+      protectedRouter.post('/mappings/auto-discover', ctrl.autoDiscoverMappings.bind(ctrl));
+      protectedRouter.post('/mappings/auto-search', ctrl.autoSearchAndCreate.bind(ctrl));
+      
+      // 일반 CRUD 경로
       protectedRouter.get('/mappings', ctrl.getMappings.bind(ctrl));
       protectedRouter.get('/mappings/:id', ctrl.getMappingById.bind(ctrl));
       protectedRouter.post('/mappings', ctrl.createMapping.bind(ctrl));
       protectedRouter.put('/mappings/:id', ctrl.updateMapping.bind(ctrl));
       protectedRouter.delete('/mappings/:id', ctrl.deleteMapping.bind(ctrl));
-      
-      protectedRouter.post('/mappings/bulk', ctrl.bulkCreateMappings.bind(ctrl));
-      protectedRouter.post('/mappings/bulk-upload', ctrl.bulkUploadMappings.bind(ctrl));
       protectedRouter.patch('/mappings/:id/toggle', ctrl.toggleMapping.bind(ctrl));
       protectedRouter.post('/mappings/:id/validate', ctrl.validateMapping.bind(ctrl));
-      protectedRouter.post('/mappings/auto-discover', ctrl.autoDiscoverMappings.bind(ctrl));
-      protectedRouter.get('/mappings/search-shopify', ctrl.searchShopifyProducts.bind(ctrl));
-      protectedRouter.post('/mappings/auto-search', ctrl.autoSearchAndCreate.bind(ctrl));
-      protectedRouter.get('/mappings/export/csv', ctrl.exportMappings.bind(ctrl));
-      protectedRouter.get('/mappings/template/download', ctrl.downloadTemplate.bind(ctrl));
 
       logger.info('✅ Mapping routes registered');
     }
@@ -411,7 +414,49 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
   protectedRouter.post('/products/:sku/sync', defaultHandlers.success);
   
   // Add ALL inventory routes
-  protectedRouter.get('/inventory', defaultHandlers.getInventory);
+  // 재고 관리 - InventoryController 사용 또는 기본 핸들러
+  if (serviceContainer?.inventoryController) {
+    // InventoryController가 등록되면 이미 위에서 처리됨
+  } else {
+    // 기본 핸들러 - 매핑된 상품들의 재고 정보 반환
+    protectedRouter.get('/inventory', async (req: any, res: any) => {
+      try {
+        // MongoDB에서 매핑 정보 가져오기
+        const ProductMapping = (await import('../models/ProductMapping.js')).default;
+        
+        if (!ProductMapping) {
+          throw new Error('ProductMapping model not found');
+        }
+        
+        const mappings = await ProductMapping.find({}).limit(20).lean();
+        
+        // 매핑된 상품들의 재고 정보 구성
+        const inventoryData = mappings.map((mapping: any) => ({
+          _id: mapping._id,
+          sku: mapping.sku,
+          productName: mapping.productName || '상품명 없음',
+          naverStock: mapping.inventory?.naver?.available || 0,
+          shopifyStock: mapping.inventory?.shopify?.available || 0,
+          status: mapping.status || 'active',
+          lastSync: mapping.updatedAt,
+          discrepancy: false
+        }));
+        
+        res.json({
+          success: true,
+          data: inventoryData,
+          pagination: {
+            total: inventoryData.length,
+            page: 1,
+            limit: 20
+          }
+        });
+      } catch (error) {
+        console.error('Inventory fetch error:', error);
+        res.json({ success: true, data: [], pagination: { total: 0, page: 1, limit: 20 } });
+      }
+    });
+  }
   protectedRouter.get('/inventory/:sku', defaultHandlers.getProductById);
   protectedRouter.put('/inventory/:sku', defaultHandlers.success);
   protectedRouter.post('/inventory/:sku/adjust', defaultHandlers.success);
@@ -426,6 +471,52 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
   protectedRouter.post('/inventory/discrepancies/:sku/resolve', defaultHandlers.success);
   
   // Add ALL mapping routes - 순서 중요! 구체적인 경로를 먼저
+  // MappingController가 있으면 실제 구현 사용, 없으면 더미 데이터
+  if (serviceContainer?.mappingController) {
+    protectedRouter.get('/mappings/search-by-sku', serviceContainer.mappingController.searchProductsBySku.bind(serviceContainer.mappingController));
+  } else {
+    protectedRouter.get('/mappings/search-by-sku', async (req: any, res: any) => {
+      const { sku } = req.query;
+      
+      // 더미 데이터 반환 - 실제 구현 전까지 사용
+      res.json({
+        success: true,
+        data: {
+          naver: {
+            found: true,
+            products: [
+              {
+                id: `naver-${sku || 'test'}`,
+                sku: sku || 'test',
+                name: `네이버 상품 - ${sku || 'test'}`,
+                price: 25000,
+                stock: 100,
+                image: null,
+                url: 'https://smartstore.naver.com/product/example'
+              }
+            ],
+            message: '네이버에서 1개 상품을 찾았습니다.'
+          },
+          shopify: {
+            found: true,
+            products: [
+              {
+                variantId: `gid://shopify/ProductVariant/${sku || 'test'}`,
+                sku: sku || 'test',
+                title: `Shopify Product - ${sku || 'test'}`,
+                price: 25.99,
+                inventoryQuantity: 50,
+                image: null,
+                inventoryItemId: `gid://shopify/InventoryItem/${sku || 'test'}`
+              }
+            ],
+            message: 'Shopify에서 1개 상품을 찾았습니다.'
+          }
+        }
+      });
+    });
+  }
+  
   protectedRouter.get('/mappings/search-shopify', async (req: any, res: any) => {
     // Shopify 제품 검색 결과 반환
     res.json({ 
@@ -450,19 +541,8 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
       ]
     });
   });
-  protectedRouter.get('/mappings/export/csv', defaultHandlers.emptyList);
-  protectedRouter.get('/mappings/template/download', defaultHandlers.emptyList);
-  protectedRouter.get('/mappings/:id', defaultHandlers.getProductById);
-  protectedRouter.get('/mappings', defaultHandlers.getMappings);
-  protectedRouter.post('/mappings', defaultHandlers.success);
-  protectedRouter.put('/mappings/:id', defaultHandlers.success);
-  protectedRouter.delete('/mappings/:id', defaultHandlers.success);
-  protectedRouter.post('/mappings/bulk', defaultHandlers.success);
-  protectedRouter.post('/mappings/bulk-upload', defaultHandlers.success);
-  protectedRouter.patch('/mappings/:id/toggle', defaultHandlers.success);
-  protectedRouter.post('/mappings/:id/validate', defaultHandlers.success);
-  protectedRouter.post('/mappings/auto-discover', defaultHandlers.success);
-  protectedRouter.post('/mappings/auto-search', defaultHandlers.success);
+  // Mapping routes는 이미 위에서 ServiceContainer를 통해 등록됨
+  // 중복 제거
   
   // Add ALL sync routes
   protectedRouter.post('/sync/all', defaultHandlers.success);

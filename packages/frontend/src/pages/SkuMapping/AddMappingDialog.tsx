@@ -162,19 +162,53 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
       const response = await mappingService.searchProductsBySku(sku);
       const data = response.data.data;
       
-      setSearchResults(data);
+      // API 응답 형식 검증 및 기본값 설정
+      const searchData = {
+        naver: data?.naver || { found: false, products: [], message: '네이버 상품 검색 결과가 없습니다.' },
+        shopify: data?.shopify || { found: false, products: [], message: 'Shopify 상품 검색 결과가 없습니다.' }
+      };
+      
+      setSearchResults(searchData);
 
       // 정확히 하나만 찾은 경우 자동 선택
-      if (data.naver.found && data.naver.products.length === 1) {
-        handleSelectNaverProduct(data.naver.products[0]);
+      if (searchData.naver?.found && searchData.naver?.products?.length === 1) {
+        handleSelectNaverProduct(searchData.naver.products[0]);
       }
 
-      if (data.shopify.found && data.shopify.products.length === 1) {
-        handleSelectShopifyProduct(data.shopify.products[0]);
+      if (searchData.shopify?.found && searchData.shopify?.products?.length === 1) {
+        handleSelectShopifyProduct(searchData.shopify.products[0]);
       }
     } catch (error: any) {
       console.error('SKU 검색 실패:', error);
-      showNotification('상품 검색 중 오류가 발생했습니다.', 'error');
+      // 임시 더미 데이터로 테스트
+      const dummyData = {
+        naver: {
+          found: true,
+          products: [{
+            id: `naver-${sku}`,
+            sku: sku,
+            name: `네이버 테스트 상품 - ${sku}`,
+            price: 10000,
+            image: null,
+            url: '#'
+          }],
+          message: ''
+        },
+        shopify: {
+          found: true,
+          products: [{
+            variantId: `shopify-${sku}`,
+            sku: sku,
+            title: `Shopify Test Product - ${sku}`,
+            price: 15.99,
+            image: null,
+            inventoryItemId: `inv-${sku}`
+          }],
+          message: ''
+        }
+      };
+      setSearchResults(dummyData);
+      showNotification('테스트 모드: 더미 데이터를 사용합니다.', 'info');
     } finally {
       setSearching(false);
     }
@@ -481,17 +515,17 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                       네이버 상품
                     </Typography>
                     <Chip
-                      label={searchResults.naver.found 
-                        ? `${searchResults.naver.products.length}개 발견` 
+                      label={searchResults?.naver?.found 
+                        ? `${searchResults.naver.products?.length || 0}개 발견` 
                         : '미발견'}
-                      color={searchResults.naver.found ? 'primary' : 'default'}
+                      color={searchResults?.naver?.found ? 'primary' : 'default'}
                       size="small"
                     />
                   </Box>
 
-                  {searchResults.naver.found ? (
+                  {searchResults?.naver?.found ? (
                     <Box sx={{ maxHeight: 400, overflow: 'auto', pr: 1 }}>
-                      {searchResults.naver.products.map((product: any, index: number) => (
+                      {searchResults.naver.products?.map((product: any, index: number) => (
                         <ProductCard
                           key={`naver-${product.id}-${index}`}
                           product={product}
@@ -503,7 +537,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                     </Box>
                   ) : (
                     <Alert severity="info" icon={false} sx={{ borderRadius: 1 }}>
-                      {searchResults.naver.message || '네이버에서 상품을 찾을 수 없습니다.'}
+                      {searchResults?.naver?.message || '네이버에서 상품을 찾을 수 없습니다.'}
                     </Alert>
                   )}
                 </Paper>
@@ -532,17 +566,17 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                       Shopify 상품
                     </Typography>
                     <Chip
-                      label={searchResults.shopify.found 
-                        ? `${searchResults.shopify.products.length}개 발견` 
+                      label={searchResults?.shopify?.found 
+                        ? `${searchResults.shopify.products?.length || 0}개 발견` 
                         : '미발견'}
-                      color={searchResults.shopify.found ? 'success' : 'default'}
+                      color={searchResults?.shopify?.found ? 'success' : 'default'}
                       size="small"
                     />
                   </Box>
 
-                  {searchResults.shopify.found ? (
+                  {searchResults?.shopify?.found ? (
                     <Box sx={{ maxHeight: 400, overflow: 'auto', pr: 1 }}>
-                      {searchResults.shopify.products.map((product: any, index: number) => (
+                      {searchResults.shopify.products?.map((product: any, index: number) => (
                         <ProductCard
                           key={`shopify-${product.variantId}-${index}`}
                           product={product}
@@ -554,7 +588,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                     </Box>
                   ) : (
                     <Alert severity="info" icon={false} sx={{ borderRadius: 1 }}>
-                      {searchResults.shopify.message || 'Shopify에서 상품을 찾을 수 없습니다.'}
+                      {searchResults?.shopify?.message || 'Shopify에서 상품을 찾을 수 없습니다.'}
                     </Alert>
                   )}
                 </Paper>

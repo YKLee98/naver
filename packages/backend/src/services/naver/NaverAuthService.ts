@@ -266,6 +266,14 @@ export class NaverAuthService extends BaseService {
   }
 
   /**
+   * Get access token string only (for backward compatibility)
+   */
+  async getAccessToken(forceRefresh: boolean = false): Promise<string> {
+    const token = await this.getToken(forceRefresh);
+    return token.access_token;
+  }
+
+  /**
    * Get access token
    */
   async getToken(forceRefresh: boolean = false): Promise<NaverToken> {
@@ -350,9 +358,15 @@ export class NaverAuthService extends BaseService {
       });
 
       this.emit('token:failed', { error: axiosError.message });
+      
+      // 더 자세한 에러 메시지 제공
+      const errorDetail = axiosError.response?.data?.message || 
+                         axiosError.response?.data?.error || 
+                         axiosError.response?.data || 
+                         axiosError.message;
 
       throw new Error(
-        `Naver authentication failed: ${axiosError.response?.data || axiosError.message}`
+        `Naver authentication failed: ${JSON.stringify(errorDetail)}`
       );
     }
   }

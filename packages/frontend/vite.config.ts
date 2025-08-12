@@ -80,6 +80,7 @@ export default defineConfig(({ mode }) => {
           '**/package-lock.json',
           '**/yarn.lock',
           '**/pnpm-lock.yaml',
+          '**/node_modules/@mui/icons-material/**',
         ],
         depth: 3,
         awaitWriteFinish: {
@@ -113,6 +114,7 @@ export default defineConfig(({ mode }) => {
         'react-dom',
         'react-router-dom',
         '@mui/material',
+        '@mui/icons-material',
         '@mui/x-data-grid',
         '@emotion/react',
         '@emotion/styled',
@@ -126,9 +128,9 @@ export default defineConfig(({ mode }) => {
         'socket.io-client',
         '@mui/system',
         '@mui/utils',
+        'prop-types',
       ],
       exclude: [
-        '@mui/icons-material',
         '@mui/lab',
       ],
       force: false,
@@ -143,7 +145,7 @@ export default defineConfig(({ mode }) => {
           'process.env.NODE_ENV': JSON.stringify(mode),
         },
       },
-      holdUntilCrawlEnd: true,
+      holdUntilCrawlEnd: false,
     },
     
     build: {
