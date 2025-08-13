@@ -470,47 +470,100 @@ export class ShopifyInventoryService extends ShopifyService {
     try {
       this.ensureInitialized();
 
-      // First, find the product variant by SKU
       if (!this.client) {
         // Mock mode
         logger.debug(`Mock mode: returning dummy inventory for SKU ${sku}`);
         return 100;
       }
 
-      // Search for product variant with this SKU
-      const productsResponse = await this.client.get({
-        path: 'products',
-        query: { limit: '250' },
-      });
-
-      let inventoryItemId: string | null = null;
-      
-      if (productsResponse?.body?.products) {
-        for (const product of productsResponse.body.products) {
-          const variant = product.variants?.find((v: any) => v.sku === sku);
-          if (variant) {
-            inventoryItemId = variant.inventory_item_id;
-            break;
+      // GraphQL로 SKU 검색 (더 효율적)
+      try {
+        const gqlResponse = await this.client.post({
+          path: 'graphql',
+          data: {
+            query: `
+              query getVariantBySku($sku: String!) {
+                productVariants(first: 1, query: $sku) {
+                  edges {
+                    node {
+                      id
+                      sku
+                      inventoryQuantity
+                      inventoryItem {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            `,
+            variables: { sku: `sku:${sku}` }
           }
+        });
+
+        if (gqlResponse?.body?.data?.productVariants?.edges?.length > 0) {
+          const variant = gqlResponse.body.data.productVariants.edges[0].node;
+          const quantity = variant.inventoryQuantity || 0;
+          logger.info(`✅ Shopify inventory for ${sku}: ${quantity} (via GraphQL)`);
+          return quantity;
+        }
+      } catch (gqlError) {
+        logger.debug('GraphQL query failed, falling back to REST API');
+      }
+
+      // REST API 폴백 - 더 효율적인 검색
+      let page = 1;
+      let hasMore = true;
+      
+      while (hasMore && page <= 5) { // 최대 5페이지까지만 검색
+        const productsResponse = await this.client.get({
+          path: 'products',
+          query: { 
+            limit: '50',
+            page: String(page),
+            fields: 'id,variants'
+          },
+        });
+
+        if (productsResponse?.body?.products) {
+          for (const product of productsResponse.body.products) {
+            const variant = product.variants?.find((v: any) => v.sku === sku);
+            if (variant) {
+              const inventoryItemId = variant.inventory_item_id;
+              
+              if (!inventoryItemId) {
+                // variant에 직접 inventory_quantity가 있을 수 있음
+                const quantity = variant.inventory_quantity || 0;
+                logger.info(`✅ Shopify inventory for ${sku}: ${quantity} (from variant)`);
+                return quantity;
+              }
+
+              // Get the primary location
+              const locations = await this.getLocations();
+              const primaryLocation = locations.find(loc => loc.active);
+              
+              if (!primaryLocation) {
+                logger.warn('No active location found, using variant quantity');
+                return variant.inventory_quantity || 0;
+              }
+
+              // Get inventory level for this item
+              const level = await this.getInventoryLevelByIds(inventoryItemId, primaryLocation.id);
+              const quantity = level?.available || 0;
+              logger.info(`✅ Shopify inventory for ${sku}: ${quantity} (from inventory level)`);
+              return quantity;
+            }
+          }
+          
+          hasMore = productsResponse.body.products.length === 50;
+          page++;
+        } else {
+          hasMore = false;
         }
       }
 
-      if (!inventoryItemId) {
-        logger.warn(`No inventory item found for SKU: ${sku}`);
-        return 0;
-      }
-
-      // Get the primary location
-      const locations = await this.getLocations();
-      const primaryLocation = locations.find(loc => loc.active);
-      
-      if (!primaryLocation) {
-        throw new Error('No active location found');
-      }
-
-      // Get inventory level for this item
-      const level = await this.getInventoryLevel(inventoryItemId, primaryLocation.id);
-      return level?.available || 0;
+      logger.warn(`No inventory item found for SKU: ${sku} after searching ${page - 1} pages`);
+      return 0;
 
     } catch (error: any) {
       logger.error(`Failed to get inventory for SKU ${sku}:`, error);

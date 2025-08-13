@@ -3,8 +3,8 @@ import { Schema, model, Document } from 'mongoose';
 
 export interface InventoryTransaction extends Document {
   sku: string;
-  platform: 'naver' | 'shopify';
-  transactionType: 'sale' | 'restock' | 'adjustment' | 'sync';
+  platform: 'naver' | 'shopify' | 'both';
+  transactionType: 'sale' | 'restock' | 'adjustment' | 'sync' | 'realtime_update';
   quantity: number;
   previousQuantity: number;
   newQuantity: number;
@@ -20,7 +20,7 @@ export interface InventoryTransaction extends Document {
   updatedAt: Date;
 }
 
-const InventoryTransactionSchema = new Schema<IInventoryTransaction>(
+const InventoryTransactionSchema = new Schema<InventoryTransaction>(
   {
     sku: {
       type: String,
@@ -30,13 +30,13 @@ const InventoryTransactionSchema = new Schema<IInventoryTransaction>(
     platform: {
       type: String,
       required: true,
-      enum: ['naver', 'shopify'],
+      enum: ['naver', 'shopify', 'both'],
       index: true,
     },
     transactionType: {
       type: String,
       required: true,
-      enum: ['sale', 'restock', 'adjustment', 'sync'],
+      enum: ['sale', 'restock', 'adjustment', 'sync', 'realtime_update'],
       index: true,
     },
     quantity: {
@@ -96,7 +96,7 @@ InventoryTransactionSchema.index(
   { unique: true, sparse: true }
 );
 
-export const InventoryTransaction = model<IInventoryTransaction>(
+export const InventoryTransaction = model<InventoryTransaction>(
   'InventoryTransaction',
   InventoryTransactionSchema
 );

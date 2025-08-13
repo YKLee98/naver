@@ -235,8 +235,11 @@ export class NaverProductService {
     try {
       const product = await this.getProduct(productId);
       return product?.stockQuantity || 0;
-    } catch (error) {
-      logger.error(`Error getting product stock for ${productId}:`, error);
+    } catch (error: any) {
+      logger.error(`Error getting product stock for ${productId}:`, {
+        message: error.message || 'Unknown error',
+        status: error.response?.status || 'N/A'
+      });
       throw error;
     }
   }
@@ -424,8 +427,11 @@ export class NaverProductService {
     try {
       const product = await this.getProduct(productId);
       return product?.stockQuantity || 0;
-    } catch (error) {
-      logger.error(`Error getting inventory for ${productId}:`, error);
+    } catch (error: any) {
+      logger.error(`Error getting inventory for ${productId}:`, {
+        message: error.message || 'Unknown error',
+        status: error.response?.status || 'N/A'
+      });
       throw error;
     }
   }

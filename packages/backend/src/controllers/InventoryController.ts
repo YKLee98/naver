@@ -85,24 +85,73 @@ export class InventoryController {
           let shopifyStock = 0;
           
           try {
-            // 네이버 재고 조회
-            if (this.naverProductService && mapping.naverProductId && mapping.naverProductId !== 'PENDING') {
+            // 네이버 재고 조회 - searchProducts 사용
+            if (this.naverProductService && mapping.sku) {
               try {
-                logger.info(`Fetching Naver inventory for SKU: ${mapping.sku}, ProductId: ${mapping.naverProductId}`);
-                naverStock = await this.naverProductService.getInventory(mapping.naverProductId);
-                logger.info(`✅ Naver inventory for ${mapping.sku}: ${naverStock}`);
+                logger.info(`Fetching Naver inventory for SKU: ${mapping.sku}`);
+                const searchResult = await this.naverProductService.searchProducts({
+                  searchKeyword: mapping.sku,
+                  searchType: 'SELLER_MANAGEMENT_CODE',
+                  page: 1,
+                  size: 10
+                });
+                
+                logger.info(`Naver search result for ${mapping.sku}:`, {
+                  found: searchResult?.contents?.length || 0,
+                  firstProduct: searchResult?.contents?.[0] ? {
+                    sellerManagementCode: searchResult.contents[0].sellerManagementCode,
+                    stockQuantity: searchResult.contents[0].stockQuantity,
+                    channelProducts: searchResult.contents[0].channelProducts?.map((cp: any) => ({
+                      stockQuantity: cp.stockQuantity
+                    }))
+                  } : null
+                });
+                
+                if (searchResult?.contents && searchResult.contents.length > 0) {
+                  // EnhancedInventorySyncService와 동일한 로직 사용
+                  for (const item of searchResult.contents) {
+                    // channelProducts 체크
+                    if (item.channelProducts && Array.isArray(item.channelProducts)) {
+                      for (const channelProduct of item.channelProducts) {
+                        const prodId = String(channelProduct.channelProductNo || channelProduct.productNo || '');
+                        if (prodId === String(mapping.naverProductId)) {
+                          naverStock = channelProduct.stockQuantity || 0;
+                          logger.info(`✅ Naver inventory for ${mapping.sku}: ${naverStock} via channel products`);
+                          break;
+                        }
+                      }
+                      if (naverStock > 0) break;
+                    }
+                    
+                    // 직접 상품 체크
+                    const itemId = String(item.productNo || item.originProductNo || item.id || '');
+                    if (itemId === String(mapping.naverProductId)) {
+                      naverStock = item.stockQuantity || 0;
+                      logger.info(`✅ Naver inventory for ${mapping.sku}: ${naverStock} via direct match`);
+                      break;
+                    }
+                  }
+                  
+                  // ID 매칭 실패 시 첫 번째 결과 사용
+                  if (naverStock === 0 && searchResult.contents.length > 0) {
+                    const firstItem = searchResult.contents[0];
+                    naverStock = firstItem.stockQuantity || 0;
+                    logger.info(`✅ Naver inventory for ${mapping.sku}: ${naverStock} (using first match)`);
+                  }
+                } else {
+                  logger.warn(`No product found for SKU ${mapping.sku} in Naver`);
+                  naverStock = mapping.inventory?.naver?.available || 0;
+                }
               } catch (error: any) {
-                logger.error(`❌ Failed to get Naver inventory for ${mapping.sku}:`, {
-                  error: error.message,
-                  productId: mapping.naverProductId,
-                  response: error.response?.data
+                logger.error(`❌ Failed to search Naver inventory for ${mapping.sku}:`, {
+                  error: error.message
                 });
                 // API 실패 시 기본값 사용
-                naverStock = mapping.inventory?.naver?.available || 100;
+                naverStock = mapping.inventory?.naver?.available || 0;
               }
             } else {
-              logger.warn(`No Naver product service or invalid product ID for ${mapping.sku}`);
-              naverStock = mapping.inventory?.naver?.available || 100;
+              logger.warn(`No Naver product service for ${mapping.sku}`);
+              naverStock = mapping.inventory?.naver?.available || 0;
             }
             
             // Shopify 재고 조회
@@ -194,10 +243,23 @@ export class InventoryController {
         throw new AppError('Inventory services not available', 503);
       }
 
-      const [naverInventory, shopifyInventory] = await Promise.all([
-        this.naverProductService.getInventory(mapping.naverProductId),
-        this.shopifyInventoryService.getInventoryBySku(sku),
-      ]);
+      // 네이버 재고 조회 - searchProducts 사용
+      let naverInventory = 0;
+      try {
+        const searchResult = await this.naverProductService.searchProducts({
+          searchKeyword: sku,
+          searchType: 'SELLER_MANAGEMENT_CODE',
+          page: 1,
+          size: 10
+        });
+        if (searchResult?.contents && searchResult.contents.length > 0) {
+          naverInventory = searchResult.contents[0].stockQuantity || 0;
+        }
+      } catch (error) {
+        logger.error(`Failed to search Naver inventory for ${sku}:`, error);
+      }
+      
+      const shopifyInventory = await this.shopifyInventoryService.getInventoryBySku(sku);
 
       const inventoryStatus: InventoryStatus = {
         sku,

@@ -139,15 +139,15 @@ export class CronManager {
    */
   private async syncInventory(): Promise<void> {
     try {
-      // InventorySyncJob 사용
-      const { InventorySyncJob } = await import('../jobs/InventorySyncJob.js');
-      const inventorySyncJob = new InventorySyncJob(this.services);
+      // EnhancedInventorySyncJob 사용
+      const { EnhancedInventorySyncJob } = await import('../jobs/EnhancedInventorySyncJob.js');
+      const inventorySyncJob = new EnhancedInventorySyncJob(this.services);
       
-      logger.info('🔄 Running inventory sync from cron...');
+      logger.info('🔄 Running enhanced inventory sync from cron...');
       const result = await inventorySyncJob.triggerManualSync();
-      logger.info('✅ Inventory sync completed from cron:', result);
+      logger.info('✅ Enhanced inventory sync completed from cron:', result);
     } catch (error) {
-      logger.error('Inventory sync cron failed:', error);
+      logger.error('Enhanced inventory sync cron failed:', error);
       throw error;
     }
   }

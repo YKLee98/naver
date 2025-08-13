@@ -1,57 +1,62 @@
 // packages/backend/src/app.ts
-import express, { Application, Request, Response, NextFunction } from 'express';
-import cors from 'cors';
+import express, { Express } from 'express';
 import helmet from 'helmet';
-import compression from 'compression';
+import cors from 'cors';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
+import compression from 'compression';
 import mongoSanitize from 'express-mongo-sanitize';
+import rateLimit from 'express-rate-limit';
 import hpp from 'hpp';
-import { createServer, Server as HttpServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
-import swaggerUi from 'swagger-ui-express';
 import { config } from './config/index.js';
-import { logger, stream } from './utils/logger.js';
+import { logger } from './utils/logger.js';
 import { ServiceContainer } from './services/ServiceContainer.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import { notFoundHandler } from './middlewares/notFoundHandler.js';
 import { requestLogger } from './middlewares/requestLogger.js';
-import { setupRoutes } from './routes/index.js';
-import { setupSocketHandlers } from './websocket/index.js';
+import { EnhancedInventorySyncJob } from './jobs/EnhancedInventorySyncJob.js';
+import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
+import type { Server } from 'http';
 
 export class App {
-  private app: Application;
-  private httpServer?: HttpServer;
-  private io?: SocketIOServer;
+  public app: Express;
   private services: ServiceContainer;
-  private isInitialized = false;
+  private isInitialized: boolean = false;
+  private io: any;
+  private inventorySyncJob: EnhancedInventorySyncJob | null = null;
 
   constructor(services: ServiceContainer) {
     this.app = express();
     this.services = services;
   }
 
+  get express(): Express {
+    return this.app;
+  }
+
   async initialize(): Promise<void> {
     if (this.isInitialized) {
-      logger.warn('App is already initialized');
+      logger.warn('App already initialized');
       return;
     }
 
     try {
-      // ServiceContainer를 전역 변수로 설정
-      (global as any).serviceContainer = this.services;
-      
-      // Setup middleware
+      logger.info('🔧 Initializing app middleware and routes...');
+
+      // Setup security middleware
       this.setupSecurityMiddleware();
+
+      // Setup common middleware
       this.setupCommonMiddleware();
-      this.setupLoggingMiddleware();
 
       // Setup routes
       await this.setupRoutes();
 
       // Setup WebSocket
       this.setupWebSocket();
+      
+      // Setup Enhanced Inventory Sync Job
+      await this.setupInventorySyncJob();
 
       // Setup error handling
       this.setupErrorHandling();
@@ -197,117 +202,136 @@ export class App {
       })
     );
 
-    // Request ID
-    this.app.use((req: Request, res: Response, next: NextFunction) => {
-      req.id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      res.setHeader('X-Request-Id', req.id);
-      next();
-    });
+    // Static files
+    this.app.use(express.static('public'));
 
-    // Trust proxy
+    // Request logging
     if (config.isProduction) {
-      this.app.set('trust proxy', 1);
+      this.app.use(
+        morgan('combined', {
+          stream: {
+            write: (message: string) => logger.http(message.trim()),
+          },
+          skip: (req) => req.url === '/health' || req.url === '/health/live',
+        })
+      );
+    } else {
+      this.app.use(
+        morgan('dev', {
+          skip: (req) => req.url === '/health' || req.url === '/health/live',
+        })
+      );
     }
-  }
-
-  private setupLoggingMiddleware(): void {
-    // Morgan HTTP logger
-    const morganFormat = config.isDevelopment
-      ? 'dev'
-      : ':remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" :response-time ms';
-
-    this.app.use(
-      morgan(morganFormat, {
-        stream,
-        skip: (req, res) => {
-          // Skip health check logs
-          return req.url === '/health' && res.statusCode === 200;
-        },
-      })
-    );
 
     // Custom request logger
     this.app.use(requestLogger);
+
+    // Trust proxy
+    this.app.set('trust proxy', 1);
+
+    // View engine
+    this.app.set('view engine', 'ejs');
   }
 
   private async setupRoutes(): Promise<void> {
-    // API documentation
-    this.app.use(
-      '/api-docs',
-      swaggerUi.serve,
-      swaggerUi.setup(swaggerSpec, {
-        customCss: '.swagger-ui .topbar { display: none }',
-        customSiteTitle: 'Hallyu Fomaholic API Documentation',
-      })
-    );
+    logger.info('📍 Setting up routes...');
 
-    // Health check
-    this.app.get('/health', async (_req, res) => {
-      try {
-        // Basic health check - can be enhanced with actual service checks
-        const health = {
-          status: 'healthy',
-          timestamp: new Date().toISOString(),
-          uptime: process.uptime(),
-          environment: config.env,
-        };
-        res.status(200).json(health);
-      } catch (error) {
-        res.status(503).json({
-          status: 'unhealthy',
-          error: (error as Error).message,
-        });
-      }
+    // API Documentation
+    this.app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+    // Health check - should be before auth
+    this.app.get('/health', (_req, res) => {
+      res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: config.nodeEnv,
+      });
     });
 
-    // Metrics endpoint
-    this.app.get('/metrics', async (_req, res) => {
-      try {
-        // Basic metrics - can be enhanced with actual metrics collection
-        const metrics = {
-          timestamp: new Date().toISOString(),
-          uptime: process.uptime(),
-          memory: process.memoryUsage(),
-          cpu: process.cpuUsage(),
-        };
-        res.json(metrics);
-      } catch (error) {
-        res.status(500).json({
-          error: 'Failed to get metrics',
-        });
-      }
+    // Main API routes
+    const { setupRoutes } = await import('./routes/index.js');
+    const router = await setupRoutes(this.services);
+    this.app.use('/api', router);
+
+    // Root route
+    this.app.get('/', (_req, res) => {
+      res.json({
+        message: 'Naver-Shopify Sync API',
+        version: '2.0.0',
+        environment: config.nodeEnv,
+        documentation: '/api-docs',
+        health: '/health',
+      });
     });
 
-    // API routes
-    const router = await setupRoutes();
-    this.app.use('/api/v1', router);
-
-    // Static files (if needed)
-    if (config.isDevelopment) {
-      this.app.use('/uploads', express.static('uploads'));
-    }
+    logger.info('✅ Routes configured');
   }
 
   private setupWebSocket(): void {
-    this.httpServer = createServer(this.app);
-
-    this.io = new SocketIOServer(this.httpServer, {
-      cors: {
-        origin: config.misc.corsOrigin,
-        credentials: true,
-      },
-      transports: ['websocket', 'polling'],
-      pingTimeout: 60000,
-      pingInterval: 25000,
-    });
-
-    // Setup WebSocket handlers
-    setupSocketHandlers(this.io, this.services);
-
-    // Attach WebSocket to services container
-    this.services.io = this.io;
-
-    logger.info('✅ WebSocket server initialized');
+    // WebSocket will be initialized in server.ts
+    logger.info('WebSocket setup delegated to server initialization');
+  }
+  
+  private async setupInventorySyncJob(): Promise<void> {
+    // Check if inventory sync is enabled
+    if (process.env.ENABLE_INVENTORY_SYNC === 'false') {
+      logger.info('Inventory sync job is disabled');
+      return;
+    }
+    
+    try {
+      logger.info('⏰ Setting up Enhanced Inventory Sync Job...');
+      
+      // Initialize the enhanced inventory sync job
+      this.inventorySyncJob = new EnhancedInventorySyncJob(this.services);
+      
+      // Start the cron job (runs every 5 minutes)
+      this.inventorySyncJob.start();
+      
+      // Add API endpoints for manual control
+      this.app.get('/api/inventory/sync/status', async (_req, res) => {
+        if (!this.inventorySyncJob) {
+          return res.status(503).json({ error: 'Inventory sync job not initialized' });
+        }
+        
+        const status = await this.inventorySyncJob.getStatus();
+        res.json(status);
+      });
+      
+      this.app.post('/api/inventory/sync/trigger', async (_req, res) => {
+        if (!this.inventorySyncJob) {
+          return res.status(503).json({ error: 'Inventory sync job not initialized' });
+        }
+        
+        const result = await this.inventorySyncJob.triggerManualSync();
+        res.json(result);
+      });
+      
+      this.app.post('/api/inventory/sync/sku/:sku', async (req, res) => {
+        if (!this.inventorySyncJob) {
+          return res.status(503).json({ error: 'Inventory sync job not initialized' });
+        }
+        
+        const { sku } = req.params;
+        const result = await this.inventorySyncJob.syncSpecificSku(sku);
+        res.json(result);
+      });
+      
+      this.app.get('/api/inventory/sync/discrepancies', async (_req, res) => {
+        if (!this.inventorySyncJob) {
+          return res.status(503).json({ error: 'Inventory sync job not initialized' });
+        }
+        
+        const report = await this.inventorySyncJob.getDiscrepancyReport();
+        res.json(report);
+      });
+      
+      logger.info('✅ Enhanced Inventory Sync Job initialized and started');
+    } catch (error) {
+      logger.error('Failed to setup inventory sync job:', error);
+      // Don't throw - allow server to continue without sync job
+    }
   }
 
   private setupErrorHandling(): void {
@@ -316,47 +340,36 @@ export class App {
 
     // Global error handler
     this.app.use(errorHandler);
+
+    // Unhandled rejection handler
+    process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+      // Application specific logging, throwing an error, or other logic here
+    });
+
+    // Uncaught exception handler
+    process.on('uncaughtException', (error: Error) => {
+      logger.error('Uncaught Exception:', error);
+      // Application specific logging, throwing an error, or other logic here
+      process.exit(1); // Exit the process to avoid undefined behavior
+    });
   }
 
-  getApp(): Application {
-    return this.app;
+  listen(port: number): Server {
+    return this.app.listen(port);
   }
-
-  getHttpServer(): HttpServer | undefined {
-    return this.httpServer;
-  }
-
-  getSocketServer(): SocketIOServer | undefined {
-    return this.io;
-  }
-
-  listen(port: number, callback?: () => void): HttpServer {
-    if (!this.httpServer) {
-      this.httpServer = createServer(this.app);
+  
+  async shutdown(): Promise<void> {
+    logger.info('Shutting down app...');
+    
+    // Stop inventory sync job if running
+    if (this.inventorySyncJob) {
+      this.inventorySyncJob.stop();
+      await this.inventorySyncJob.cleanup();
+      this.inventorySyncJob = null;
     }
-
-    return this.httpServer.listen(port, callback);
-  }
-
-  close(callback?: () => void): void {
-    if (this.httpServer) {
-      this.httpServer.close(callback);
-    }
-
-    if (this.io) {
-      this.io.close();
-    }
-  }
-}
-
-// Extend Express Request type
-declare global {
-  namespace Express {
-    interface Request {
-      id?: string;
-      rawBody?: string;
-      user?: any;
-      startTime?: number;
-    }
+    
+    // Close other resources...
+    logger.info('App shutdown complete');
   }
 }

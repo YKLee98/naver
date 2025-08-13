@@ -32,17 +32,39 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
     });
   });
 
-  // Default dashboard handlers
+  // Default dashboard handlers with real data
   const defaultDashboardHandlers = {
     statistics: async (req: any, res: any) => {
-      res.json({
-        success: true,
-        data: {
-          products: { total: 250, active: 230 },
-          activities: { total: 150 },
-          syncs: { total: 50 }
-        }
-      });
+      try {
+        const ProductMapping = (await import('../models/ProductMapping.js')).ProductMapping;
+        const Activity = (await import('../models/Activity.js')).Activity;
+        const SyncHistory = (await import('../models/SyncHistory.js')).SyncHistory;
+        
+        const [totalProducts, activeProducts, totalActivities, totalSyncs] = await Promise.all([
+          ProductMapping.countDocuments(),
+          ProductMapping.countDocuments({ isActive: true }),
+          Activity.countDocuments(),
+          SyncHistory.countDocuments()
+        ]);
+        
+        res.json({
+          success: true,
+          data: {
+            products: { total: totalProducts, active: activeProducts },
+            activities: { total: totalActivities },
+            syncs: { total: totalSyncs }
+          }
+        });
+      } catch (error) {
+        res.json({
+          success: true,
+          data: {
+            products: { total: 0, active: 0 },
+            activities: { total: 0 },
+            syncs: { total: 0 }
+          }
+        });
+      }
     },
     activities: async (req: any, res: any) => {
       res.json({

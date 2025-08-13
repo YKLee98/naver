@@ -104,29 +104,33 @@ export class PriceController {
       const { page = 1, limit = 20, search } = req.query;
       const skip = (Number(page) - 1) * Number(limit);
 
-      const query: any = { isActive: true };
+      const query: any = {};  // isActive 조건 제거 (필드가 없을 수 있음)
 
       if (search) {
         query.$or = [
           { sku: { $regex: search, $options: 'i' } },
-          { name: { $regex: search, $options: 'i' } },
+          { productName: { $regex: search, $options: 'i' } },  // name -> productName
         ];
       }
+
+      logger.info('Fetching product mappings for prices:', { query, skip, limit: Number(limit) });
 
       const [mappings, total] = await Promise.all([
         ProductMapping.find(query).skip(skip).limit(Number(limit)).lean(),
         ProductMapping.countDocuments(query),
       ]);
 
+      logger.info(`Found ${mappings.length} mappings, total: ${total}`);
+
       const priceData = mappings.map((mapping) => ({
         id: mapping._id,
         sku: mapping.sku,
-        productName: mapping.name || 'Unknown Product',
-        naverPrice: mapping.last_naver_price || 0,
-        shopifyPrice: mapping.last_shopify_price || 0,
-        margin: mapping.margin || 15,
-        lastUpdated: mapping.last_price_update || mapping.updatedAt,
-        status: this.getPriceStatus(mapping),
+        productName: mapping.productName || 'Unknown Product',
+        naverPrice: mapping.pricing?.naver?.regular || mapping.naverPrice || 0,
+        shopifyPrice: mapping.pricing?.shopify?.regular || mapping.shopifyPrice || 0,
+        margin: mapping.priceMargin || mapping.margin || 15,
+        lastUpdated: mapping.pricing?.naver?.lastUpdated || mapping.updatedAt,
+        status: mapping.status || 'active',
       }));
 
       res.json({

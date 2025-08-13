@@ -20,6 +20,7 @@
     "seed": "tsx src/scripts/seed.ts",
     "migrate": "tsx src/scripts/migrate.ts",
     "sync:check": "tsx src/scripts/sync-check.ts",
+    "test:inventory-sync": "tsx src/scripts/test-inventory-sync.ts",
     "docker:build": "docker build -t hallyu-backend .",
     "docker:run": "docker run -p 3000:3000 -p 3001:3001 --env-file .env hallyu-backend",
     "pm2:start": "pm2 start ecosystem.config.js",

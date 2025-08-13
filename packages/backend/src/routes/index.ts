@@ -2,8 +2,13 @@
 import { Router } from 'express';
 import authRoutes from './auth.routes.js';
 
-export async function setupRoutes(): Promise<Router> {
+export async function setupRoutes(serviceContainer?: any): Promise<Router> {
   const router = Router();
+  
+  // ServiceContainer를 전역 변수로 설정
+  if (serviceContainer) {
+    (global as any).serviceContainer = serviceContainer;
+  }
 
   // Health check routes (인증 불필요)
   try {
