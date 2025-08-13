@@ -65,14 +65,14 @@ class DashboardService {
   /**
    * Get dashboard statistics
    */
-  async getStatistics(): Promise<AxiosResponse<{ success: boolean; data: DashboardStats }>> {
-    return api.get('/dashboard/statistics');
+  async getStatistics(): Promise<DashboardStats> {
+    return api.get<DashboardStats>('/dashboard/statistics');
   }
 
   /**
    * Get statistics by type
    */
-  async getStatisticsByType(type: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
+  async getStatisticsByType(type: string): Promise<any> {
     return api.get(`/dashboard/statistics/${type}`);
   }
 
@@ -83,15 +83,15 @@ class DashboardService {
     limit?: number;
     offset?: number;
     type?: string;
-  }): Promise<AxiosResponse<{ success: boolean; data: { activities: Activity[]; pagination: any } }>> {
+  }): Promise<{ activities: Activity[]; pagination: any }> {
     return api.get('/dashboard/activities', { params });
   }
 
   /**
    * Get activity by ID
    */
-  async getActivityById(id: string): Promise<AxiosResponse<{ success: boolean; data: Activity }>> {
-    return api.get(`/dashboard/activities/${id}`);
+  async getActivityById(id: string): Promise<Activity> {
+    return api.get<Activity>(`/dashboard/activities/${id}`);
   }
 
   /**
@@ -100,8 +100,8 @@ class DashboardService {
   async getSalesChartData(params?: {
     period?: string;
     platform?: string;
-  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
-    return api.get('/dashboard/charts/sales', { params });
+  }): Promise<ChartData> {
+    return api.get<ChartData>('/dashboard/charts/sales', { params });
   }
 
   /**
@@ -110,8 +110,8 @@ class DashboardService {
   async getInventoryChartData(params?: {
     period?: string;
     sku?: string;
-  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
-    return api.get('/dashboard/charts/inventory', { params });
+  }): Promise<ChartData> {
+    return api.get<ChartData>('/dashboard/charts/inventory', { params });
   }
 
   /**
@@ -120,8 +120,8 @@ class DashboardService {
   async getPriceChartData(params?: {
     period?: string;
     sku?: string;
-  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
-    return api.get('/dashboard/charts/price', { params });
+  }): Promise<ChartData> {
+    return api.get<ChartData>('/dashboard/charts/price', { params });
   }
 
   /**
@@ -129,8 +129,8 @@ class DashboardService {
    */
   async getSyncChartData(params?: {
     period?: string;
-  }): Promise<AxiosResponse<{ success: boolean; data: ChartData }>> {
-    return api.get('/dashboard/charts/sync', { params });
+  }): Promise<ChartData> {
+    return api.get<ChartData>('/dashboard/charts/sync', { params });
   }
 
   /**

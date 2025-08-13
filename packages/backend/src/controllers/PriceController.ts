@@ -113,14 +113,19 @@ export class PriceController {
         ];
       }
 
-      logger.info('Fetching product mappings for prices:', { query, skip, limit: Number(limit) });
+      logger.info('Fetching product mappings for prices:', { 
+        query, 
+        skip, 
+        limit: Number(limit),
+        collectionName: ProductMapping.collection.name 
+      });
 
       const [mappings, total] = await Promise.all([
         ProductMapping.find(query).skip(skip).limit(Number(limit)).lean(),
         ProductMapping.countDocuments(query),
       ]);
 
-      logger.info(`Found ${mappings.length} mappings, total: ${total}`);
+      logger.info(`Found ${mappings.length} mappings, total: ${total} from collection: ${ProductMapping.collection.name}`);
 
       const priceData = mappings.map((mapping) => ({
         id: mapping._id,
@@ -439,6 +444,27 @@ export class PriceController {
       res.json({
         success: true,
         data: rules,
+      });
+    }
+  );
+
+  /**
+   * Get exchange rate
+   * GET /api/v1/prices/exchange-rate
+   */
+  getExchangeRate = asyncHandler(
+    async (req: Request, res: Response): Promise<void> => {
+      const rate = await this.getCurrentExchangeRate();
+      
+      res.json({
+        success: true,
+        rate: 1 / rate, // Convert to KRW per USD
+        krwPerUsd: 1 / rate,
+        usdPerKrw: rate,
+        source: 'cached',
+        change: 0,
+        changePercent: 0,
+        updatedAt: new Date(),
       });
     }
   );

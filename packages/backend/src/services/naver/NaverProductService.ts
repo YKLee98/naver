@@ -154,7 +154,8 @@ export class NaverProductService {
       // 결과가 없으면 빈 결과 반환
       return { contents: [], totalElements: 0 };
     } catch (error: any) {
-      logger.error('Error searching products:', error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error searching products: ${errorMessage}`);
 
       if (error.response?.status === 404) {
         logger.warn('Search endpoint not found, returning empty result');
@@ -197,7 +198,8 @@ export class NaverProductService {
         size: response.data.size || options.limit,
       };
     } catch (error: any) {
-      logger.error('Error listing products:', error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error listing products: ${errorMessage}`);
 
       if (error.response?.status === 404) {
         return { items: [], total: 0 };
@@ -218,7 +220,8 @@ export class NaverProductService {
       );
       return response.data;
     } catch (error: any) {
-      logger.error(`Error getting product ${productId}:`, error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error getting product ${productId}: ${errorMessage}`);
 
       if (error.response?.status === 404) {
         return null;
@@ -261,8 +264,9 @@ export class NaverProductService {
       );
 
       return response.status === 200;
-    } catch (error) {
-      logger.error(`Error updating product stock for ${productId}:`, error);
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error updating product stock for ${productId}: ${errorMessage}`);
       throw error;
     }
   }
@@ -282,7 +286,8 @@ export class NaverProductService {
 
       return response.status === 200;
     } catch (error) {
-      logger.error(`Error updating product price for ${productId}:`, error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error updating product price for ${productId}: ${errorMessage}`);
       throw error;
     }
   }
@@ -305,7 +310,8 @@ export class NaverProductService {
 
       return response.status === 200;
     } catch (error) {
-      logger.error(`Error updating product status for ${productId}:`, error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error updating product status for ${productId}: ${errorMessage}`);
       throw error;
     }
   }
@@ -333,7 +339,8 @@ export class NaverProductService {
 
       return response.data;
     } catch (error) {
-      logger.error('Error getting products:', error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error getting products: ${errorMessage}`);
       throw error;
     }
   }
@@ -359,7 +366,8 @@ export class NaverProductService {
 
       return response.data.contents || [];
     } catch (error) {
-      logger.error(`Error getting stock history for ${productId}:`, error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error getting stock history for ${productId}: ${errorMessage}`);
       throw error;
     }
   }
@@ -386,8 +394,9 @@ export class NaverProductService {
         failed,
         results,
       };
-    } catch (error) {
-      logger.error('Error in bulk stock update:', error);
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error in bulk stock update: ${errorMessage}`);
       throw error;
     }
   }
@@ -415,7 +424,8 @@ export class NaverProductService {
         results,
       };
     } catch (error) {
-      logger.error('Error in bulk price update:', error);
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error in bulk price update: ${errorMessage}`);
       throw error;
     }
   }
@@ -449,8 +459,9 @@ export class NaverProductService {
   async updateInventory(productId: string, quantity: number): Promise<boolean> {
     try {
       return await this.updateProductStock(productId, quantity);
-    } catch (error) {
-      logger.error(`Error updating inventory for ${productId}:`, error);
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error';
+      logger.error(`Error updating inventory for ${productId}: ${errorMessage}`);
       throw error;
     }
   }

@@ -105,4 +105,10 @@ export const priceApi = {
     const response = await apiClient.get('/prices/rules');
     return response.data;
   },
+
+  // 가격 동기화
+  syncPrices: async () => {
+    const response = await apiClient.post('/sync/prices');
+    return response.data;
+  },
 };

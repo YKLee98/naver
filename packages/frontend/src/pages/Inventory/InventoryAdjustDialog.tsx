@@ -20,6 +20,7 @@ import {
   Alert,
   Divider,
   InputAdornment,
+  Chip,
 } from '@mui/material';
 import { inventoryService } from '@/services/api/inventory.service';
 import { useNotification } from '@/hooks/useNotification';

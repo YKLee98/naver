@@ -135,7 +135,7 @@ class InventoryService {
    * 재고 조정
    */
   async adjustInventory(params: AdjustInventoryParams): Promise<AxiosResponse<{ success: boolean; data: InventoryStatus }>> {
-    return apiClient.post(`inventory/${params.sku}/adjust`, params);
+    return apiClient.post(`/inventory/${params.sku}/adjust`, params);
   }
 
   /**

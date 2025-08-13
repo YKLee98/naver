@@ -12,7 +12,7 @@ class ApiService {
 
   constructor() {
     // API 베이스 URL 설정
-    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
     
     console.log('[ApiService] Initializing with baseURL:', baseURL);
     
@@ -151,7 +151,12 @@ class ApiService {
   // HTTP 메서드들
   async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.instance.get<ApiResponse<T>>(url, config);
-    return response.data.data!;
+    // Check if response has the expected structure
+    if (response.data && 'data' in response.data) {
+      return response.data.data!;
+    }
+    // If not wrapped in standard structure, return as is
+    return response.data as T;
   }
 
   async post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {

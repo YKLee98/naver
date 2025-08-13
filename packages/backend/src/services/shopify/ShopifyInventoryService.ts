@@ -584,28 +584,46 @@ export class ShopifyInventoryService extends ShopifyService {
         return true;
       }
 
-      // Search for product variant with this SKU
-      const productsResponse = await this.client.get({
-        path: 'products',
-        query: { limit: '250' },
+      // Use GraphQL to find the inventory item ID for this SKU
+      const query = `
+        query getInventoryItemId($sku: String!) {
+          productVariants(first: 1, query: $sku) {
+            edges {
+              node {
+                id
+                sku
+                inventoryItem {
+                  id
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      // Use the REST client to perform GraphQL query
+      const graphQLResponse = await this.client.post({
+        path: 'graphql',
+        data: {
+          query,
+          variables: { sku: `sku:${sku}` }
+        }
       });
 
       let inventoryItemId: string | null = null;
       
-      if (productsResponse?.body?.products) {
-        for (const product of productsResponse.body.products) {
-          const variant = product.variants?.find((v: any) => v.sku === sku);
-          if (variant) {
-            inventoryItemId = variant.inventory_item_id;
-            break;
-          }
-        }
+      if (graphQLResponse?.body?.data?.productVariants?.edges?.length > 0) {
+        const variant = graphQLResponse.body.data.productVariants.edges[0].node;
+        inventoryItemId = variant.inventoryItem?.id;
       }
 
       if (!inventoryItemId) {
         logger.warn(`No inventory item found for SKU: ${sku}`);
         return false;
       }
+
+      // Extract numeric ID from GraphQL ID
+      const numericInventoryItemId = inventoryItemId.split('/').pop();
 
       // Get the primary location
       const locations = await this.getLocations();
@@ -615,9 +633,25 @@ export class ShopifyInventoryService extends ShopifyService {
         throw new Error('No active location found');
       }
 
-      // Update inventory level
-      await this.setInventoryLevel(inventoryItemId, primaryLocation.id, quantity);
-      return true;
+      // Update inventory level using the numeric ID
+      logger.info(`📦 Updating Shopify inventory for SKU ${sku}: inventoryItemId=${numericInventoryItemId}, locationId=${primaryLocation.id}, quantity=${quantity}`);
+      await this.setInventoryLevel(numericInventoryItemId!, primaryLocation.id, quantity);
+      
+      // Wait a bit for the update to propagate
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Verify the update by fetching the inventory again
+      const verifyQuantity = await this.getInventoryBySku(sku);
+      if (verifyQuantity === quantity) {
+        logger.info(`✅ Successfully updated and verified Shopify inventory for SKU ${sku} to ${quantity}`);
+        return true;
+      } else {
+        logger.warn(`⚠️ Shopify inventory update for SKU ${sku} may not have propagated. Expected: ${quantity}, Got: ${verifyQuantity}`);
+        // Try once more
+        await this.setInventoryLevel(numericInventoryItemId!, primaryLocation.id, quantity);
+        logger.info(`🔄 Retried Shopify inventory update for SKU ${sku} to ${quantity}`);
+        return true;
+      }
 
     } catch (error: any) {
       logger.error(`Failed to update inventory for SKU ${sku}:`, error);

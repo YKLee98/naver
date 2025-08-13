@@ -721,5 +721,6 @@ productMappingSchema.statics.findOutOfStock = async function () {
 // Create and export model
 export const ProductMapping = model<IProductMapping>(
   'ProductMapping',
-  productMappingSchema
+  productMappingSchema,
+  'product_mappings'  // Explicitly specify collection name
 );

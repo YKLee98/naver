@@ -111,12 +111,13 @@ const Dashboard: React.FC = () => {
         dashboardService.getSyncChartData({ period: '7d' })
       ]);
 
-      setStats(statsRes.data.data);
-      setActivities(activitiesRes.data.data.activities);
-      setSalesChartData(salesRes.data.data);
-      setInventoryChartData(inventoryRes.data.data);
-      setPriceChartData(priceRes.data.data);
-      setSyncChartData(syncRes.data.data);
+      // Direct data from service (already extracted from response)
+      setStats(statsRes);
+      setActivities(activitiesRes?.activities || []);
+      setSalesChartData(salesRes);
+      setInventoryChartData(inventoryRes);
+      setPriceChartData(priceRes);
+      setSyncChartData(syncRes);
 
       dispatch(addNotification({
         type: 'success',
@@ -222,6 +223,17 @@ const Dashboard: React.FC = () => {
           </Button>
         }>
           {error}
+        </Alert>
+      </Box>
+    );
+  }
+
+  // Check if stats is loaded
+  if (!stats) {
+    return (
+      <Box p={3}>
+        <Alert severity="warning">
+          대시보드 데이터를 불러오는 중입니다...
         </Alert>
       </Box>
     );

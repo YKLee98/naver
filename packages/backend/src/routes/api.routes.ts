@@ -47,21 +47,59 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
           SyncHistory.countDocuments()
         ]);
         
+        // Calculate inventory statistics
+        const mappings = await ProductMapping.find({}).lean();
+        let totalInventory = 0;
+        let lowStockCount = 0;
+        let outOfStockCount = 0;
+        
+        mappings.forEach(mapping => {
+          const naverStock = mapping.inventory?.naver?.available || 0;
+          const shopifyStock = mapping.inventory?.shopify?.available || 0;
+          totalInventory += naverStock + shopifyStock;
+          
+          if (naverStock === 0 || shopifyStock === 0) {
+            outOfStockCount++;
+          } else if (naverStock < 10 || shopifyStock < 10) {
+            lowStockCount++;
+          }
+        });
+        
         res.json({
           success: true,
           data: {
-            products: { total: totalProducts, active: activeProducts },
-            activities: { total: totalActivities },
-            syncs: { total: totalSyncs }
+            totalInventory,
+            todaySales: Math.floor(Math.random() * 50000) + 10000, // Mock data
+            syncStatus: totalSyncs > 0 ? 'normal' : 'warning',
+            alertCount: lowStockCount + outOfStockCount,
+            inventoryValue: totalInventory * 15000, // Mock calculation
+            lowStockCount,
+            outOfStockCount,
+            syncSuccessRate: 95, // Mock data
+            lastSyncTime: new Date().toISOString(),
+            activeProducts,
+            totalProducts,
+            priceDiscrepancies: 0,
+            pendingSyncs: 0
           }
         });
       } catch (error) {
         res.json({
           success: true,
           data: {
-            products: { total: 0, active: 0 },
-            activities: { total: 0 },
-            syncs: { total: 0 }
+            totalInventory: 0,
+            todaySales: 0,
+            syncStatus: 'error',
+            alertCount: 0,
+            inventoryValue: 0,
+            lowStockCount: 0,
+            outOfStockCount: 0,
+            syncSuccessRate: 0,
+            lastSyncTime: null,
+            activeProducts: 0,
+            totalProducts: 0,
+            priceDiscrepancies: 0,
+            pendingSyncs: 0
           }
         });
       }
@@ -238,6 +276,9 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
       const ctrl = serviceContainer.priceController;
 
       protectedRouter.get('/prices', ctrl.getPrices.bind(ctrl));
+      protectedRouter.get('/prices/exchange-rate', ctrl.getExchangeRate.bind(ctrl));
+      // Add exchange-rates/current route for frontend compatibility
+      protectedRouter.get('/exchange-rates/current', ctrl.getExchangeRate.bind(ctrl));
       protectedRouter.get('/prices/:sku', ctrl.getPriceBySku.bind(ctrl));
       protectedRouter.put('/prices/:sku', ctrl.updatePrice.bind(ctrl));
       protectedRouter.post('/prices/bulk-update', ctrl.bulkUpdatePrices.bind(ctrl));
@@ -479,18 +520,22 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
       }
     });
   }
-  protectedRouter.get('/inventory/:sku', defaultHandlers.getProductById);
-  protectedRouter.put('/inventory/:sku', defaultHandlers.success);
-  protectedRouter.post('/inventory/:sku/adjust', defaultHandlers.success);
-  protectedRouter.get('/inventory/:sku/status', defaultHandlers.getProductById);
-  protectedRouter.get('/inventory/:sku/history', defaultHandlers.emptyList);
-  protectedRouter.post('/inventory/bulk-update', defaultHandlers.success);
-  protectedRouter.post('/inventory/sync/:sku', defaultHandlers.success);
-  protectedRouter.post('/inventory/sync', defaultHandlers.success);
-  protectedRouter.post('/inventory/discrepancy-check', defaultHandlers.success);
-  protectedRouter.get('/inventory/discrepancies/list', defaultHandlers.emptyList);
-  protectedRouter.post('/inventory/discrepancies/resolve', defaultHandlers.success);
-  protectedRouter.post('/inventory/discrepancies/:sku/resolve', defaultHandlers.success);
+  
+  // Add default inventory routes only if controller is not registered
+  if (!serviceContainer?.inventoryController) {
+    protectedRouter.get('/inventory/:sku', defaultHandlers.getProductById);
+    protectedRouter.put('/inventory/:sku', defaultHandlers.success);
+    protectedRouter.post('/inventory/:sku/adjust', defaultHandlers.success);
+    protectedRouter.get('/inventory/:sku/status', defaultHandlers.getProductById);
+    protectedRouter.get('/inventory/:sku/history', defaultHandlers.emptyList);
+    protectedRouter.post('/inventory/bulk-update', defaultHandlers.success);
+    protectedRouter.post('/inventory/sync/:sku', defaultHandlers.success);
+    protectedRouter.post('/inventory/sync', defaultHandlers.success);
+    protectedRouter.post('/inventory/discrepancy-check', defaultHandlers.success);
+    protectedRouter.get('/inventory/discrepancies/list', defaultHandlers.emptyList);
+    protectedRouter.post('/inventory/discrepancies/resolve', defaultHandlers.success);
+    protectedRouter.post('/inventory/discrepancies/:sku/resolve', defaultHandlers.success);
+  }
   
   // Add ALL mapping routes - 순서 중요! 구체적인 경로를 먼저
   // MappingController가 있으면 실제 구현 사용, 없으면 더미 데이터
@@ -579,16 +624,42 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
   protectedRouter.post('/sync/jobs/:id/cancel', defaultHandlers.success);
   protectedRouter.post('/sync/jobs/:id/retry', defaultHandlers.success);
   
-  // Add ALL price routes
-  protectedRouter.get('/prices', defaultHandlers.getPrices);
-  protectedRouter.get('/prices/:sku', defaultHandlers.getProductById);
-  protectedRouter.put('/prices/:sku', defaultHandlers.success);
-  protectedRouter.post('/prices/bulk-update', defaultHandlers.success);
-  protectedRouter.get('/prices/discrepancies', defaultHandlers.emptyList);
-  protectedRouter.get('/prices/history/:sku', defaultHandlers.emptyList);
-  protectedRouter.post('/prices/calculate', defaultHandlers.success);
-  protectedRouter.get('/prices/margins', defaultHandlers.emptyList);
-  protectedRouter.post('/prices/sync/:sku', defaultHandlers.success);
+  // Add ALL price routes - Skip if PriceController is registered
+  if (!serviceContainer?.priceController) {
+    protectedRouter.get('/prices', defaultHandlers.getPrices);
+    protectedRouter.get('/prices/exchange-rate', async (req: any, res: any) => {
+      res.json({
+        success: true,
+        rate: 1330,
+        krwPerUsd: 1330,
+        usdPerKrw: 0.00075,
+        source: 'default',
+        change: 0,
+        changePercent: 0,
+        updatedAt: new Date(),
+      });
+    });
+    protectedRouter.get('/exchange-rates/current', async (req: any, res: any) => {
+      res.json({
+        success: true,
+        rate: 1330,
+        krwPerUsd: 1330,
+        usdPerKrw: 0.00075,
+        source: 'default',
+        change: 0,
+        changePercent: 0,
+        updatedAt: new Date(),
+      });
+    });
+    protectedRouter.get('/prices/:sku', defaultHandlers.getProductById);
+    protectedRouter.put('/prices/:sku', defaultHandlers.success);
+    protectedRouter.post('/prices/bulk-update', defaultHandlers.success);
+    protectedRouter.get('/prices/discrepancies', defaultHandlers.emptyList);
+    protectedRouter.get('/prices/history/:sku', defaultHandlers.emptyList);
+    protectedRouter.post('/prices/calculate', defaultHandlers.success);
+    protectedRouter.get('/prices/margins', defaultHandlers.emptyList);
+    protectedRouter.post('/prices/sync/:sku', defaultHandlers.success);
+  }
   
   // Add ALL analytics routes
   protectedRouter.get('/analytics/overview', defaultHandlers.getAnalytics);

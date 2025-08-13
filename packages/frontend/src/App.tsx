@@ -1,6 +1,6 @@
 // packages/frontend/src/App.tsx
 import React, { useEffect, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -58,7 +58,6 @@ const theme = createTheme({
 
 function App() {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
   const { isAuthenticated } = useAppSelector((state) => state.auth);
 
   useEffect(() => {
@@ -82,7 +81,7 @@ function App() {
 
   useEffect(() => {
     // 개발 모드에서 자동 로그인
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       const token = localStorage.getItem('authToken') || localStorage.getItem('token');
       if (!token) {
         // 개발 모드에서 토큰이 없으면 자동으로 테스트 토큰 설정
@@ -105,14 +104,15 @@ function App() {
         .unwrap()
         .catch(() => {
           // 토큰이 유효하지 않으면 로그인 페이지로
-          if (process.env.NODE_ENV !== 'development') {
+          if (!import.meta.env.DEV) {
             localStorage.removeItem('authToken');
             localStorage.removeItem('token');
-            navigate('/login');
+            // navigate를 사용하지 않고 window.location으로 리디렉션
+            window.location.href = '/login';
           }
         });
     }
-  }, [dispatch, navigate]);
+  }, [dispatch]);
 
   return (
     <ErrorBoundary>

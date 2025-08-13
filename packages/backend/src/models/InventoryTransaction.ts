@@ -90,10 +90,13 @@ InventoryTransactionSchema.index({ sku: 1, createdAt: -1 });
 InventoryTransactionSchema.index({ platform: 1, syncStatus: 1 });
 InventoryTransactionSchema.index({ orderId: 1, platform: 1 });
 
-// 멱등성을 위한 유니크 인덱스
+// 멱등성을 위한 유니크 인덱스 - orderId가 있는 경우에만 적용
 InventoryTransactionSchema.index(
   { orderId: 1, orderLineItemId: 1, transactionType: 1 },
-  { unique: true, sparse: true }
+  { 
+    unique: true,
+    partialFilterExpression: { orderId: { $exists: true } }
+  }
 );
 
 export const InventoryTransaction = model<InventoryTransaction>(

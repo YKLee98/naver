@@ -143,9 +143,8 @@ export class InventoryController {
                   naverStock = mapping.inventory?.naver?.available || 0;
                 }
               } catch (error: any) {
-                logger.error(`❌ Failed to search Naver inventory for ${mapping.sku}:`, {
-                  error: error.message
-                });
+                const errorMessage = error?.message || 'Unknown error';
+                logger.error(`❌ Failed to search Naver inventory for ${mapping.sku}: ${errorMessage}`);
                 // API 실패 시 기본값 사용
                 naverStock = mapping.inventory?.naver?.available || 0;
               }
@@ -161,10 +160,8 @@ export class InventoryController {
                 shopifyStock = await this.shopifyInventoryService.getInventoryBySku(mapping.sku);
                 logger.info(`✅ Shopify inventory for ${mapping.sku}: ${shopifyStock}`);
               } catch (error: any) {
-                logger.error(`❌ Failed to get Shopify inventory for ${mapping.sku}:`, {
-                  error: error.message,
-                  response: error.response?.data
-                });
+                const errorMessage = error?.message || 'Unknown error';
+                logger.error(`❌ Failed to get Shopify inventory for ${mapping.sku}: ${errorMessage}`);
                 // API 실패 시 기본값 사용
                 shopifyStock = mapping.inventory?.shopify?.available || 95;
               }
@@ -421,7 +418,7 @@ export class InventoryController {
             newQuantity: quantity,
             reason,
             source,
-            userId: (req as any).user?.id,
+            performedBy: 'system',
           });
 
           results.push({
@@ -807,11 +804,10 @@ export class InventoryController {
   ): Promise<void> => {
     try {
       const { sku } = req.params;
-      const { adjustment, reason, notes } = req.body;
-
-      if (!adjustment || adjustment === 0) {
-        throw new AppError('Valid adjustment value is required', 400);
-      }
+      const { adjustment, adjustType = 'relative', platform = 'both', quantity, shopifyQuantity, naverQuantity, reason, notes } = req.body;
+      
+      // Handle different quantity parameter names from frontend
+      const targetQuantity = quantity || shopifyQuantity || naverQuantity || 0;
 
       const mapping = await ProductMapping.findOne({ sku });
 
@@ -819,41 +815,152 @@ export class InventoryController {
         throw new AppError('Product mapping not found', 404);
       }
 
-      if (!this.shopifyInventoryService) {
-        throw new AppError('Inventory service not available', 503);
+      if (!this.shopifyInventoryService || !this.naverProductService) {
+        throw new AppError('Inventory services not available', 503);
       }
 
       // 현재 재고 조회
-      const currentInventory = await this.shopifyInventoryService.getInventoryBySku(sku);
-      const newQuantity = currentInventory + adjustment;
+      let currentNaverStock = 0;
+      let currentShopifyStock = 0;
+      
+      try {
+        const searchResult = await this.naverProductService.searchProducts({
+          searchKeyword: sku,
+          searchType: 'SELLER_MANAGEMENT_CODE',
+          page: 1,
+          size: 10
+        });
+        if (searchResult?.contents && searchResult.contents.length > 0) {
+          currentNaverStock = searchResult.contents[0].stockQuantity || 0;
+        }
+      } catch (error: any) {
+        const errorMessage = error?.message || 'Unknown error';
+        logger.error(`Failed to get Naver inventory for adjustment: ${errorMessage}`);
+      }
+      
+      currentShopifyStock = await this.shopifyInventoryService.getInventoryBySku(sku);
 
-      if (newQuantity < 0) {
+      // 새 재고 계산
+      let newNaverStock = currentNaverStock;
+      let newShopifyStock = currentShopifyStock;
+
+      if (adjustType === 'set') {
+        // 절대값으로 설정
+        if (platform === 'naver' || platform === 'both') {
+          newNaverStock = targetQuantity;
+        }
+        if (platform === 'shopify' || platform === 'both') {
+          newShopifyStock = targetQuantity;
+        }
+      } else if (adjustType === 'relative') {
+        // 상대적 조정
+        const adjustmentValue = adjustment || 0;
+        if (platform === 'naver' || platform === 'both') {
+          newNaverStock = currentNaverStock + adjustmentValue;
+        }
+        if (platform === 'shopify' || platform === 'both') {
+          newShopifyStock = currentShopifyStock + adjustmentValue;
+        }
+      } else if (adjustType === 'sync') {
+        // 동기화 - 더 낮은 재고로 맞춤
+        const minStock = Math.min(currentNaverStock, currentShopifyStock);
+        newNaverStock = minStock;
+        newShopifyStock = minStock;
+      }
+
+      // 음수 체크
+      if (newNaverStock < 0 || newShopifyStock < 0) {
         throw new AppError('Adjustment would result in negative inventory', 400);
       }
 
       // 재고 업데이트
-      await this.shopifyInventoryService.updateInventoryBySku(sku, newQuantity);
+      const updateResults = {
+        naver: { success: false, error: null as any },
+        shopify: { success: false, error: null as any }
+      };
+      
+      if ((platform === 'naver' || platform === 'both') && mapping.naverProductId && mapping.naverProductId !== 'PENDING') {
+        try {
+          await this.naverProductService.updateInventory(mapping.naverProductId, newNaverStock);
+          updateResults.naver.success = true;
+          logger.info(`✅ Successfully updated Naver inventory for ${sku} to ${newNaverStock}`);
+        } catch (err: any) {
+          updateResults.naver.error = err?.message || 'Unknown error';
+          logger.error(`Failed to update Naver inventory for ${sku}: ${updateResults.naver.error}`);
+        }
+      }
+      
+      if (platform === 'shopify' || platform === 'both') {
+        try {
+          const success = await this.shopifyInventoryService.updateInventoryBySku(sku, newShopifyStock);
+          updateResults.shopify.success = success;
+          if (success) {
+            logger.info(`✅ Successfully updated Shopify inventory for ${sku} to ${newShopifyStock}`);
+          } else {
+            logger.error(`Failed to update Shopify inventory for ${sku} - update returned false`);
+          }
+        } catch (err: any) {
+          updateResults.shopify.error = err?.message || 'Unknown error';
+          logger.error(`Failed to update Shopify inventory for ${sku}: ${updateResults.shopify.error}`);
+        }
+      }
 
       // 트랜잭션 기록
+      const transactionQuantity = adjustType === 'set' 
+        ? (quantity || 0) 
+        : (adjustment || 0);
+      
       await InventoryTransaction.create({
         sku,
         type: 'adjustment',
-        quantity: adjustment,
-        previousQuantity: currentInventory,
-        newQuantity,
+        transactionType: 'adjustment',
+        platform: platform as any,
+        quantity: transactionQuantity,
+        previousQuantity: platform === 'naver' ? currentNaverStock : currentShopifyStock,
+        newQuantity: platform === 'naver' ? newNaverStock : newShopifyStock,
         reason,
         notes,
-        userId: (req as any).user?.id,
+        performedBy: 'system',
+        metadata: {
+          adjustmentType: adjustType,
+          platform,
+          naverStock: { previous: currentNaverStock, new: newNaverStock },
+          shopifyStock: { previous: currentShopifyStock, new: newShopifyStock },
+          notes
+        }
       });
+
+      // MongoDB 업데이트
+      await ProductMapping.updateOne(
+        { _id: mapping._id },
+        {
+          $set: {
+            'inventory.naver.available': newNaverStock,
+            'inventory.shopify.available': newShopifyStock,
+            'inventory.lastSync': new Date(),
+            'inventory.discrepancy': Math.abs(newNaverStock - newShopifyStock),
+            'inventory.syncStatus': newNaverStock === newShopifyStock ? 'synced' : 'out_of_sync',
+          },
+        }
+      );
 
       res.json({
         success: true,
         data: {
           sku,
-          previousQuantity: currentInventory,
-          adjustment,
-          newQuantity,
+          adjustType,
+          platform,
+          previous: {
+            naver: currentNaverStock,
+            shopify: currentShopifyStock
+          },
+          current: {
+            naver: newNaverStock,
+            shopify: newShopifyStock
+          },
+          adjustment: adjustType === 'set' ? quantity : adjustment,
           reason,
+          updateResults
         },
       });
     } catch (error) {

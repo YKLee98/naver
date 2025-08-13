@@ -102,9 +102,17 @@ const Pricing: React.FC = () => {
   const loadPriceData = async () => {
     setLoading(true);
     try {
-      const response = await priceApi.getPriceHistory();
-      if (response?.data) {
-        setPriceHistory(response.data);
+      // 현재 가격 목록을 가져옴 (매핑 목록)  
+      const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const response = await fetch(`${baseURL}/prices`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        }
+      });
+      const data = await response.json();
+      
+      if (data?.success && data?.data) {
+        setPriceHistory(data.data);
       }
     } catch (error) {
       console.error('Failed to load price data:', error);
@@ -117,10 +125,18 @@ const Pricing: React.FC = () => {
   const loadExchangeRate = async () => {
     try {
       const response = await priceApi.getCurrentExchangeRate();
-      if (response?.data?.USD) {
-        const rate = response.data.USD.KRW || response.data.USD.rate || 1305.50;
+      console.log('Exchange rate response:', response);
+      
+      // API 응답 형식에 맞게 처리
+      if (response) {
+        const rate = response.krwPerUsd || response.rate || 1305.50;
         setExchangeRate(rate);
-        setExchangeRateData(response.data.USD);
+        setExchangeRateData({
+          rate: rate,
+          changePercent: response.changePercent || 0,
+          change: response.change || 0,
+          source: response.source || 'api'
+        });
       }
     } catch (error) {
       console.error('Failed to load exchange rate:', error);
