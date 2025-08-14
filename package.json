@@ -2,6 +2,7 @@
   "name": "hallyu-fomaholic-sync",
   "version": "1.0.0",
   "description": "Shopify-Naver Smart Store Real-time Sync System",
+  "type": "module",
   "author": "YUKYUNG <math.makes.you.free@gmail.com>",
   "private": true,
   "workspaces": [
@@ -9,6 +10,7 @@
   ],
   "scripts": {
     "dev": "pnpm run --parallel -r dev",
+    "dev:ngrok": "node start-dev.js",
     "dev:frontend": "pnpm --filter @hallyu/frontend dev",
     "dev:backend": "pnpm --filter @hallyu/backend dev",
     "build": "pnpm run -r build",
@@ -94,6 +96,7 @@
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "string-similarity": "^4.0.4",
+    "vite": "^5.4.19",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
     "zod": "^4.0.5"
