@@ -275,7 +275,12 @@ export const config: Config = {
   misc: {
     corsOrigin: process.env['CORS_ORIGIN']
       ? process.env['CORS_ORIGIN'].split(',').map((origin) => origin.trim())
-      : ['http://localhost:5173'],
+      : [
+          'http://localhost:5173',
+          'http://localhost:3000',
+          /https:\/\/[a-z0-9]+\.ngrok-free\.app$/,  // ngrok 도메인 허용
+          /https:\/\/[a-z0-9]+\.ngrok\.io$/,  // 구버전 ngrok
+        ],
     logLevel: getEnv('LOG_LEVEL', 'debug'),
     logDir: getEnv('LOG_DIR', './logs'),
   },

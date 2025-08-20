@@ -626,7 +626,47 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
   
   // Add ALL price routes - Skip if PriceController is registered
   if (!serviceContainer?.priceController) {
-    protectedRouter.get('/prices', defaultHandlers.getPrices);
+    protectedRouter.get('/prices', async (req: any, res: any) => {
+      try {
+        // MongoDB에서 실제 매핑 데이터 가져오기
+        const ProductMapping = (await import('../models/ProductMapping.js')).default || (await import('../models/ProductMapping.js')).ProductMapping;
+        
+        if (!ProductMapping) {
+          throw new Error('ProductMapping model not found');
+        }
+        
+        // 매핑된 모든 상품 가져오기
+        const mappings = await ProductMapping.find({}).limit(100).lean();
+        
+        // 매핑 데이터에서 가격 정보 구성
+        const priceData = mappings.map((mapping: any) => ({
+          _id: mapping._id?.toString() || mapping.sku,
+          id: mapping._id?.toString() || mapping.sku,
+          sku: mapping.sku,
+          productName: mapping.productName || mapping.productNameKo || mapping.productNameEn || `Product ${mapping.sku}`,
+          naverPrice: mapping.pricing?.naver?.regular || mapping.pricing?.naver?.sale || 0,
+          shopifyPrice: mapping.pricing?.shopify?.regular || mapping.pricing?.shopify?.sale || 0,
+          margin: mapping.pricing?.rules?.marginPercent || mapping.pricing?.naver?.margin || mapping.pricing?.shopify?.margin || 10,
+          lastSyncAt: mapping.syncStatus?.lastSyncAt || mapping.updatedAt || new Date(),
+          updatedAt: mapping.updatedAt || new Date(),
+        }));
+        
+        console.log(`Fetched ${priceData.length} price records from database`);
+        
+        res.json({
+          success: true,
+          data: priceData,
+        });
+      } catch (error) {
+        console.error('Error fetching prices:', error);
+        // 에러 발생시에도 빈 배열 반환
+        res.json({ 
+          success: true, 
+          data: [],
+          message: 'No price data available'
+        });
+      }
+    });
     protectedRouter.get('/prices/exchange-rate', async (req: any, res: any) => {
       res.json({
         success: true,

@@ -104,8 +104,42 @@ class InventoryService {
   /**
    * 재고 목록 조회
    */
-  async getInventoryList(params?: InventoryListParams): Promise<AxiosResponse<InventoryListResponse>> {
-    return apiClient.get('/inventory', { params });
+  async getInventoryList(params?: InventoryListParams): Promise<any> {
+    try {
+      const response = await apiClient.get('/inventory', { params });
+      console.log('Inventory service response:', response);
+      
+      // 응답 데이터 정규화
+      // 백엔드가 {success: true, data: [...], pagination: {...}} 형태로 반환
+      if (response.data?.success && response.data?.data) {
+        return response.data;
+      }
+      
+      // 직접 데이터 반환 (폴백)
+      return {
+        success: true,
+        data: response.data || [],
+        pagination: {
+          page: params?.page || 1,
+          limit: params?.limit || 20,
+          total: Array.isArray(response.data) ? response.data.length : 0,
+          pages: 1
+        }
+      };
+    } catch (error) {
+      console.error('Error in getInventoryList:', error);
+      // 에러 발생시 빈 데이터 반환
+      return {
+        success: true,
+        data: [],
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          pages: 1
+        }
+      };
+    }
   }
 
   /**

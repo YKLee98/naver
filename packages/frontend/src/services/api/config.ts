@@ -2,7 +2,37 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { toast } from 'react-toastify';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+// ngrok이나 다른 도메인에서 접속할 때도 API 호출이 가능하도록 처리
+const API_BASE_URL = (() => {
+  // 환경변수가 설정되어 있으면 우선 사용
+  if (import.meta.env.VITE_API_URL) {
+    console.log('Using VITE_API_URL:', import.meta.env.VITE_API_URL);
+    return import.meta.env.VITE_API_URL;
+  }
+  
+  // ngrok 도메인에서 접속한 경우 처리
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    
+    // ngrok으로 접속한 경우, 프록시 사용 (CORS 문제 방지)
+    if (hostname.includes('ngrok-free.app') || 
+        hostname.includes('ngrok.io') || 
+        hostname.includes('ngrok.app')) {
+      console.log('Detected ngrok access, using proxy');
+      // ngrok에서도 프록시 사용 (Vite 개발 서버가 처리)
+      return '/api/v1';
+    }
+    
+    // localhost에서 개발 중일 때는 프록시 사용
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      console.log('Using proxy for localhost development');
+      return '/api/v1';
+    }
+  }
+  
+  // 기본값: 프록시 사용
+  return '/api/v1';
+})();
 
 // Axios 인스턴스 생성
 export const apiClient: AxiosInstance = axios.create({

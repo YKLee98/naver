@@ -233,7 +233,7 @@ export class NaverAuthService extends BaseService {
 
     try {
       if (secretType === 'bcrypt') {
-        // Use bcrypt salt method
+        // Use bcrypt salt method - 네이버 커머스 API는 bcrypt salt를 사용
         const hashed = bcrypt.hashSync(password, this.authConfig.clientSecret);
         const signature = Buffer.from(hashed).toString('base64');
 
@@ -245,9 +245,9 @@ export class NaverAuthService extends BaseService {
         return signature;
       } else {
         // Use HMAC SHA256 method as fallback
-        const hmac = createHash('sha256');
+        const crypto = await import('crypto');
+        const hmac = crypto.createHmac('sha256', this.authConfig.clientSecret);
         hmac.update(password);
-        hmac.update(this.authConfig.clientSecret);
         const signature = hmac.digest('base64');
 
         logger.debug('Generated HMAC signature', {

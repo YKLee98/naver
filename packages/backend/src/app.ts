@@ -85,6 +85,17 @@ export class App {
           // Allow requests with no origin (mobile apps, Postman, etc)
           if (!origin) return callback(null, true);
 
+          // ngrok 도메인 자동 허용
+          if (origin.match(/https:\/\/[a-z0-9]+\.ngrok-free\.app$/) || 
+              origin.match(/https:\/\/[a-z0-9]+\.ngrok\.io$/)) {
+            return callback(null, true);
+          }
+
+          // 개발 환경에서 localhost 허용
+          if (config.isDevelopment && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+            return callback(null, true);
+          }
+
           const allowedOrigins = Array.isArray(config.misc.corsOrigin)
             ? config.misc.corsOrigin
             : [config.misc.corsOrigin];
@@ -97,7 +108,7 @@ export class App {
         },
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'ngrok-skip-browser-warning', 'X-Forwarded-Host'],
         exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page'],
       })
     );
@@ -252,6 +263,8 @@ export class App {
     // Main API routes
     const { setupRoutes } = await import('./routes/index.js');
     const router = await setupRoutes(this.services);
+    this.app.use('/api/v1', router);
+    // 백업 경로 (둘 다 지원)
     this.app.use('/api', router);
 
     // Root route

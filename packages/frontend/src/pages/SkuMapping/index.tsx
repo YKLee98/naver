@@ -129,15 +129,51 @@ const SkuMapping: React.FC = () => {
       console.log('Loading mappings with params:', params);
 
       const response = await mappingService.getMappings(params);
-      const data = response.data.data;
+      console.log('Loaded mappings response:', response);
       
-      console.log('Loaded mappings response:', data);
+      // API 응답 구조에 따라 처리
+      let mappingsData = [];
+      let paginationData = { total: 0 };
+      let statsData = null;
+      
+      if (response?.data?.success) {
+        // 표준 응답 형식
+        const data = response.data.data;
+        mappingsData = data.mappings || [];
+        paginationData = data.pagination || { total: 0 };
+        statsData = data.stats;
+      } else if (response?.data?.data) {
+        // 직접 data 접근
+        const data = response.data.data;
+        if (Array.isArray(data)) {
+          mappingsData = data;
+          paginationData = { total: data.length };
+        } else {
+          mappingsData = data.mappings || [];
+          paginationData = data.pagination || { total: 0 };
+          statsData = data.stats;
+        }
+      } else if (response?.data && Array.isArray(response.data)) {
+        // 배열로 직접 반환되는 경우
+        mappingsData = response.data;
+        paginationData = { total: response.data.length };
+      }
 
-      setMappings(data.mappings || []);
-      setTotalCount(data.pagination?.total || 0);
+      setMappings(mappingsData);
+      setTotalCount(paginationData.total || mappingsData.length);
       
-      if (data.stats) {
-        setStats(data.stats);
+      if (statsData) {
+        setStats(statsData);
+      } else {
+        // 통계 수동 계산
+        setStats({
+          total: mappingsData.length,
+          active: mappingsData.filter(m => m.isActive).length,
+          inactive: mappingsData.filter(m => !m.isActive).length,
+          error: mappingsData.filter(m => m.status === 'error').length,
+          pending: mappingsData.filter(m => m.status === 'pending').length,
+          syncNeeded: mappingsData.filter(m => m.syncStatus === 'needed').length,
+        });
       }
     } catch (error) {
       console.error('Failed to load mappings:', error);

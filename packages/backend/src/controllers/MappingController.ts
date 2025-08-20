@@ -801,7 +801,7 @@ export class MappingController {
     next: NextFunction
   ): Promise<void> {
     try {
-      const sku = req.params.sku || req.query.sku;
+      const sku = req.query.sku || req.params.sku;
 
       if (!sku || (typeof sku === 'string' && sku.length < 2)) {
         throw new AppError('SKU must be at least 2 characters', 400);
@@ -857,31 +857,42 @@ export class MappingController {
                   });
 
                 if (skuSearchResult && skuSearchResult.contents) {
-                  const flatProducts = [];
-                  for (const item of skuSearchResult.contents) {
-                    if (
-                      item.channelProducts &&
-                      Array.isArray(item.channelProducts)
-                    ) {
-                      for (const channelProduct of item.channelProducts) {
-                        flatProducts.push({
-                          ...channelProduct,
-                          originProductNo: item.originProductNo,
-                        });
+                  // SKU 검색 결과 처리 - 정확한 매칭 우선, 없으면 부분 매칭도 포함
+                  const exactMatches = skuSearchResult.contents.filter((item: any) => 
+                    item.sellerManagementCode && item.sellerManagementCode.toUpperCase() === skuUpper
+                  );
+                  
+                  // 사용할 결과 선택 (정확한 매칭이 있으면 사용, 없으면 전체 결과 사용)
+                  const itemsToProcess = exactMatches.length > 0 ? exactMatches : skuSearchResult.contents;
+                  
+                  if (itemsToProcess.length > 0) {
+                    // 결과 처리
+                    const flatProducts = [];
+                    for (const item of itemsToProcess) {
+                      if (
+                        item.channelProducts &&
+                        Array.isArray(item.channelProducts)
+                      ) {
+                        for (const channelProduct of item.channelProducts) {
+                          flatProducts.push({
+                            ...channelProduct,
+                            originProductNo: item.originProductNo,
+                            sellerManagementCode: item.sellerManagementCode
+                          });
+                        }
+                      } else {
+                        flatProducts.push(item);
                       }
-                    } else {
-                      flatProducts.push(item);
                     }
-                  }
 
-                  if (flatProducts.length > 0) {
                     naverProducts = flatProducts.map((product) => ({
                       id:
                         product.channelProductNo ||
                         product.productNo ||
-                        product.id,
+                        product.id ||
+                        product.originProductNo,
                       name: product.name || product.productName || '',
-                      sku: product.sellerManagementCode || skuUpper,
+                      sku: product.sellerManagementCode || '',  // 실제 SKU만 사용
                       price: product.salePrice || 0,
                       imageUrl:
                         product.representativeImage?.url ||
@@ -890,8 +901,12 @@ export class MappingController {
                       stockQuantity: product.stockQuantity || 0,
                       status:
                         product.statusType || product.saleStatus || 'UNKNOWN',
-                      similarity: 100,
+                      similarity: product.sellerManagementCode && product.sellerManagementCode.toUpperCase() === skuUpper ? 100 : 80,
                     }));
+                    
+                    if (exactMatches.length === 0) {
+                      logger.info(`No exact match for SKU ${skuUpper}, showing ${itemsToProcess.length} partial matches`);
+                    }
                   }
                 }
               } catch (skuError: any) {
@@ -902,30 +917,41 @@ export class MappingController {
               }
 
               if (naverProducts.length === 0) {
+                logger.info(`No SKU match, trying keyword search for: ${skuUpper}`);
                 const keywordResult = await naverProductService.searchProducts({
                   searchKeyword: skuUpper,
                   searchType: 'PRODUCT_NAME',
                   page: 1,
-                  size: 5,
+                  size: 10,
                 });
 
                 if (keywordResult && keywordResult.contents) {
-                  naverProducts = keywordResult.contents.map(
-                    (product: any) => ({
-                      id: product.productNo || product.id,
-                      name: product.name || '',
-                      sku: product.sellerManagementCode || '',
-                      price: product.salePrice || 0,
-                      imageUrl: product.representativeImage?.url || '',
-                      stockQuantity: product.stockQuantity || 0,
-                      status: product.statusType || 'UNKNOWN',
-                      similarity: product.sellerManagementCode?.includes(
-                        skuUpper
-                      )
-                        ? 80
-                        : 50,
-                    })
-                  );
+                  // 키워드 검색 결과도 channelProducts 구조 처리
+                  const flatProducts = [];
+                  for (const item of keywordResult.contents) {
+                    if (item.channelProducts && Array.isArray(item.channelProducts)) {
+                      for (const channelProduct of item.channelProducts) {
+                        flatProducts.push({
+                          ...channelProduct,
+                          originProductNo: item.originProductNo,
+                          sellerManagementCode: item.sellerManagementCode
+                        });
+                      }
+                    } else {
+                      flatProducts.push(item);
+                    }
+                  }
+                  
+                  naverProducts = flatProducts.map((product: any) => ({
+                    id: product.channelProductNo || product.productNo || product.id || product.originProductNo,
+                    name: product.name || product.productName || '',
+                    sku: product.sellerManagementCode || '',  // 실제 SKU만 사용, 검색어로 대체하지 않음
+                    price: product.salePrice || 0,
+                    imageUrl: product.representativeImage?.url || product.images?.[0]?.url || '',
+                    stockQuantity: product.stockQuantity || 0,
+                    status: product.statusType || product.saleStatus || 'UNKNOWN',
+                    similarity: product.sellerManagementCode?.toUpperCase()?.includes(skuUpper) ? 70 : 50,
+                  }));
                 }
               }
 

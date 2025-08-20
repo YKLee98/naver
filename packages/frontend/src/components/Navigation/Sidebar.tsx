@@ -33,8 +33,8 @@ const menuItems = [
     description: '전체 현황 확인'
   },
   { 
-    path: '/products', 
-    label: '상품 매핑', 
+    path: '/sku-mapping', 
+    label: 'SKU 매핑', 
     icon: <LinkIcon />,
     description: 'SKU 연결 관리'
   },

@@ -23,6 +23,7 @@ import {
   Chip,
 } from '@mui/material';
 import { inventoryService } from '@/services/api/inventory.service';
+import { apiClient } from '@/services/api/config';
 import { useNotification } from '@/hooks/useNotification';
 import { formatNumber } from '@/utils/formatters';
 
@@ -99,21 +100,51 @@ const InventoryAdjustDialog: React.FC<InventoryAdjustDialogProps> = ({
 
     setSubmitting(true);
     try {
-      await inventoryService.adjustInventory({
-        sku: inventory.sku,
+      // 백엔드 API에 맞춘 파라미터 구성
+      const requestParams: any = {
         platform,
-        adjustType: adjustType === 'sync' ? 'set' : adjustType === 'absolute' ? 'set' : 'add',
-        naverQuantity: platform === 'shopify' ? undefined : naverQuantity,
-        shopifyQuantity: platform === 'naver' ? undefined : shopifyQuantity,
         reason,
         notes,
-      });
+      };
 
-      showNotification('재고가 성공적으로 조정되었습니다.', 'success');
-      onSuccess();
-      handleClose();
-    } catch (error) {
-      showNotification('재고 조정에 실패했습니다.', 'error');
+      // adjustType에 따른 파라미터 설정
+      if (adjustType === 'sync') {
+        requestParams.adjustType = 'sync';
+      } else if (adjustType === 'absolute') {
+        requestParams.adjustType = 'set';
+        requestParams.quantity = platform === 'naver' ? naverQuantity : 
+                                platform === 'shopify' ? shopifyQuantity : 
+                                Math.max(naverQuantity, shopifyQuantity);
+      } else if (adjustType === 'relative') {
+        requestParams.adjustType = 'relative';
+        requestParams.adjustment = platform === 'naver' ? (naverQuantity - inventory.naverStock) :
+                                  platform === 'shopify' ? (shopifyQuantity - inventory.shopifyStock) :
+                                  Math.max(naverQuantity - inventory.naverStock, shopifyQuantity - inventory.shopifyStock);
+      }
+
+      // platform별 수량 설정 (백엔드가 필요로 하는 경우)
+      if (platform === 'naver' || platform === 'both') {
+        requestParams.naverQuantity = naverQuantity;
+      }
+      if (platform === 'shopify' || platform === 'both') {
+        requestParams.shopifyQuantity = shopifyQuantity;
+      }
+
+      console.log('Adjusting inventory with params:', requestParams);
+      
+      const response = await apiClient.post(`/inventory/${inventory.sku}/adjust`, requestParams);
+      
+      if (response.data?.success) {
+        showNotification('재고가 성공적으로 조정되었습니다.', 'success');
+        onSuccess();
+        handleClose();
+      } else {
+        throw new Error(response.data?.message || '재고 조정 실패');
+      }
+    } catch (error: any) {
+      console.error('Inventory adjustment error:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || '재고 조정에 실패했습니다.';
+      showNotification(errorMessage, 'error');
     } finally {
       setSubmitting(false);
     }

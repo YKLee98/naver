@@ -573,6 +573,10 @@ export class ServiceContainer {
           this.priceSyncService,
           this.exchangeRateService
         );
+        // 추가 서비스 주입
+        (this.priceController as any).naverProductService = this.naverProductService;
+        (this.priceController as any).shopifyService = this.shopifyService;
+        (this.priceController as any).shopifyInventoryService = this.shopifyInventoryService;
         logger.debug('✓ PriceController initialized');
       }
 

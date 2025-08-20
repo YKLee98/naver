@@ -219,7 +219,10 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
     console.log('Selected Naver product:', product);
     setSelectedNaverProduct(product);
     formik.setFieldValue('naverProductId', product.id);
-    formik.setFieldValue('productName', product.name);
+    // Shopify 상품이 선택되지 않은 경우에만 네이버 상품명 사용
+    if (!selectedShopifyProduct) {
+      formik.setFieldValue('productName', product.name);
+    }
   };
 
   // 선택한 Shopify 상품 적용
@@ -229,6 +232,8 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
     formik.setFieldValue('shopifyProductId', product.id);
     formik.setFieldValue('shopifyVariantId', product.variantId);
     formik.setFieldValue('vendor', product.vendor || 'album');
+    // Shopify 상품명을 항상 우선적으로 사용 (상품 A처럼)
+    formik.setFieldValue('productName', product.title || product.name);
   };
 
   const handleClose = () => {

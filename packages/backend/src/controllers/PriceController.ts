@@ -101,15 +101,15 @@ export class PriceController {
    */
   getCurrentPrices = asyncHandler(
     async (req: Request, res: Response): Promise<void> => {
-      const { page = 1, limit = 20, search } = req.query;
+      const { page = 1, limit = 20, search, realtime } = req.query;
       const skip = (Number(page) - 1) * Number(limit);
 
-      const query: any = {};  // isActive 조건 제거 (필드가 없을 수 있음)
+      const query: any = {};
 
       if (search) {
         query.$or = [
           { sku: { $regex: search, $options: 'i' } },
-          { productName: { $regex: search, $options: 'i' } },  // name -> productName
+          { productName: { $regex: search, $options: 'i' } },
         ];
       }
 
@@ -117,7 +117,7 @@ export class PriceController {
         query, 
         skip, 
         limit: Number(limit),
-        collectionName: ProductMapping.collection.name 
+        realtime: realtime === 'true'
       });
 
       const [mappings, total] = await Promise.all([
@@ -125,18 +125,180 @@ export class PriceController {
         ProductMapping.countDocuments(query),
       ]);
 
-      logger.info(`Found ${mappings.length} mappings, total: ${total} from collection: ${ProductMapping.collection.name}`);
+      logger.info(`Found ${mappings.length} mappings`);
 
-      const priceData = mappings.map((mapping) => ({
-        id: mapping._id,
-        sku: mapping.sku,
-        productName: mapping.productName || 'Unknown Product',
-        naverPrice: mapping.pricing?.naver?.regular || mapping.naverPrice || 0,
-        shopifyPrice: mapping.pricing?.shopify?.regular || mapping.shopifyPrice || 0,
-        margin: mapping.priceMargin || mapping.margin || 15,
-        lastUpdated: mapping.pricing?.naver?.lastUpdated || mapping.updatedAt,
-        status: mapping.status || 'active',
-      }));
+      // 실시간 가격 조회 옵션
+      const priceDataPromises = mappings.map(async (mapping) => {
+        let naverPrice = 0;
+        let shopifyPrice = 0;
+        
+        if (realtime === 'true' || !mapping.pricing) {
+          try {
+            // 네이버 실시간 가격 조회 - searchProducts 메서드 사용
+            const naverService = (this as any).naverProductService;
+            if (naverService && mapping.sku) {
+              try {
+                const searchResults = await naverService.searchProducts({
+                  searchKeyword: mapping.sku,
+                  searchType: 'SELLER_MANAGEMENT_CODE',
+                  page: 1,
+                  size: 10
+                });
+                
+                if (searchResults?.contents && searchResults.contents.length > 0) {
+                  // 매핑된 ID와 정확히 일치하는 상품 찾기
+                  let naverProduct = null;
+                  
+                  // 먼저 ID로 정확한 매칭 시도
+                  for (const item of searchResults.contents) {
+                    // ID가 정확히 일치하는지 확인
+                    const itemId = String(item.id || item.productNo || item.channelProductNo || '');
+                    if (itemId === String(mapping.naverProductId)) {
+                      naverProduct = item;
+                      logger.info(`Found exact match by ID: ${itemId}`);
+                      break;
+                    }
+                    
+                    // channelProducts 확인
+                    if (item.channelProducts && Array.isArray(item.channelProducts)) {
+                      for (const channelProduct of item.channelProducts) {
+                        const channelId = String(channelProduct.channelProductNo || channelProduct.id || '');
+                        if (channelId === String(mapping.naverProductId)) {
+                          naverProduct = {
+                            ...channelProduct,
+                            salePrice: channelProduct.salePrice || item.salePrice,
+                            price: channelProduct.price || item.price,
+                            originProductNo: item.originProductNo
+                          };
+                          logger.info(`Found exact match in channelProducts: ${channelId}`);
+                          break;
+                        }
+                      }
+                    }
+                    
+                    if (naverProduct) break;
+                  }
+                  
+                  // 정확한 매칭이 없으면 SKU로 찾기
+                  if (!naverProduct) {
+                    for (const item of searchResults.contents) {
+                      if (item.sellerManagementCode === mapping.sku) {
+                        naverProduct = item;
+                        logger.info(`Found match by SKU: ${mapping.sku}`);
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (naverProduct) {
+                    naverPrice = naverProduct.salePrice || naverProduct.price || 0;
+                    logger.info(`Naver real-time price for ${mapping.sku}: ${naverPrice}원 (Product: ${naverProduct.name}, ID: ${naverProduct.id})`);
+                  } else {
+                    logger.warn(`No matching Naver product found for ${mapping.sku} with ID ${mapping.naverProductId}`);
+                  }
+                } else if (mapping.naverProductId) {
+                  // fallback to getProductById if available
+                  const naverProduct = await naverService.getProductById(mapping.naverProductId);
+                  naverPrice = naverProduct?.salePrice || naverProduct?.price || 0;
+                  logger.info(`Naver real-time price for ${mapping.sku}: ${naverPrice}원`);
+                }
+              } catch (naverError: any) {
+                logger.error(`Error fetching Naver price for ${mapping.sku}: ${naverError.message}`);
+              }
+            }
+            
+            // Shopify 실시간 가격 조회
+            const shopifyInventoryService = (this as any).shopifyInventoryService;
+            if (shopifyInventoryService && mapping.sku) {
+              try {
+                // GraphQL로 SKU 검색해서 가격 정보 가져오기
+                const gqlQuery = `
+                  query getVariantBySku($sku: String!) {
+                    productVariants(first: 1, query: $sku) {
+                      edges {
+                        node {
+                          id
+                          sku
+                          price
+                          product {
+                            title
+                          }
+                        }
+                      }
+                    }
+                  }
+                `;
+                
+                if (shopifyInventoryService.client) {
+                  const response = await shopifyInventoryService.client.post({
+                    path: 'graphql',
+                    data: {
+                      query: gqlQuery,
+                      variables: { sku: `sku:${mapping.sku}` }
+                    }
+                  });
+                  
+                  if (response?.body?.data?.productVariants?.edges?.length > 0) {
+                    const variant = response.body.data.productVariants.edges[0].node;
+                    shopifyPrice = parseFloat(variant.price || '0');
+                    logger.info(`Shopify real-time price for ${mapping.sku}: $${shopifyPrice}`);
+                  }
+                } else {
+                  // Mock 모드
+                  shopifyPrice = 15.99;
+                  logger.debug(`Mock Shopify price for ${mapping.sku}: $${shopifyPrice}`);
+                }
+              } catch (shopifyError: any) {
+                logger.error(`Error fetching Shopify price for ${mapping.sku}: ${shopifyError.message}`);
+              }
+            }
+            
+            // DB 업데이트 - 실시간 가격이 있으면 무조건 업데이트
+            if (naverPrice > 0 || shopifyPrice > 0) {
+              const updateData: any = {
+                'pricing.naver.lastUpdated': new Date(),
+                'pricing.shopify.lastUpdated': new Date()
+              };
+              
+              if (naverPrice > 0) {
+                updateData['pricing.naver.regular'] = naverPrice;
+                updateData['pricing.naver.sale'] = naverPrice;
+              }
+              
+              if (shopifyPrice > 0) {
+                updateData['pricing.shopify.regular'] = shopifyPrice;
+                updateData['pricing.shopify.sale'] = shopifyPrice;
+              }
+              
+              await ProductMapping.findByIdAndUpdate(mapping._id, { $set: updateData });
+              logger.info(`Updated prices in DB for ${mapping.sku} - Naver: ${naverPrice}, Shopify: ${shopifyPrice}`);
+            }
+          } catch (error: any) {
+            logger.error(`Error fetching real-time prices for ${mapping.sku}: ${error?.message || 'Unknown error'}`);
+            // 오류 시 DB 값 사용
+            naverPrice = mapping.pricing?.naver?.regular || mapping.pricing?.naver?.sale || 0;
+            shopifyPrice = mapping.pricing?.shopify?.regular || mapping.pricing?.shopify?.sale || 0;
+          }
+        } else {
+          // DB 값 사용
+          naverPrice = mapping.pricing?.naver?.regular || mapping.pricing?.naver?.sale || 0;
+          shopifyPrice = mapping.pricing?.shopify?.regular || mapping.pricing?.shopify?.sale || 0;
+        }
+        
+        return {
+          id: mapping._id,
+          sku: mapping.sku,
+          productName: mapping.productName || 'Unknown Product',
+          naverPrice,
+          shopifyPrice,
+          margin: mapping.pricing?.rules?.marginPercent || 15,
+          lastUpdated: new Date(),
+          status: mapping.status || 'active',
+          isRealtime: realtime === 'true'
+        };
+      });
+
+      const priceData = await Promise.all(priceDataPromises);
 
       res.json({
         success: true,

@@ -157,7 +157,7 @@ export class ShopifyInventoryService extends ShopifyService {
 
       const inventoryItemId = variant.body.variant.inventory_item_id;
 
-      // Get first location
+      // Get locations and prefer Main Office and Warehouse
       const locations = await this.client.get({
         path: 'locations',
       });
@@ -165,8 +165,19 @@ export class ShopifyInventoryService extends ShopifyService {
       if (!locations?.body?.locations?.length) {
         throw new Error('No locations found');
       }
-
-      const locationId = locations.body.locations[0].id;
+      
+      // Only use Main Office and Warehouse
+      const primaryLocation = locations.body.locations.find((loc: any) => 
+        loc.name && loc.name.includes('Main Office and Warehouse') && loc.active !== false
+      );
+      
+      if (!primaryLocation) {
+        logger.error('Main Office and Warehouse location not found!');
+        throw new Error('Main Office and Warehouse location not found. Cannot update inventory.');
+      }
+      
+      const locationId = primaryLocation.id;
+      logger.info(`🏢 Using Shopify location for adjustment: ${primaryLocation.name} (${locationId})`);
 
       // Get current inventory level
       const currentLevels = await this.client.get({
@@ -538,19 +549,26 @@ export class ShopifyInventoryService extends ShopifyService {
                 return quantity;
               }
 
-              // Get the primary location
+              // Get the primary location - prefer Main Office and Warehouse
               const locations = await this.getLocations();
-              const primaryLocation = locations.find(loc => loc.active);
+              logger.debug('Available Shopify locations:', locations.map(l => ({ id: l.id, name: l.name })));
+              
+              // Only use Main Office and Warehouse
+              const primaryLocation = locations.find(loc => 
+                loc.name && loc.name.includes('Main Office and Warehouse') && loc.active
+              );
               
               if (!primaryLocation) {
-                logger.warn('No active location found, using variant quantity');
-                return variant.inventory_quantity || 0;
+                logger.error('Main Office and Warehouse location not found!');
+                throw new Error('Main Office and Warehouse location not found. Cannot update inventory.');
               }
+              
+              logger.info(`Using location: ${primaryLocation.name} (${primaryLocation.id})`);
 
               // Get inventory level for this item
               const level = await this.getInventoryLevelByIds(inventoryItemId, primaryLocation.id);
               const quantity = level?.available || 0;
-              logger.info(`✅ Shopify inventory for ${sku}: ${quantity} (from inventory level)`);
+              logger.info(`✅ Shopify inventory for ${sku}: ${quantity} (from inventory level at ${primaryLocation.name})`);
               return quantity;
             }
           }
@@ -625,16 +643,24 @@ export class ShopifyInventoryService extends ShopifyService {
       // Extract numeric ID from GraphQL ID
       const numericInventoryItemId = inventoryItemId.split('/').pop();
 
-      // Get the primary location
+      // Get the primary location - prefer Main Office and Warehouse
       const locations = await this.getLocations();
-      const primaryLocation = locations.find(loc => loc.active);
+      logger.debug('Available Shopify locations:', locations.map(l => ({ id: l.id, name: l.name })));
+      
+      // Only use Main Office and Warehouse
+      const primaryLocation = locations.find(loc => 
+        loc.name && loc.name.includes('Main Office and Warehouse') && loc.active
+      );
       
       if (!primaryLocation) {
-        throw new Error('No active location found');
+        logger.error('Main Office and Warehouse location not found!');
+        throw new Error('Main Office and Warehouse location not found. Cannot update inventory.');
       }
+      
+      logger.info(`🏢 Using Shopify location: ${primaryLocation.name} (${primaryLocation.id}) for SKU ${sku}`);
 
       // Update inventory level using the numeric ID
-      logger.info(`📦 Updating Shopify inventory for SKU ${sku}: inventoryItemId=${numericInventoryItemId}, locationId=${primaryLocation.id}, quantity=${quantity}`);
+      logger.info(`📦 Updating Shopify inventory for SKU ${sku}: inventoryItemId=${numericInventoryItemId}, location=${primaryLocation.name} (${primaryLocation.id}), quantity=${quantity}`);
       await this.setInventoryLevel(numericInventoryItemId!, primaryLocation.id, quantity);
       
       // Wait a bit for the update to propagate

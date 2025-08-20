@@ -92,30 +92,58 @@ const Inventory: React.FC = () => {
   const loadInventories = async () => {
     setLoading(true);
     try {
-      const response = await inventoryService.getInventoryList({
+      const params = {
         page: page + 1,
         limit: rowsPerPage,
         search: searchTerm,
         status: statusFilter === 'all' ? undefined : statusFilter,
         stockLevel: stockFilter === 'all' ? undefined : stockFilter,
-      });
+      };
+      
+      console.log('Loading inventories with params:', params);
+      const response = await inventoryService.getInventoryList(params);
+      console.log('Inventories response:', response);
 
       // API 응답에서 데이터 파싱
-      const inventoryData = response.data.data || [];
-      const pagination = response.data.pagination || {};
-      const totalData = pagination.total || 0;
+      console.log('Raw response:', response);
+      
+      let inventoryData = [];
+      let pagination = {};
+      let summaryData = {};
+      
+      // 응답 구조에 따라 처리
+      if (response?.data && Array.isArray(response.data)) {
+        // 직접 data 배열로 오는 경우 (현재 백엔드 응답 형태)
+        inventoryData = response.data;
+        pagination = response.pagination || {};
+      } else if (response?.data?.inventories) {
+        // data.inventories로 오는 경우
+        inventoryData = response.data.inventories;
+        pagination = response.data.pagination || {};
+        summaryData = response.data.summary || {};
+      } else if (response?.inventories) {
+        // inventories 속성으로 오는 경우
+        inventoryData = response.inventories;
+        pagination = response.pagination || {};
+        summaryData = response.summary || {};
+      }
+      
+      const totalData = pagination.total || inventoryData.length || 0;
+      
+      console.log('Parsed inventoryData:', inventoryData);
+      console.log('Parsed pagination:', pagination);
 
       // 각 항목에서 재고 정보 추출
       const processedInventories = inventoryData.map((item: any) => ({
         _id: item._id || item.sku,
         sku: item.sku,
-        productName: item.productName || '',
+        productName: item.productName || item.title || '',
         naverStock: item.naverStock || 0,
         shopifyStock: item.shopifyStock || 0,
-        difference: Math.abs((item.naverStock || 0) - (item.shopifyStock || 0)),
-        status: (item.naverStock === 0 || item.shopifyStock === 0) ? 'error' : 
-                (item.naverStock <= 10 || item.shopifyStock <= 10) ? 'warning' : 'normal',
-        lastSyncAt: item.lastSyncedAt || item.lastSync || new Date().toISOString(),
+        difference: (item.naverStock || 0) - (item.shopifyStock || 0), // 차이값 (음수 가능)
+        status: item.status || ((item.naverStock === 0 || item.shopifyStock === 0) ? 'error' : 
+                (item.naverStock <= 10 || item.shopifyStock <= 10) ? 'warning' : 'normal'),
+        lastSyncAt: item.lastSyncedAt || item.lastSync || item.updatedAt || new Date().toISOString(),
         syncStatus: item.syncStatus || 'synced'
       }));
 
@@ -123,13 +151,13 @@ const Inventory: React.FC = () => {
       setTotalCount(totalData);
 
       // 요약 정보 계산
-      const summaryData = {
+      const calculatedSummary = {
         totalSku: totalData,
         normalCount: processedInventories.filter(i => i.status === 'normal').length,
         warningCount: processedInventories.filter(i => i.status === 'warning').length,
         errorCount: processedInventories.filter(i => i.status === 'error').length,
       };
-      setSummary(summaryData);
+      setSummary(calculatedSummary);
     } catch (error) {
       console.error('Error loading inventories:', error);
       showNotification('재고 목록을 불러오는데 실패했습니다.', 'error');
@@ -220,17 +248,23 @@ const Inventory: React.FC = () => {
   // 재고 차이 렌더링
   const renderDifference = (diff: number) => {
     if (diff === 0) {
-      return <Remove fontSize="small" color="disabled" />;
+      return (
+        <Box display="flex" alignItems="center" justifyContent="center">
+          <Remove fontSize="small" color="disabled" />
+          <Typography variant="body2" color="text.disabled" ml={0.5}>0</Typography>
+        </Box>
+      );
     }
+    const absDiff = Math.abs(diff);
     return diff > 0 ? (
-      <Box display="flex" alignItems="center" color="success.main">
+      <Box display="flex" alignItems="center" justifyContent="center" color="warning.main">
         <TrendingUp fontSize="small" />
-        <Typography variant="body2" ml={0.5}>+{diff}</Typography>
+        <Typography variant="body2" ml={0.5}>+{absDiff}</Typography>
       </Box>
     ) : (
-      <Box display="flex" alignItems="center" color="error.main">
+      <Box display="flex" alignItems="center" justifyContent="center" color="info.main">
         <TrendingDown fontSize="small" />
-        <Typography variant="body2" ml={0.5}>{diff}</Typography>
+        <Typography variant="body2" ml={0.5}>-{absDiff}</Typography>
       </Box>
     );
   };

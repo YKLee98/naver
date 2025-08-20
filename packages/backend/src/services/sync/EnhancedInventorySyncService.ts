@@ -203,7 +203,8 @@ export class EnhancedInventorySyncService {
           const targetStock = Math.max(naverStock, shopifyStock);
           
           if (naverStock < targetStock) {
-            await this.naverProductService.updateProductStock(mapping.naverProductId, targetStock);
+            // SKU로 업데이트하여 originProductNo를 올바르게 사용
+            await this.naverProductService.updateProductStockBySku(mapping.sku, targetStock);
             result.currentNaver = targetStock;
           }
           

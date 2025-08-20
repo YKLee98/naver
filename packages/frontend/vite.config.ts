@@ -56,13 +56,12 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: false,
-      allowedHosts: ['localhost', '5b86eaf9ff17.ngrok-free.app', 'f44f74154796.ngrok-free.app'],
+      allowedHosts: ['.ngrok-free.app', '.ngrok.io', 'localhost', '27b68fa0194c.ngrok-free.app', '3eb63ab2112e.ngrok-free.app'],
       host: true,
       open: false,
       cors: true,
       hmr: {
         overlay: true,
-        clientPort: 5173,
       },
       watch: {
         usePolling: process.platform === 'win32',
@@ -94,16 +93,53 @@ export default defineConfig(({ mode }) => {
         allow: ['..'],
       },
       proxy: {
-        '/api': {
-          target: env.VITE_API_URL || 'http://localhost:3000',
+        '/api/v1': {
+          target: 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
           ws: true,
-          rewrite: (path) => path,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('proxy error', err);
+            });
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              // ngrok 헤더 추가
+              proxyReq.setHeader('ngrok-skip-browser-warning', 'true');
+              proxyReq.setHeader('X-Forwarded-Host', req.headers.host || '');
+              console.log('Sending Request to the Target:', req.method, req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req, _res) => {
+              console.log('Received Response from the Target:', proxyRes.statusCode, req.url);
+            });
+          },
+        },
+        '/api': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+          ws: true,
+          configure: (proxy, _options) => {
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              proxyReq.setHeader('ngrok-skip-browser-warning', 'true');
+              proxyReq.setHeader('X-Forwarded-Host', req.headers.host || '');
+            });
+          },
         },
         '/socket.io': {
-          target: env.VITE_WS_URL || 'ws://localhost:3001',
+          target: 'ws://localhost:3001',
           ws: true,
+          changeOrigin: true,
+        },
+        '/health': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+        },
+        '/auth': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+        },
+        '/webhooks': {
+          target: 'http://localhost:3000',
           changeOrigin: true,
         },
       },

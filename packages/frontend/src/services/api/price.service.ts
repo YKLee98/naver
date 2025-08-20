@@ -3,6 +3,43 @@ import apiClient from './config';
 import { PriceHistory, ExchangeRate } from '@/types/models';
 
 export const priceApi = {
+  // 가격 목록 조회 (매핑된 상품들의 가격 정보)
+  getPriceList: async (realtime = true) => {
+    try {
+      const response = await apiClient.get('/prices', {
+        params: { realtime }
+      });
+      console.log('Raw price response:', response.data);
+      
+      // 백엔드 응답 구조에 맞게 데이터 추출
+      if (response.data?.success && response.data?.data) {
+        return response.data.data;
+      } else if (Array.isArray(response.data)) {
+        return response.data;
+      } else {
+        return [];
+      }
+    } catch (error) {
+      console.error('Failed to fetch price list:', error);
+      return [];
+    }
+  },
+
+  // 모든 상품 가격 동기화
+  syncAllPrices: async () => {
+    try {
+      const response = await apiClient.post('/sync/prices');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to sync all prices:', error);
+      throw error;
+    }
+  },
+
+  // 가격 동기화 (레거시 호환용)
+  syncPrices: async () => {
+    return priceApi.syncAllPrices();
+  },
   // 가격 이력 조회
   getPriceHistory: async (params?: {
     sku?: string;
@@ -106,9 +143,4 @@ export const priceApi = {
     return response.data;
   },
 
-  // 가격 동기화
-  syncPrices: async () => {
-    const response = await apiClient.post('/sync/prices');
-    return response.data;
-  },
 };

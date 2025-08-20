@@ -49,7 +49,48 @@ const consoleFormat = winston.format.combine(
     let msg = `${timestamp} [${level}]: ${message}`;
 
     if (Object.keys(meta).length > 0) {
-      msg += ` ${JSON.stringify(meta, null, 2)}`;
+      try {
+        // 순환 참조를 방지하는 안전한 JSON 변환
+        const safeStringify = (obj: any, indent = 2) => {
+          const seen = new WeakSet();
+          return JSON.stringify(obj, (key, value) => {
+            // 순환 참조 체크
+            if (typeof value === 'object' && value !== null) {
+              if (seen.has(value)) {
+                return '[Circular]';
+              }
+              seen.add(value);
+              
+              // Axios 요청/응답 객체 처리
+              if (value.config || value.request || value.response) {
+                return {
+                  status: value.status,
+                  statusText: value.statusText,
+                  data: value.data,
+                  message: value.message,
+                  url: value.config?.url
+                };
+              }
+              
+              // Node.js 스트림 객체 필터링
+              if (value.constructor && (
+                value.constructor.name === 'ClientRequest' ||
+                value.constructor.name === 'IncomingMessage' ||
+                value.constructor.name === 'Socket' ||
+                value.constructor.name === 'TLSSocket'
+              )) {
+                return '[Stream Object]';
+              }
+            }
+            return value;
+          }, indent);
+        };
+        
+        msg += ` ${safeStringify(meta)}`;
+      } catch (err) {
+        // JSON 변환 실패 시 기본 메시지만 출력
+        msg += ` [Meta stringify error: ${err.message}]`;
+      }
     }
 
     return msg;

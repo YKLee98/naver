@@ -29,6 +29,7 @@ import {
 } from '@mui/icons-material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import { priceApi } from '@/services/api/price.service';
+import apiClient from '@/services/api/config';
 
 const Pricing: React.FC = () => {
   // 환율 관련 상태 - 안전한 초기값 설정
@@ -50,18 +51,18 @@ const Pricing: React.FC = () => {
       field: 'naverPrice', 
       headerName: '네이버 가격 (KRW)', 
       width: 150,
-      valueFormatter: (params) => {
-        if (!params.value) return '₩0';
-        return `₩${Number(params.value).toLocaleString('ko-KR')}`;
+      renderCell: (params) => {
+        const value = params.value || 0;
+        return `₩${Number(value).toLocaleString('ko-KR')}`;
       },
     },
     { 
       field: 'shopifyPrice', 
       headerName: 'Shopify 가격 (USD)', 
       width: 150,
-      valueFormatter: (params) => {
-        if (!params.value) return '$0.00';
-        return `$${Number(params.value).toFixed(2)}`;
+      renderCell: (params) => {
+        const value = params.value || 0;
+        return `$${Number(value).toFixed(2)}`;
       },
     },
     {
@@ -102,21 +103,37 @@ const Pricing: React.FC = () => {
   const loadPriceData = async () => {
     setLoading(true);
     try {
-      // 현재 가격 목록을 가져옴 (매핑 목록)  
-      const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-      const response = await fetch(`${baseURL}/prices`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        }
-      });
-      const data = await response.json();
+      // 매핑된 상품들의 가격 정보를 가져옴
+      const response = await priceApi.getPriceList();
+      console.log('🔴 Price data response:', response);
+      console.log('🔴 Response type:', typeof response);
+      console.log('🔴 Is Array?:', Array.isArray(response));
       
-      if (data?.success && data?.data) {
-        setPriceHistory(data.data);
+      if (response && Array.isArray(response)) {
+        // 각 상품의 가격 정보 포맷팅
+        const formattedData = response.map((item, index) => {
+          console.log(`🔵 Item ${index}:`, item);
+          const formatted = {
+            id: item._id || item.id || Math.random().toString(),
+            sku: item.sku,
+            productName: item.productName || item.title || '상품명 없음',
+            naverPrice: item.naverPrice || 0,
+            shopifyPrice: item.shopifyPrice || 0,
+            margin: item.margin || item.priceMargin || 10,
+            lastUpdated: item.lastUpdated || item.updatedAt || item.lastSyncAt || new Date(),
+          };
+          console.log(`🟢 Formatted ${index}:`, formatted);
+          return formatted;
+        });
+        console.log('🟡 Final formatted data:', formattedData);
+        setPriceHistory(formattedData);
+      } else {
+        console.log('❌ No price data received or invalid format:', response);
+        setPriceHistory([]);
       }
     } catch (error) {
-      console.error('Failed to load price data:', error);
-      // 오류 발생시 빈 배열 유지
+      console.error('❌ Failed to load price data:', error);
+      setPriceHistory([]);
     } finally {
       setLoading(false);
     }
@@ -172,14 +189,32 @@ const Pricing: React.FC = () => {
   const handlePriceSync = async () => {
     setSyncLoading(true);
     try {
-      await priceApi.syncPrices();
-      alert('가격 동기화가 시작되었습니다.');
-      await loadPriceData();
+      // 실시간 가격 조회 옵션으로 데이터 가져오기
+      setLoading(true);
+      const response = await apiClient.get('/prices?realtime=true');
+      console.log('Real-time price sync response:', response.data);
+      
+      if (response.data?.success && response.data?.data) {
+        const formattedData = response.data.data.map((item: any) => ({
+          id: item._id || item.id || Math.random().toString(),
+          sku: item.sku,
+          productName: item.productName || '상품명 없음',
+          naverPrice: item.naverPrice || 0,
+          shopifyPrice: item.shopifyPrice || 0,
+          margin: item.margin || 10,
+          lastUpdated: item.lastUpdated || new Date(),
+        }));
+        setPriceHistory(formattedData);
+        alert('실시간 가격 동기화가 완료되었습니다.');
+      } else {
+        alert('가격 동기화에 실패했습니다.');
+      }
     } catch (error) {
       console.error('Failed to sync prices:', error);
       alert('가격 동기화에 실패했습니다.');
     } finally {
       setSyncLoading(false);
+      setLoading(false);
     }
   };
 
@@ -388,13 +423,20 @@ const Pricing: React.FC = () => {
         <Divider sx={{ mb: 2 }} />
         
         <Box sx={{ height: 400, width: '100%' }}>
+          {console.log('🔥 DataGrid rows:', priceHistory)}
+          {console.log('🔥 DataGrid rows length:', priceHistory.length)}
+          {priceHistory.length > 0 && console.log('🔥 First row:', priceHistory[0])}
           <DataGrid
             rows={priceHistory}
             columns={columns}
-            pageSize={10}
-            rowsPerPageOptions={[10, 25, 50]}
+            initialState={{
+              pagination: {
+                paginationModel: { pageSize: 10, page: 0 },
+              },
+            }}
+            pageSizeOptions={[10, 25, 50]}
             checkboxSelection
-            disableSelectionOnClick
+            disableRowSelectionOnClick
             loading={loading}
             getRowId={(row) => row.id || row._id || Math.random().toString()}
             sx={{
