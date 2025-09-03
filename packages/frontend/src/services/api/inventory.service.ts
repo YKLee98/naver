@@ -1,5 +1,5 @@
 // packages/frontend/src/services/api/inventory.service.ts
-import { apiClient } from './config';
+import { apiClient, get, post, put, del } from './config';
 import { AxiosResponse } from 'axios';
 
 export interface InventoryItem {
@@ -107,23 +107,39 @@ class InventoryService {
   async getInventoryList(params?: InventoryListParams): Promise<any> {
     try {
       const response = await apiClient.get('/inventory', { params });
-      console.log('Inventory service response:', response);
+      console.log('Inventory service full response:', response);
+      console.log('Inventory service response data:', response.data);
       
-      // 응답 데이터 정규화
-      // 백엔드가 {success: true, data: [...], pagination: {...}} 형태로 반환
-      if (response.data?.success && response.data?.data) {
-        return response.data;
+      // Backend returns { success: true, data: [...] }
+      let inventoryData = [];
+      let pagination = null;
+      
+      if (response.data) {
+        if (response.data.success && Array.isArray(response.data.data)) {
+          // Handle { success: true, data: [...] } format
+          console.log('Processing success/data format:', response.data.data.length);
+          inventoryData = response.data.data;
+          pagination = response.data.pagination;
+        } else if (Array.isArray(response.data)) {
+          // Handle direct array format
+          console.log('Processing array of inventory items:', response.data.length);
+          inventoryData = response.data;
+        } else if (response.data.data && Array.isArray(response.data.data)) {
+          // Handle { data: [...] } format
+          console.log('Processing data wrapper format:', response.data.data.length);
+          inventoryData = response.data.data;
+          pagination = response.data.pagination;
+        }
       }
       
-      // 직접 데이터 반환 (폴백)
       return {
         success: true,
-        data: response.data || [],
-        pagination: {
+        data: inventoryData,
+        pagination: pagination || {
           page: params?.page || 1,
           limit: params?.limit || 20,
-          total: Array.isArray(response.data) ? response.data.length : 0,
-          pages: 1
+          total: inventoryData.length,
+          pages: Math.ceil(inventoryData.length / (params?.limit || 20))
         }
       };
     } catch (error) {
@@ -146,7 +162,8 @@ class InventoryService {
    * 재고 상태 조회 (단일 SKU)
    */
   async getInventoryStatus(sku: string): Promise<AxiosResponse<{ success: boolean; data: InventoryStatus }>> {
-    return apiClient.get(`/inventory/${sku}/status`);
+    const data = await get(`/inventory/${sku}/status`);
+    return { data: { success: true, data } } as any;
   }
 
   /**
@@ -162,14 +179,16 @@ class InventoryService {
       page?: number;
     }
   ): Promise<AxiosResponse<{ success: boolean; data: { history: InventoryHistory[]; total: number } }>> {
-    return apiClient.get(`/inventory/${sku}/history`, { params });
+    const data = await get(`/inventory/${sku}/history`, { params });
+    return { data: { success: true, data } } as any;
   }
 
   /**
    * 재고 조정
    */
   async adjustInventory(params: AdjustInventoryParams): Promise<AxiosResponse<{ success: boolean; data: InventoryStatus }>> {
-    return apiClient.post(`/inventory/${params.sku}/adjust`, params);
+    const data = await post(`/inventory/${params.sku}/adjust`, params);
+    return { data: { success: true, data } } as any;
   }
 
   /**
@@ -228,7 +247,8 @@ class InventoryService {
    */
   async syncInventory(sku?: string): Promise<AxiosResponse<{ success: boolean; data: { synced: number; failed: number } }>> {
     const endpoint = sku ? `/sync/sku/${sku}` : '/sync/inventory';
-    return apiClient.post(endpoint);
+    const data = await post(endpoint);
+    return { data: { success: true, data } } as any;
   }
 
   /**

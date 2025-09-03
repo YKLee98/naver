@@ -11,8 +11,17 @@ class ApiService {
   }> = [];
 
   constructor() {
-    // API 베이스 URL 설정
-    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+    // API 베이스 URL 설정 - ngrok 접속시 자동 감지
+    let baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+    
+    // 현재 호스트가 ngrok인 경우 프록시 사용
+    if (window.location.hostname.includes('ngrok')) {
+      // ngrok에서 접속 시 프록시를 통해 백엔드 연결
+      baseURL = '/api';
+    } else if (window.location.hostname === '172.30.1.79') {
+      // 로컬 IP로 접속한 경우
+      baseURL = 'http://172.30.1.79:3000/api';
+    }
     
     console.log('[ApiService] Initializing with baseURL:', baseURL);
     
@@ -21,6 +30,7 @@ class ApiService {
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
       },
     });
 

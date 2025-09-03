@@ -1,5 +1,5 @@
 // packages/frontend/src/services/api/product.service.ts
-import { apiClient } from './config';
+import { apiClient, get, post, patch } from './config';
 import { AxiosResponse } from 'axios';
 
 export interface Product {
@@ -40,29 +40,59 @@ export interface ProductListResponse {
 
 class ProductService {
   /**
+   * Shopify SKU로 검색
+   */
+  async searchShopifyBySku(sku: string): Promise<AxiosResponse<any>> {
+    return await apiClient.get('/products/search/shopify-sku', {
+      params: { sku }
+    });
+  }
+
+  /**
+   * 네이버 상품명으로 검색
+   */
+  async searchNaverByName(name: string, limit: number = 50): Promise<AxiosResponse<any>> {
+    const response = await apiClient.get('/products/search/naver-name', {
+      params: { name, limit }
+    });
+    
+    // API 응답 구조 정규화
+    if (response.data && response.data.success && response.data.data) {
+      return { ...response, data: response.data.data };
+    }
+    
+    return response;
+  }
+
+  /**
    * 네이버 상품 검색
    */
   async searchNaverProducts(params: SearchProductsParams): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/products/search/naver', { 
+    // SKU 형식 체크 (숫자로만 이루어진 경우 SKU로 판단)
+    const isSkuFormat = /^\d+$/.test(params.query);
+    
+    const data = await get('/products/search/naver', { 
       params: {
-        keyword: params.query,
+        ...(isSkuFormat ? { sku: params.query } : { keyword: params.query }),
         page: params.page || 1,
-        size: params.limit || 20
+        limit: params.limit || 20
       }
     });
+    return { data: { success: true, data } } as any;
   }
 
   /**
    * Shopify 상품 검색 - vendor 기반
    */
   async searchShopifyProducts(params: ShopifySearchParams): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/products/search/shopify', { 
+    const data = await get('/products/search/shopify', { 
       params: {
         vendor: params.vendor || 'album',
         limit: params.limit || 100,
         includeInactive: params.includeInactive || false
       }
     });
+    return { data: { success: true, data } } as any;
   }
 
   /**
@@ -119,28 +149,32 @@ class ProductService {
     syncStatus?: string;
     search?: string;
   }): Promise<AxiosResponse<ProductListResponse>> {
-    return apiClient.get('/products', { params });
+    const data = await get('/products', { params });
+    return { data: { success: true, data } } as any;
   }
 
   /**
    * SKU로 상품 조회
    */
   async getProductBySku(sku: string): Promise<AxiosResponse<{ success: boolean; data: Product }>> {
-    return apiClient.get(`/products/${sku}`);
+    const data = await get(`/products/${sku}`);
+    return { data: { success: true, data } } as any;
   }
 
   /**
    * 상품 동기화
    */
   async syncProduct(sku: string): Promise<AxiosResponse<{ success: boolean; data: any }>> {
-    return apiClient.post(`/products/${sku}/sync`);
+    const data = await post(`/products/${sku}/sync`);
+    return { data: { success: true, data } } as any;
   }
 
   /**
    * 상품 상태 업데이트
    */
   async updateProductStatus(sku: string, status: string): Promise<AxiosResponse<{ success: boolean }>> {
-    return apiClient.patch(`/products/${sku}/status`, { status });
+    const data = await patch(`/products/${sku}/status`, { status });
+    return { data: { success: true, ...data } } as any;
   }
 }
 

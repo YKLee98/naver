@@ -178,6 +178,8 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
       
       protectedRouter.get('/products/search/naver', ctrl.searchNaverProducts.bind(ctrl));
       protectedRouter.get('/products/search/shopify', ctrl.searchShopifyProducts.bind(ctrl));
+      protectedRouter.get('/products/search/shopify-sku', ctrl.searchShopifyBySku.bind(ctrl));
+      protectedRouter.get('/products/search/naver-name', ctrl.searchNaverByName.bind(ctrl));
       protectedRouter.post('/products/bulk-update', ctrl.bulkUpdateProducts.bind(ctrl));
       protectedRouter.get('/products/export/csv', ctrl.exportProducts.bind(ctrl));
       
@@ -470,8 +472,7 @@ export async function setupApiRoutes(container?: ServiceContainer): Promise<Rout
   protectedRouter.post('/products', defaultHandlers.success);
   protectedRouter.put('/products/:sku', defaultHandlers.success);
   protectedRouter.delete('/products/:sku', defaultHandlers.success);
-  protectedRouter.get('/products/search/naver', defaultHandlers.emptyList);
-  protectedRouter.get('/products/search/shopify', defaultHandlers.emptyList);
+  // Removed duplicate routes - using actual controllers instead
   protectedRouter.post('/products/bulk-update', defaultHandlers.success);
   protectedRouter.get('/products/export/csv', defaultHandlers.emptyList);
   protectedRouter.post('/products/:sku/sync', defaultHandlers.success);

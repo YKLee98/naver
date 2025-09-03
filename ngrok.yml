@@ -1,13 +1,13 @@
-version: 2
-authtoken: 2xUeDpx6qVbsSgzwD5kECFy8BnZ_5uKQ4iVzeZA6Yqhn4gRwq # ngrok 계정의 authtoken을 여기에 입력하세요
+version: "3"
+agent:
+  authtoken: 31xQsGvFczzsm5RVMotS4mQfieL_6v9ZDnFamja5uU7WepBVN
+  update_channel: stable
 tunnels:
   frontend:
     proto: http
     addr: 5173
-    host_header: "localhost:5173"
-    inspect: true
+    hostname: broadly-full-monitor.ngrok-free.app
   backend:
     proto: http
     addr: 3000
-    host_header: "localhost:3000"
-    inspect: true
+    hostname: backend.monitor.ngrok.pro

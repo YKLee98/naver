@@ -48,10 +48,11 @@ const MoneyIcon = (props: any) => getIcon('AttachMoney')(props);
 const StoreIcon = (props: any) => getIcon('Store')(props);
 const ShoppingCartIcon = (props: any) => getIcon('ShoppingCart')(props);
 const PercentIcon = (props: any) => getIcon('Percent')(props);
-const BusinessIcon = (props: any) => getIcon('Business')(props);
+const BusinessIcon = (props: any) => getIcon('Store')(props);  // Changed from Business to Store
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { mappingService } from '@/services/api/mapping.service';
+import { productService } from '@/services/api/product.service';
 import { useNotification } from '@/hooks/useNotification';
 
 interface AddMappingDialogProps {
@@ -70,7 +71,10 @@ const validationSchema = Yup.object({
   isActive: Yup.boolean(),
 });
 
-const formatCurrency = (amount: number, currency: string) => {
+const formatCurrency = (amount: number | undefined | null, currency: string) => {
+  if (!amount && amount !== 0) {
+    return currency === 'KRW' ? '₩0' : '$0';
+  }
   if (currency === 'KRW') {
     return `₩${amount.toLocaleString()}`;
   }
@@ -85,6 +89,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
 }) => {
   const { showNotification } = useNotification();
   const [searching, setSearching] = useState(false);
+  const [searchingNaver, setSearchingNaver] = useState(false); // 네이버 검색 중 상태
   const [searchResults, setSearchResults] = useState<any>(null);
   const [selectedNaverProduct, setSelectedNaverProduct] = useState<any>(null);
   const [selectedShopifyProduct, setSelectedShopifyProduct] = useState<any>(null);
@@ -226,7 +231,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
   };
 
   // 선택한 Shopify 상품 적용
-  const handleSelectShopifyProduct = (product: any) => {
+  const handleSelectShopifyProduct = async (product: any) => {
     console.log('Selected Shopify product:', product);
     setSelectedShopifyProduct(product);
     formik.setFieldValue('shopifyProductId', product.id);
@@ -234,6 +239,62 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
     formik.setFieldValue('vendor', product.vendor || 'album');
     // Shopify 상품명을 항상 우선적으로 사용 (상품 A처럼)
     formik.setFieldValue('productName', product.title || product.name);
+
+    // Shopify 상품 선택 시 자동으로 네이버 상품 검색
+    if (product.title || product.name) {
+      setSearchingNaver(true);
+      setSelectedNaverProduct(null); // 기존 선택 초기화
+      
+      try {
+        // 제품명 기반으로 네이버 검색
+        let searchKeyword = product.title || product.name;
+        
+        // 특수문자 제거 (**, !, @ 등)
+        searchKeyword = searchKeyword.replace(/[*!@#$%^&()_+=\[\]{};':"\\|,.<>?]/g, '').trim();
+        
+        // 제품명에서 아티스트명 추출 (예: "BTS - Album Name" -> "BTS")
+        if (searchKeyword.includes(' - ')) {
+          searchKeyword = searchKeyword.split(' - ')[0].trim();
+        }
+        
+        // 너무 긴 경우 첫 단어만 사용 (보통 아티스트명)
+        const words = searchKeyword.split(' ');
+        if (words.length > 3 && words[0].length > 2) {
+          // 첫 단어가 아티스트명일 가능성이 높음
+          searchKeyword = words[0];
+        }
+        
+        console.log('Searching Naver products with keyword:', searchKeyword);
+        const response = await productService.searchNaverByName(searchKeyword, 50);
+        console.log('Naver API response:', response);
+        
+        // API 응답 구조 확인 - response.data.data 또는 response.data 형태 모두 처리
+        const products = response?.data?.data || response?.data || [];
+        
+        // 검색 결과를 업데이트
+        if (searchResults) {
+          setSearchResults({
+            ...searchResults,
+            naver: {
+              found: products.length > 0,
+              products: products,
+              message: products.length > 0 
+                ? `${products.length}개의 상품을 찾았습니다.` 
+                : '검색 결과가 없습니다.'
+            }
+          });
+        }
+        
+        if (products.length === 0) {
+          showNotification('네이버에서 관련 상품을 찾을 수 없습니다.', 'info');
+        }
+      } catch (error) {
+        console.error('Error searching Naver products:', error);
+        showNotification('네이버 상품 검색 중 오류가 발생했습니다.', 'error');
+      } finally {
+        setSearchingNaver(false);
+      }
+    }
   };
 
   const handleClose = () => {
@@ -241,6 +302,7 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
     setSearchResults(null);
     setSelectedNaverProduct(null);
     setSelectedShopifyProduct(null);
+    setSearchingNaver(false);
     onClose();
   };
 
@@ -519,16 +581,48 @@ const AddMappingDialog: React.FC<AddMappingDialogProps> = ({
                       <StoreIcon color="primary" />
                       네이버 상품
                     </Typography>
-                    <Chip
-                      label={searchResults?.naver?.found 
-                        ? `${searchResults.naver.products?.length || 0}개 발견` 
-                        : '미발견'}
-                      color={searchResults?.naver?.found ? 'primary' : 'default'}
-                      size="small"
-                    />
+                    {searchingNaver ? (
+                      <Chip
+                        label="검색 중..."
+                        color="primary"
+                        size="small"
+                        icon={<CircularProgress size={12} sx={{ color: 'white !important' }} />}
+                      />
+                    ) : (
+                      <Chip
+                        label={searchResults?.naver?.found 
+                          ? `${searchResults.naver.products?.length || 0}개 발견` 
+                          : '미발견'}
+                        color={searchResults?.naver?.found ? 'primary' : 'default'}
+                        size="small"
+                      />
+                    )}
                   </Box>
 
-                  {searchResults?.naver?.found ? (
+                  {searchingNaver ? (
+                    <Box sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary" align="center" gutterBottom>
+                        선택한 Shopify 상품을 기반으로 네이버 상품을 검색하고 있습니다...
+                      </Typography>
+                      <LinearProgress sx={{ mt: 2 }} />
+                      <Box sx={{ mt: 3 }}>
+                        {[1, 2, 3].map((i) => (
+                          <Card key={i} sx={{ mb: 1.5 }}>
+                            <CardContent sx={{ py: 1.5 }}>
+                              <Box sx={{ display: 'flex', gap: 2 }}>
+                                <Skeleton variant="rectangular" width={60} height={60} />
+                                <Box sx={{ flex: 1 }}>
+                                  <Skeleton width="60%" />
+                                  <Skeleton width="40%" />
+                                  <Skeleton width="30%" />
+                                </Box>
+                              </Box>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </Box>
+                    </Box>
+                  ) : searchResults?.naver?.found ? (
                     <Box sx={{ maxHeight: 400, overflow: 'auto', pr: 1 }}>
                       {searchResults.naver.products?.map((product: any, index: number) => (
                         <ProductCard

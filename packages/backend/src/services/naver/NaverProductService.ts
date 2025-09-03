@@ -91,12 +91,14 @@ export class NaverProductService {
     sku: string
   ): Promise<NaverProduct[]> {
     try {
+      logger.info(`🔍 [NaverProductService] Searching for SKU: ${sku}`);
+      
       // POST /v1/products/search 사용 (baseURL이 /external 포함)
       const requestBody = {
         searchType: 'SELLER_MANAGEMENT_CODE',
         searchKeyword: sku,
         page: 1,
-        size: 10,
+        size: 100, // Increase size to find more products
       };
 
       const response = await this.axiosInstance.post(
@@ -105,9 +107,51 @@ export class NaverProductService {
       );
 
       if (response.data && response.data.contents) {
-        // 모든 검색 결과를 반환 (정확한 일치와 부분 일치 모두 포함)
         logger.info(`Found ${response.data.contents.length} products for SKU search: ${sku}`);
-        return response.data.contents;
+        
+        // Look for SKU in channelProducts and flatten the structure
+        const products: any[] = [];
+        
+        response.data.contents.forEach((item: any) => {
+          // Check if SKU matches in channelProducts
+          if (item.channelProducts && item.channelProducts.length > 0) {
+            item.channelProducts.forEach((channelProduct: any) => {
+              if (channelProduct.sellerManagementCode === sku) {
+                // Found exact match in channel product
+                logger.info(`Found SKU ${sku} in channel product of originProductNo: ${item.originProductNo}`);
+                products.push({
+                  ...item,
+                  name: channelProduct.name,
+                  stockQuantity: channelProduct.stockQuantity,
+                  salePrice: channelProduct.salePrice,
+                  sellerManagementCode: channelProduct.sellerManagementCode,
+                  channelProductNo: channelProduct.channelProductNo
+                });
+              }
+            });
+          }
+          
+          // Also check main product SKU
+          if (item.sellerManagementCode === sku) {
+            logger.info(`Found SKU ${sku} in main product: ${item.originProductNo}`);
+            const channelProduct = item.channelProducts?.[0];
+            products.push({
+              ...item,
+              name: channelProduct?.name || item.name,
+              stockQuantity: channelProduct?.stockQuantity || item.stockQuantity,
+              salePrice: channelProduct?.salePrice || item.salePrice,
+              sellerManagementCode: item.sellerManagementCode
+            });
+          }
+        });
+        
+        if (products.length > 0) {
+          logger.info(`✅ Found ${products.length} products with exact SKU match for: ${sku}`);
+        } else {
+          logger.warn(`❌ No products found with SKU: ${sku}`);
+        }
+        
+        return products;
       }
 
       return [];
@@ -136,15 +180,19 @@ export class NaverProductService {
         size: options.size || 20,
       };
 
+      // searchKeyword가 있으면 추가 (기본 검색)
       if (options.searchKeyword) {
         requestBody.searchKeyword = options.searchKeyword;
+        // searchType이 명시적으로 제공되지 않으면 기본값 사용하지 않음
+        // Naver API가 자동으로 상품명 검색을 수행
       }
 
+      // searchType이 명시적으로 제공된 경우에만 추가
       if (options.searchType) {
         requestBody.searchType = options.searchType;
       }
 
-      logger.info(`Naver API Request - searchProducts:`, requestBody);
+      console.log(`🔍 Naver API Request - searchProducts:`, JSON.stringify(requestBody, null, 2));
 
       const response = await this.axiosInstance.post(
         '/v1/products/search',
@@ -154,11 +202,43 @@ export class NaverProductService {
       logger.info(`Naver API Response - searchProducts: ${response.data?.contents?.length || 0} products found`);
       
       if (response.data?.contents?.length > 0) {
-        logger.info(`First product full structure:`, JSON.stringify(response.data.contents[0], null, 2));
-        logger.debug(`First product sample:`, {
+        // Log original structure properly
+        logger.debug(`First product raw structure:`, response.data.contents[0]);
+        
+        // Transform the nested structure - find matching channel product by SKU
+        response.data.contents = response.data.contents.map((item: any) => {
+          if (item.channelProducts && item.channelProducts.length > 0) {
+            // Try to find the channel product that matches the search SKU
+            let matchingChannelProduct = null;
+            
+            if (options.searchKeyword && options.searchType === 'SELLER_MANAGEMENT_CODE') {
+              matchingChannelProduct = item.channelProducts.find(
+                (cp: any) => cp.sellerManagementCode === options.searchKeyword
+              );
+            }
+            
+            // If no matching SKU found, use the first channel product as fallback
+            const channelProduct = matchingChannelProduct || item.channelProducts[0];
+            
+            return {
+              ...item,
+              name: channelProduct.name,
+              stockQuantity: channelProduct.stockQuantity,
+              salePrice: channelProduct.salePrice,
+              deliveryFee: channelProduct.deliveryFee,
+              deliveryAttributeType: channelProduct.deliveryAttributeType,
+              sellerManagementCode: channelProduct.sellerManagementCode || item.sellerManagementCode || options.searchKeyword,
+              channelProductNo: channelProduct.channelProductNo
+            };
+          }
+          return item;
+        });
+        
+        logger.info(`First product sample after transform:`, {
           sellerManagementCode: response.data.contents[0].sellerManagementCode,
           name: response.data.contents[0].name,
-          originProductNo: response.data.contents[0].originProductNo
+          originProductNo: response.data.contents[0].originProductNo,
+          stockQuantity: response.data.contents[0].stockQuantity
         });
       }
 
@@ -307,7 +387,7 @@ export class NaverProductService {
 
 
   /**
-   * 상품 재고 수정 (엔터프라이즈급 개선 버전)
+   * 상품 재고만 수정 (배송정보 등 다른 설정 보존)
    */
   async updateProductStock(
     productId: string,
@@ -446,53 +526,36 @@ export class NaverProductService {
         }
       }
 
-      // 3. 단일 상품 처리 - 여러 방법 시도
-      logger.info(`📤 [SINGLE PRODUCT] Trying multiple update methods...`);
+      // 3. 단일 상품 처리 - 재고만 업데이트
+      logger.info(`📤 [SINGLE PRODUCT] Updating stock only...`);
       
-      // 방법 1: 필수 필드를 포함한 업데이트
-      logger.info(`🔄 [METHOD 1] Trying update with all required fields`);
+      // 방법 1: 재고 전용 API 사용 시도
+      logger.info(`🔄 [METHOD 1] Trying stock-only update`);
       try {
-        const minimalUpdate = {
-          originProduct: {
-            name: fullProductInfo.name,
-            salePrice: fullProductInfo.salePrice,
-            images: fullProductInfo.images || [],
-            stockQuantity: quantity,
-            statusType: quantity > 0 ? 'SALE' : 'OUTOFSTOCK',
-            detailAttribute: fullProductInfo.detailAttribute || {}
-          }
+        // 재고만 업데이트하는 간단한 요청
+        const stockOnlyUpdate = {
+          stockQuantity: quantity
         };
         
-        const minimalResponse = await this.axiosInstance.put(
-          `/v2/products/origin-products/${targetProductNo}`,
-          minimalUpdate
+        // 먼저 재고 전용 엔드포인트 시도
+        const stockResponse = await this.axiosInstance.patch(
+          `/v1/products/origin-products/${targetProductNo}/stock`,
+          stockOnlyUpdate
         );
         
-        if (minimalResponse.status === 200 || minimalResponse.status === 204) {
-          logger.info(`✅ [METHOD 1 SUCCESS] Minimal update successful`);
-          
-          // 검증
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const verifyResponse = await this.axiosInstance.get(
-            `/v2/products/origin-products/${targetProductNo}`
-          );
-          const updatedStock = verifyResponse.data?.originProduct?.stockQuantity;
-          
-          if (updatedStock === quantity) {
-            logger.info(`✅ [VERIFIED] Stock updated successfully to ${quantity}`);
-            return true;
-          } else {
-            logger.warn(`⚠️ [VERIFICATION] Stock is ${updatedStock}, expected ${quantity}`);
-          }
+        if (stockResponse.status === 200 || stockResponse.status === 204) {
+          logger.info(`✅ [METHOD 1 SUCCESS] Stock-only update successful`);
+          return true;
         }
-      } catch (minimalError: any) {
-        logger.warn(`⚠️ [METHOD 1 FAILED] Minimal update failed: ${minimalError.message}`);
+      } catch (stockError: any) {
+        logger.warn(`⚠️ [METHOD 1 FAILED] Stock-only update failed: ${stockError.message}`);
       }
       
-      // 방법 2: 전체 데이터 병합 업데이트
-      logger.info(`🔄 [METHOD 2] Trying full data merge update`);
+      // 방법 2: 최소한의 필수 필드만 포함한 업데이트
+      logger.info(`🔄 [METHOD 2] Trying minimal update with only required fields`);
       try {
-        const fullUpdate = {
+        // 기존 데이터를 그대로 사용하되 재고만 변경
+        const minimalUpdate = {
           originProduct: {
             ...fullProductInfo,
             stockQuantity: quantity,
@@ -500,35 +563,24 @@ export class NaverProductService {
           }
         };
         
-        // originProduct의 불필요한 필드 제거
-        delete fullUpdate.originProduct.channelProducts;
-        delete fullUpdate.originProduct.createdAt;
-        delete fullUpdate.originProduct.updatedAt;
+        // 불필요한 필드 제거 (배송정보는 유지)
+        delete minimalUpdate.originProduct.channelProducts;
+        delete minimalUpdate.originProduct.createdAt;
+        delete minimalUpdate.originProduct.updatedAt;
+        delete minimalUpdate.originProduct.id;
+        delete minimalUpdate.originProduct._id;
         
-        const fullResponse = await this.axiosInstance.put(
+        const minimalResponse = await this.axiosInstance.put(
           `/v2/products/origin-products/${targetProductNo}`,
-          fullUpdate
+          minimalUpdate
         );
         
-        if (fullResponse.status === 200 || fullResponse.status === 204) {
-          logger.info(`✅ [METHOD 2 SUCCESS] Full merge update successful`);
-          
-          // 검증
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const verifyResponse = await this.axiosInstance.get(
-            `/v2/products/origin-products/${targetProductNo}`
-          );
-          const updatedStock = verifyResponse.data?.originProduct?.stockQuantity;
-          
-          if (updatedStock === quantity) {
-            logger.info(`✅ [VERIFIED] Stock updated successfully to ${quantity}`);
-            return true;
-          } else {
-            logger.warn(`⚠️ [VERIFICATION] Stock is ${updatedStock}, expected ${quantity}`);
-          }
+        if (minimalResponse.status === 200 || minimalResponse.status === 204) {
+          logger.info(`✅ [METHOD 2 SUCCESS] Minimal update successful`);
+          return true;
         }
-      } catch (fullError: any) {
-        logger.warn(`⚠️ [METHOD 2 FAILED] Full merge failed: ${fullError.message}`);
+      } catch (minimalError: any) {
+        logger.warn(`⚠️ [METHOD 2 FAILED] Minimal update failed: ${minimalError.message}`);
       }
       
       // 방법 3: 기존 방식 (필수 필드 포함)

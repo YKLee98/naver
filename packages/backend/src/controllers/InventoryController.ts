@@ -132,11 +132,9 @@ export class InventoryController {
                     }
                   }
                   
-                  // ID 매칭 실패 시 첫 번째 결과 사용
-                  if (naverStock === 0 && searchResult.contents.length > 0) {
-                    const firstItem = searchResult.contents[0];
-                    naverStock = firstItem.stockQuantity || 0;
-                    logger.info(`✅ Naver inventory for ${mapping.sku}: ${naverStock} (using first match)`);
+                  // ID 매칭 실패 시 - 정확한 매핑이 없으면 0 사용
+                  if (naverStock === 0) {
+                    logger.warn(`No exact product match found for SKU ${mapping.sku} with productId ${mapping.naverProductId}`);
                   }
                 } else {
                   logger.warn(`No product found for SKU ${mapping.sku} in Naver`);

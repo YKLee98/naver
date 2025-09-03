@@ -165,8 +165,10 @@ class PerformanceMonitor {
     const metrics = this.getMetrics();
     console.table(metrics);
     
+    // Metrics reporting disabled - endpoint not available
+    /*
     if (import.meta.env.VITE_API_URL) {
-      fetch(`${import.meta.env.VITE_API_URL}/api/metrics`, {
+      fetch(`${import.meta.env.VITE_API_URL}/metrics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -175,8 +177,11 @@ class PerformanceMonitor {
           userAgent: navigator.userAgent,
           url: window.location.href,
         }),
-      }).catch(error => console.error('Failed to report metrics:', error));
+      }).catch(() => {
+        // Metrics endpoint may not exist, ignore errors silently
+      });
     }
+    */
   }
 
   public destroy() {

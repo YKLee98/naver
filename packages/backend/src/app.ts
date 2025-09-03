@@ -44,7 +44,7 @@ export class App {
       logger.info('🔧 Initializing app middleware and routes...');
 
       // Setup security middleware
-      this.setupSecurityMiddleware();
+      await this.setupSecurityMiddleware();
 
       // Setup common middleware
       this.setupCommonMiddleware();
@@ -69,7 +69,7 @@ export class App {
     }
   }
 
-  private setupSecurityMiddleware(): void {
+  private async setupSecurityMiddleware(): Promise<void> {
     // Helmet for security headers
     this.app.use(
       helmet({
@@ -78,40 +78,9 @@ export class App {
       } as any)
     );
 
-    // CORS configuration
-    this.app.use(
-      cors({
-        origin: (origin, callback) => {
-          // Allow requests with no origin (mobile apps, Postman, etc)
-          if (!origin) return callback(null, true);
-
-          // ngrok 도메인 자동 허용
-          if (origin.match(/https:\/\/[a-z0-9]+\.ngrok-free\.app$/) || 
-              origin.match(/https:\/\/[a-z0-9]+\.ngrok\.io$/)) {
-            return callback(null, true);
-          }
-
-          // 개발 환경에서 localhost 허용
-          if (config.isDevelopment && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
-            return callback(null, true);
-          }
-
-          const allowedOrigins = Array.isArray(config.misc.corsOrigin)
-            ? config.misc.corsOrigin
-            : [config.misc.corsOrigin];
-
-          if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-            callback(null, true);
-          } else {
-            callback(new Error('Not allowed by CORS'));
-          }
-        },
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'ngrok-skip-browser-warning', 'X-Forwarded-Host'],
-        exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page'],
-      })
-    );
+    // CORS configuration - import from cors.ts
+    const { corsOptions } = await import('./config/cors.js');
+    this.app.use(cors(corsOptions));
 
     // Rate limiting - 개발 환경에서는 매우 관대하게 설정
     if (config.isProduction) {
@@ -252,6 +221,16 @@ export class App {
 
     // Health check - should be before auth
     this.app.get('/health', (_req, res) => {
+      res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: config.nodeEnv,
+      });
+    });
+    
+    // API health check (for ngrok and external access)
+    this.app.get('/api/health', (_req, res) => {
       res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),

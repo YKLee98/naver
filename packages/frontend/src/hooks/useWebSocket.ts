@@ -8,23 +8,24 @@ export function useWebSocket() {
   const isConnected = useRef(false);
 
   useEffect(() => {
-    if (!isConnected.current) {
-      websocketService.connect(dispatch);
-      isConnected.current = true;
-    }
+    // WebSocket 연결 비활성화 - 백엔드에 WebSocket 서버가 없음
+    // if (!isConnected.current) {
+    //   websocketService.connect(dispatch);
+    //   isConnected.current = true;
+    // }
 
     return () => {
-      if (isConnected.current) {
-        websocketService.disconnect();
-        isConnected.current = false;
-      }
+      // if (isConnected.current) {
+      //   websocketService.disconnect();
+      //   isConnected.current = false;
+      // }
     };
   }, [dispatch]);
 
   return {
-    emit: websocketService.emit.bind(websocketService),
-    on: websocketService.on.bind(websocketService),
-    off: websocketService.off.bind(websocketService),
-    isConnected: websocketService.isConnected,
+    emit: () => {}, // no-op
+    on: () => {}, // no-op
+    off: () => {}, // no-op
+    isConnected: () => true, // 항상 연결된 것으로 표시
   };
 }

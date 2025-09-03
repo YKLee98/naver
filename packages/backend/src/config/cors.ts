@@ -60,21 +60,26 @@ export const corsOptions: CorsOptions = {
       }
     }
     
-    // ngrok 도메인 자동 허용 (패턴 매칭)
+    // ngrok 도메인 자동 허용 (패턴 매칭 및 고정 도메인)
     if (origin.match(/https?:\/\/[a-z0-9-]+\.ngrok-free\.app$/) || 
         origin.match(/https?:\/\/[a-z0-9-]+\.ngrok\.io$/) ||
-        origin.match(/https?:\/\/[a-z0-9-]+\.ngrok\.app$/)) {
+        origin.match(/https?:\/\/[a-z0-9-]+\.ngrok\.app$/) ||
+        origin.match(/https?:\/\/[a-z0-9-]+\.ngrok\.pro$/) ||
+        origin === 'https://broadly-full-monitor.ngrok-free.app' ||
+        origin === 'https://backend.monitor.ngrok.pro') {
       console.log(`CORS: Allowing ngrok pattern: ${origin}`);
       return callback(null, true);
     }
     
-    // 개발 환경에서는 모든 localhost 허용
+    // 개발 환경에서는 모든 localhost 및 로컬 네트워크 IP 허용
     if (config.isDevelopment) {
-      // localhost:5173 (Vite 기본 포트) 명시적 허용
-      if (origin === 'http://localhost:5173' || 
-          origin === 'http://127.0.0.1:5173' ||
-          origin.includes('localhost') || 
-          origin.includes('127.0.0.1')) {
+      // localhost와 다양한 포트 허용
+      if (origin.includes('localhost') || 
+          origin.includes('127.0.0.1') ||
+          origin.match(/^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/) || // 192.168.x.x 대역
+          origin.match(/^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/) || // 10.x.x.x 대역
+          origin.match(/^http:\/\/172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}(:\d+)?$/)) { // 172.16-31.x.x 대역
+        console.log(`CORS: Allowing local network origin: ${origin}`);
         return callback(null, true);
       }
       

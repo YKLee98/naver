@@ -9,7 +9,7 @@ interface WebSocketState {
 }
 
 const initialState: WebSocketState = {
-  connected: false,
+  connected: true, // WebSocket 비활성화 상태에서도 연결된 것으로 표시
   reconnecting: false,
   reconnectAttempts: 0,
   error: null,

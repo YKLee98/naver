@@ -1,6 +1,6 @@
 // packages/frontend/src/services/api/mapping.service.ts
 
-import { apiClient } from './config';
+import { apiClient, get, post, put, del } from './config';
 import { AxiosResponse } from 'axios';
 
 export interface MappingData {
@@ -130,7 +130,8 @@ class MappingService {
    * SKU로 네이버와 Shopify 상품 자동 검색
    */
   async searchProductsBySku(sku: string): Promise<AxiosResponse<{ success: boolean; data: SkuSearchResult }>> {
-    return apiClient.get('/mappings/search-by-sku', { params: { sku } });
+    const data = await get('/mappings/search-by-sku', { params: { sku } });
+    return { data: { success: true, data } } as any;
   }
 
   /**
@@ -139,8 +140,58 @@ class MappingService {
   async getMappings(params?: MappingListParams): Promise<any> {
     try {
       const response = await apiClient.get('/mappings', { params });
-      console.log('Mapping service response:', response);
-      return response;
+      console.log('🗺️ Mapping service full response:', response);
+      console.log('🗺️ Mapping service response data:', response.data);
+      
+      // Backend returns { success: true, data: { mappings: [...], pagination: {...} } }
+      let mappingData = [];
+      let pagination = null;
+      let stats = null;
+      
+      if (response.data) {
+        if (response.data.success && response.data.data) {
+          // Handle { success: true, data: { mappings: [...] } } format
+          console.log('🗺️ Processing success/data format');
+          mappingData = response.data.data.mappings || [];
+          pagination = response.data.data.pagination;
+          stats = response.data.data.stats;
+        } else if (Array.isArray(response.data)) {
+          // Handle direct array format
+          console.log('🗺️ Processing array of mapping items:', response.data.length);
+          mappingData = response.data;
+        } else if (response.data.mappings) {
+          // Handle { mappings: [...] } format
+          console.log('🗺️ Processing mappings wrapper format');
+          mappingData = response.data.mappings;
+          pagination = response.data.pagination;
+          stats = response.data.stats;
+        }
+      }
+      
+      console.log('🗺️ Extracted mappings:', mappingData.length, 'items');
+      
+      return {
+        data: {
+          success: true,
+          data: {
+            mappings: mappingData,
+            pagination: pagination || { 
+              page: params?.page || 1, 
+              limit: params?.limit || 20, 
+              total: mappingData.length, 
+              totalPages: Math.ceil(mappingData.length / (params?.limit || 20))
+            },
+            stats: stats || {
+              total: mappingData.length,
+              active: mappingData.filter((m: any) => m.isActive).length,
+              inactive: mappingData.filter((m: any) => !m.isActive).length,
+              error: mappingData.filter((m: any) => m.status === 'error').length,
+              pending: mappingData.filter((m: any) => m.status === 'pending').length,
+              syncNeeded: mappingData.filter((m: any) => m.syncStatus === 'needed').length
+            }
+          }
+        }
+      };
     } catch (error) {
       console.error('Error in getMappings:', error);
       // 에러 발생시 빈 데이터 반환
@@ -160,22 +211,25 @@ class MappingService {
   /**
    * 매핑 생성
    */
-  async createMapping(data: Partial<MappingData> & { autoSearch?: boolean }): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
-    return apiClient.post('/mappings', data);
+  async createMapping(mappingData: Partial<MappingData> & { autoSearch?: boolean }): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
+    const data = await post('/mappings', mappingData);
+    return { data: { success: true, data } } as any;
   }
 
   /**
    * 매핑 수정
    */
-  async updateMapping(id: string, data: Partial<MappingData>): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
-    return apiClient.put(`/mappings/${id}`, data);
+  async updateMapping(id: string, mappingData: Partial<MappingData>): Promise<AxiosResponse<{ success: boolean; data: MappingData }>> {
+    const data = await put(`/mappings/${id}`, mappingData);
+    return { data: { success: true, data } } as any;
   }
 
   /**
    * 매핑 삭제
    */
   async deleteMapping(id: string): Promise<AxiosResponse<{ success: boolean; message: string }>> {
-    return apiClient.delete(`/mappings/${id}`);
+    const data = await del(`/mappings/${id}`);
+    return { data: { success: true, ...data } } as any;
   }
 
   /**

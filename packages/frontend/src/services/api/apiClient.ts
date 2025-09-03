@@ -66,7 +66,17 @@ class ApiClient {
    * Create axios instance with default config
    */
   private createClient(): AxiosInstance {
-    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    // API URL 설정 - ngrok으로 접속한 경우 ngrok 백엔드 사용
+    let baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+    
+    // 현재 호스트가 ngrok인 경우 프록시 사용
+    if (window.location.hostname.includes('ngrok')) {
+      // ngrok에서 접속 시 프록시를 통해 백엔드 연결
+      baseURL = '/api';
+    } else if (window.location.hostname === '172.30.1.79') {
+      // 로컬 IP로 접속한 경우
+      baseURL = 'http://172.30.1.79:3000/api';
+    }
     
     return axios.create({
       baseURL,
@@ -74,8 +84,9 @@ class ApiClient {
       headers: {
         'Content-Type': 'application/json',
         'X-Client-Version': import.meta.env.VITE_APP_VERSION || '1.0.0',
+        'ngrok-skip-browser-warning': 'true',
       },
-      withCredentials: true,
+      withCredentials: false, // CORS 문제 방지
     });
   }
 

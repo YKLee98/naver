@@ -9,18 +9,23 @@ export const priceApi = {
       const response = await apiClient.get('/prices', {
         params: { realtime }
       });
-      console.log('Raw price response:', response.data);
+      console.log('💰 Raw price response:', response.data);
+      console.log('💰 Response type:', typeof response.data);
+      console.log('💰 Is Array?:', Array.isArray(response.data));
       
       // 백엔드 응답 구조에 맞게 데이터 추출
-      if (response.data?.success && response.data?.data) {
+      if (response.data?.success && Array.isArray(response.data?.data)) {
+        console.log('💰 Using response.data.data (success structure):', response.data.data.length, 'items');
         return response.data.data;
       } else if (Array.isArray(response.data)) {
+        console.log('💰 Using response.data (direct array):', response.data.length, 'items');
         return response.data;
       } else {
+        console.log('💰 No data found or unexpected format');
         return [];
       }
     } catch (error) {
-      console.error('Failed to fetch price list:', error);
+      console.error('❌ Failed to fetch price list:', error);
       return [];
     }
   },

@@ -109,26 +109,29 @@ const Pricing: React.FC = () => {
       console.log('🔴 Response type:', typeof response);
       console.log('🔴 Is Array?:', Array.isArray(response));
       
-      if (response && Array.isArray(response)) {
+      if (Array.isArray(response) && response.length > 0) {
+        console.log('💰 Processing price array of', response.length, 'items');
         // 각 상품의 가격 정보 포맷팅
         const formattedData = response.map((item, index) => {
-          console.log(`🔵 Item ${index}:`, item);
+          console.log(`💰 Item ${index}:`, item);
           const formatted = {
-            id: item._id || item.id || Math.random().toString(),
-            sku: item.sku,
+            id: item._id || item.id || `item-${index}`,
+            sku: item.sku || `sku-${index}`,
             productName: item.productName || item.title || '상품명 없음',
             naverPrice: item.naverPrice || 0,
             shopifyPrice: item.shopifyPrice || 0,
-            margin: item.margin || item.priceMargin || 10,
+            margin: item.margin || item.priceMargin || 0,
             lastUpdated: item.lastUpdated || item.updatedAt || item.lastSyncAt || new Date(),
           };
-          console.log(`🟢 Formatted ${index}:`, formatted);
+          console.log(`💰 Formatted ${index}:`, formatted);
           return formatted;
         });
-        console.log('🟡 Final formatted data:', formattedData);
+        console.log('💰 Final formatted data:', formattedData);
         setPriceHistory(formattedData);
       } else {
         console.log('❌ No price data received or invalid format:', response);
+        console.log('❌ Response type:', typeof response);
+        console.log('❌ Response length:', response?.length);
         setPriceHistory([]);
       }
     } catch (error) {

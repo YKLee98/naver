@@ -5,22 +5,22 @@ import { FiberManualRecord } from '@mui/icons-material';
 import { useAppSelector } from '@/hooks';
 
 const WebSocketStatus: React.FC = () => {
-  const { isConnected, reconnectAttempts } = useAppSelector((state) => state.websocket);
+  const { connected, reconnectAttempts } = useAppSelector((state) => state.websocket);
 
   const getStatusColor = () => {
-    if (isConnected) return 'success';
+    if (connected) return 'success';
     if (reconnectAttempts > 0) return 'warning';
     return 'error';
   };
 
   const getStatusLabel = () => {
-    if (isConnected) return '연결됨';
+    if (connected) return '연결됨';
     if (reconnectAttempts > 0) return `재연결 중... (${reconnectAttempts})`;
     return '연결 끊김';
   };
 
   return (
-    <Tooltip title={`WebSocket ${getStatusLabel()}`}>
+    <Tooltip title="서버 연결 상태">
       <Chip
         icon={<FiberManualRecord />}
         label={getStatusLabel()}

@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(pnpm dev:*)",
+      "Bash(ngrok start:*)",
+      "Bash(curl:*)",
+      "Bash(ngrok http:*)",
+      "Bash(npm run dev:*)",
+      "Bash(taskkill:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []

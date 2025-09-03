@@ -111,21 +111,14 @@ const Inventory: React.FC = () => {
       let pagination = {};
       let summaryData = {};
       
-      // 응답 구조에 따라 처리
-      if (response?.data && Array.isArray(response.data)) {
-        // 직접 data 배열로 오는 경우 (현재 백엔드 응답 형태)
+      // Service에서 정규화된 응답을 받음
+      if (response?.success && response?.data) {
         inventoryData = response.data;
         pagination = response.pagination || {};
-      } else if (response?.data?.inventories) {
-        // data.inventories로 오는 경우
-        inventoryData = response.data.inventories;
-        pagination = response.data.pagination || {};
-        summaryData = response.data.summary || {};
-      } else if (response?.inventories) {
-        // inventories 속성으로 오는 경우
-        inventoryData = response.inventories;
-        pagination = response.pagination || {};
         summaryData = response.summary || {};
+      } else {
+        console.warn('Unexpected response structure:', response);
+        inventoryData = [];
       }
       
       const totalData = pagination.total || inventoryData.length || 0;

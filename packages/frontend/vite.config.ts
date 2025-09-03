@@ -56,7 +56,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: false,
-      allowedHosts: ['.ngrok-free.app', '.ngrok.io', 'localhost', '27b68fa0194c.ngrok-free.app', '3eb63ab2112e.ngrok-free.app'],
+      allowedHosts: ['.ngrok-free.app', '.ngrok.io', 'localhost', 'broadly-full-monitor.ngrok-free.app'],
       host: true,
       open: false,
       cors: true,
@@ -93,7 +93,7 @@ export default defineConfig(({ mode }) => {
         allow: ['..'],
       },
       proxy: {
-        '/api/v1': {
+        '/api': {
           target: 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
@@ -106,18 +106,24 @@ export default defineConfig(({ mode }) => {
               // ngrok 헤더 추가
               proxyReq.setHeader('ngrok-skip-browser-warning', 'true');
               proxyReq.setHeader('X-Forwarded-Host', req.headers.host || '');
+              // CORS 헤더 추가
+              proxyReq.setHeader('Origin', 'http://localhost:5173');
               console.log('Sending Request to the Target:', req.method, req.url);
             });
             proxy.on('proxyRes', (proxyRes, req, _res) => {
+              // CORS 헤더 추가
+              proxyRes.headers['Access-Control-Allow-Origin'] = '*';
+              proxyRes.headers['Access-Control-Allow-Credentials'] = 'true';
               console.log('Received Response from the Target:', proxyRes.statusCode, req.url);
             });
           },
         },
-        '/api': {
+        '/api/v1': {
           target: 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
           ws: true,
+          rewrite: (path) => path.replace('/api/v1', '/api'),
           configure: (proxy, _options) => {
             proxy.on('proxyReq', (proxyReq, req, _res) => {
               proxyReq.setHeader('ngrok-skip-browser-warning', 'true');

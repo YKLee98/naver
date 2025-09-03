@@ -316,24 +316,88 @@ export class ProductController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { keyword, page = 1, limit = 20 } = req.query;
+      const { keyword, sku, page = 1, limit = 20 } = req.query;
 
-      if (!keyword) {
-        throw new AppError('Search keyword is required', 400);
+      if (!keyword && !sku) {
+        throw new AppError('Search keyword or SKU is required', 400);
       }
 
-      // 네이버 API에서 상품 검색
-      const searchResult = await this.naverProductService.searchProducts(
-        String(keyword),
-        {
-          page: Number(page),
-          limit: Number(limit),
+      let searchResult;
+      
+      // If searching by SKU, first find the product in Shopify to get artist/vendor info
+      if (sku) {
+        console.log('🔍 Controller: Searching for SKU:', sku);
+        
+        // Step 1: Find product in Shopify by SKU
+        const shopifySearchQuery = `sku:${String(sku)}`;
+        console.log('🔍 Searching Shopify for SKU:', shopifySearchQuery);
+        
+        const shopifyProducts = await this.shopifyGraphQLService.searchProducts(shopifySearchQuery);
+        
+        if (shopifyProducts?.edges?.length > 0) {
+          const shopifyProduct = shopifyProducts.edges[0].node;
+          const vendor = shopifyProduct.vendor;
+          const title = shopifyProduct.title;
+          
+          console.log(`📦 Found Shopify product: "${title}" by vendor: "${vendor}"`);
+          
+          // Step 2: Search Naver by vendor/artist name or product title
+          let naverSearchKeyword = vendor && vendor !== 'album' ? vendor : title;
+          
+          // Extract artist name from title if possible (e.g., "IVE 아이브 미니 4집" -> "IVE" or "아이브")
+          const artistMatch = title.match(/^([A-Za-z]+)|^([가-힣]+)/);
+          if (artistMatch) {
+            naverSearchKeyword = artistMatch[0];
+          }
+          
+          console.log(`🔍 Searching Naver with keyword: "${naverSearchKeyword}"`);
+          
+          // Search Naver with the extracted keyword
+          const naverResult = await this.naverProductService.searchProducts({
+            searchKeyword: naverSearchKeyword,
+            searchType: 'PRODUCT_NAME',
+            page: 1,
+            size: Number(limit) || 20, // Use limit parameter from request
+          });
+          
+          if (naverResult && naverResult.contents) {
+            searchResult = naverResult.contents;
+            console.log(`📦 Found ${searchResult.length} Naver products for keyword: "${naverSearchKeyword}"`);
+          } else {
+            searchResult = [];
+          }
+        } else {
+          // If not found in Shopify, fall back to direct SKU search in Naver
+          console.log('⚠️ Product not found in Shopify, trying direct Naver SKU search');
+          const products = await this.naverProductService.searchProductsBySellerManagementCode(String(sku));
+          console.log('📦 Controller: Found products:', products.length);
+          searchResult = products;
         }
-      );
+      } else {
+        // Otherwise use general search
+        const result = await this.naverProductService.searchProducts({
+          searchKeyword: String(keyword),
+          searchType: 'SELLER_MANAGEMENT_CODE',
+          page: Number(page),
+          size: Number(limit),
+        });
+        
+        // Transform the result to match expected format
+        if (result && result.contents) {
+          searchResult = result.contents;
+        } else {
+          searchResult = [];
+        }
+      }
 
       res.json({
         success: true,
         data: searchResult,
+        pagination: {
+          total: searchResult.length,
+          page: Number(page),
+          limit: Number(limit),
+        },
       });
     } catch (error) {
       next(error);
@@ -341,7 +405,7 @@ export class ProductController {
   };
 
   /**
-   * Shopify 상품 검색
+   * Shopify 상품 검색 (SKU 기반)
    */
   searchShopifyProducts = async (
     req: Request,
@@ -351,24 +415,213 @@ export class ProductController {
     try {
       const { sku, title, vendor = 'album' } = req.query;
 
-      const searchParams: any = { vendor };
-
+      let searchQuery = '';
+      
+      // Build search query string for GraphQL
       if (sku) {
-        searchParams.sku = String(sku);
+        searchQuery = `sku:${String(sku)}`;
+      } else if (title) {
+        searchQuery = `title:*${String(title)}*`;
+      } else if (vendor) {
+        searchQuery = `vendor:${String(vendor)}`;
       }
 
-      if (title) {
-        searchParams.title = String(title);
-      }
+      console.log('🔍 Shopify search query:', searchQuery);
 
       // Shopify GraphQL로 상품 검색
       const products = await this.shopifyGraphQLService.searchProducts(
-        searchParams
+        searchQuery
       );
+
+      // Transform products to match frontend expectations
+      const transformedProducts = products?.edges?.map((edge: any) => ({
+        ...edge.node,
+        variants: edge.node.variants?.edges?.map((v: any) => v.node) || []
+      })) || [];
+
+      console.log('📦 Shopify products found:', transformedProducts.length);
 
       res.json({
         success: true,
-        data: products,
+        data: transformedProducts,
+        pagination: {
+          total: transformedProducts.length,
+          page: 1,
+          limit: 20
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Shopify SKU로 검색 후 제품명 반환
+   */
+  searchShopifyBySku = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { sku } = req.query;
+
+      if (!sku) {
+        throw new AppError('SKU is required', 400);
+      }
+
+      console.log('🔍 Searching Shopify by SKU:', sku);
+
+      // SKU로 Shopify 상품 검색
+      const searchResult = await this.shopifySearchService?.searchBySKU(String(sku));
+
+      if (!searchResult || !searchResult.found || searchResult.products.length === 0) {
+        return res.json({
+          success: true,
+          data: null,
+          message: 'No product found with this SKU'
+        });
+      }
+
+      // 첫 번째 매칭 상품 반환
+      const product = searchResult.products[0];
+      
+      res.json({
+        success: true,
+        data: {
+          id: product.id,
+          title: product.title,
+          sku: product.variant.sku,
+          variantId: product.variant.id,
+          price: product.variant.price,
+          inventoryQuantity: product.variant.inventoryQuantity
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * 네이버 상품 검색 (상품명 기반 - 제목 유사도로 50개 검색)
+   */
+  searchNaverByName = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { name, limit = 50 } = req.query;
+      const searchKeyword = name ? String(name).toLowerCase() : '';
+
+      console.log('🔍 Searching Naver by product name (title similarity):', name);
+
+      // 네이버 API가 searchKeyword를 무시하는 것 같으므로, 
+      // 모든 상품을 가져온 후 클라이언트 측에서 필터링
+      // 여러 페이지를 순차적으로 가져와서 2000개까지 수집
+      const allProducts: any[] = [];
+      let currentPage = 1;
+      const pageSize = 200; // 페이지당 최대 200개
+      const targetTotal = 2000;
+      
+      while (allProducts.length < targetTotal) {
+        const searchOptions = {
+          size: pageSize,
+          page: currentPage
+        };
+
+        console.log(`📋 Fetching Naver products page ${currentPage} to filter by keyword:`, searchKeyword);
+
+        const searchResult = await this.naverProductService.searchProducts(searchOptions);
+        
+        if (!searchResult?.contents || searchResult.contents.length === 0) {
+          break; // 더 이상 상품이 없으면 중단
+        }
+
+        // 검색 결과 변환 - 각 채널 상품을 개별 항목으로 펼침
+        searchResult.contents.forEach((product: any) => {
+        if (product.channelProducts && product.channelProducts.length > 0) {
+          // 각 채널 상품을 개별 항목으로 추가
+          product.channelProducts.forEach((channelProduct: any) => {
+            allProducts.push({
+              originProductNo: product.originProductNo,
+              channelProductNo: channelProduct.channelProductNo,
+              name: channelProduct.name,
+              sellerManagementCode: channelProduct.sellerManagementCode,
+              stockQuantity: channelProduct.stockQuantity,
+              salePrice: channelProduct.salePrice,
+              discountedPrice: channelProduct.discountedPrice,
+              deliveryFee: channelProduct.deliveryFee,
+              deliveryAttributeType: channelProduct.deliveryAttributeType,
+              statusType: channelProduct.statusType,
+              imageUrl: channelProduct.representativeImage?.url || product.representativeImage?.url,
+              // 제목 유사도를 위한 원본 제목 포함
+              originalName: product.name || channelProduct.name
+            });
+          });
+        } else {
+          // channelProducts가 없으면 원본 상품 정보 사용
+          allProducts.push({
+            originProductNo: product.originProductNo,
+            name: product.name,
+            sellerManagementCode: product.sellerManagementCode,
+            stockQuantity: product.stockQuantity,
+            salePrice: product.salePrice,
+            deliveryFee: product.deliveryFee,
+            imageUrl: product.representativeImage?.url,
+            originalName: product.name
+          });
+        }
+        });
+        
+        currentPage++;
+        
+        // 최대 10페이지까지만 요청 (2000개)
+        if (currentPage > 10) break;
+      }
+
+      console.log(`📦 Total Naver products fetched: ${allProducts.length}`);
+
+      // 키워드로 필터링 (제목에 키워드가 포함된 상품만)
+      let filteredProducts = allProducts;
+      if (searchKeyword) {
+        filteredProducts = allProducts.filter((product) => {
+          const productName = (product.name || '').toLowerCase();
+          const originalName = (product.originalName || '').toLowerCase();
+          return productName.includes(searchKeyword) || originalName.includes(searchKeyword);
+        });
+
+        // 정확한 매칭을 우선순위로 정렬
+        filteredProducts.sort((a, b) => {
+          const aName = (a.name || '').toLowerCase();
+          const bName = (b.name || '').toLowerCase();
+          
+          // 정확히 일치하는 경우 우선
+          if (aName === searchKeyword) return -1;
+          if (bName === searchKeyword) return 1;
+          
+          // 시작 위치가 더 앞인 것 우선
+          const aIndex = aName.indexOf(searchKeyword);
+          const bIndex = bName.indexOf(searchKeyword);
+          
+          if (aIndex !== -1 && bIndex !== -1) {
+            if (aIndex !== bIndex) return aIndex - bIndex;
+          }
+          
+          // 길이가 더 짧은 것 우선
+          return aName.length - bName.length;
+        });
+      }
+
+      // 최대 50개로 제한
+      const limitedProducts = filteredProducts.slice(0, 50);
+
+      console.log(`📦 Naver products filtered by "${searchKeyword}": ${limitedProducts.length}/50 (from ${allProducts.length} total)`);
+
+      res.json({
+        success: true,
+        data: limitedProducts,
+        total: limitedProducts.length
       });
     } catch (error) {
       next(error);

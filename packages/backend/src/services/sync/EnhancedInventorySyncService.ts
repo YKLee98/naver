@@ -78,13 +78,9 @@ export class EnhancedInventorySyncService {
             }
           }
           
-          // ID 매칭 실패 시 첫 번째 결과 사용 (SKU가 일치하므로)
-          if (searchResult.contents.length > 0) {
-            const firstItem = searchResult.contents[0];
-            const stock = firstItem.stockQuantity || 0;
-            logger.info(`✅ Fetched Naver inventory for ${sku}: ${stock} (using first match)`);
-            return stock;
-          }
+          // ID 매칭 실패 시 - 정확한 매핑이 없으면 0 반환
+          logger.warn(`No exact product match found for SKU ${sku} with productId ${productId}`);
+          return 0;
         }
       }
       

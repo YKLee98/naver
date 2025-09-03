@@ -285,13 +285,23 @@ export class PriceController {
           shopifyPrice = mapping.pricing?.shopify?.regular || mapping.pricing?.shopify?.sale || 0;
         }
         
+        // 마진율 계산: ((쇼피파이 가격 - 네이버 가격) / 네이버 가격) * 100
+        // 환율 적용: 쇼피파이 가격(USD)를 원화로 변환
+        const exchangeRate = 1330; // 기본 환율 (실제로는 환율 서비스에서 가져와야 함)
+        const shopifyPriceKRW = shopifyPrice * exchangeRate;
+        
+        let calculatedMargin = 0;
+        if (naverPrice > 0) {
+          calculatedMargin = ((shopifyPriceKRW - naverPrice) / naverPrice) * 100;
+        }
+        
         return {
           id: mapping._id,
           sku: mapping.sku,
           productName: mapping.productName || 'Unknown Product',
           naverPrice,
           shopifyPrice,
-          margin: mapping.pricing?.rules?.marginPercent || 15,
+          margin: Math.round(calculatedMargin * 100) / 100, // 소수점 2자리까지
           lastUpdated: new Date(),
           status: mapping.status || 'active',
           isRealtime: realtime === 'true'
